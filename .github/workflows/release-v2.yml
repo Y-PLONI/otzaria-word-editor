@@ -93,22 +93,31 @@ jobs:
           echo "tag=v$version"           >> "$GITHUB_OUTPUT"
           echo "sha=${GITHUB_SHA::7}"    >> "$GITHUB_OUTPUT"
 
-      # אותן שלוש בדיקות שהחנות ואוצריא מחזירות רק בזמן התקנה: manifest בשורש
-      # הארכיון, name זהה לכותרת הלשונית, ותיאור עד 150 תווים.
-      - name: Verify manifest constraints
+      # הגרסה הארוזה היא זו שה-Release ייקרא על שמה; הוא נגזר מ-public/manifest.json
+      # והבדיקה נשארת כאן כי היא היחידה שאינה על המניפסט עצמו אלא על ההתאמה בינו לבנייה.
+      - name: Verify dist version matches public
         run: |
           set -euo pipefail
           node -e '
             const m = require("./dist/manifest.json");
-            const fail = (msg) => { console.error(msg); process.exitCode = 1; };
-            if (m.version !== process.env.EXPECTED) fail(`גרסה ב-dist (${m.version}) שונה מהגרסה ב-public (${process.env.EXPECTED})`);
-            const title = m.contributes?.toolTab?.title;
-            if (m.name !== title) fail(`manifest.name ("${m.name}") חייב להיות זהה ל-contributes.toolTab.title ("${title}") אחרת אוצריא מסרבת להתקין`);
-            if ((m.description ?? "").length > 150) fail(`התיאור באורך ${m.description.length} תווים — המותר הוא 150`);
-            if (!process.exitCode) console.log(`OK: גרסה ${m.version}, שם "${m.name}", תיאור ${m.description.length} תווים`);
+            if (m.version !== process.env.EXPECTED) {
+              console.error(`גרסה ב-dist (${m.version}) שונה מהגרסה ב-public (${process.env.EXPECTED})`);
+              process.exit(1);
+            }
+            console.log(`OK: גרסה ${m.version}`);
           '
         env:
           EXPECTED: ${{ steps.meta.outputs.version }}
+
+      # שער האמת היחיד: אותן בדיקות שהחנות ואוצריא מריצות, מול מפרט ה-SDK
+      # החי של אוצריא. רץ על כל קומיט וללא סודות (`publish: false`), כך שמניפסט
+      # שחדל לעמוד בכללי ההתקנה נופל כאן ולא אצל המשתמש.
+      - name: Validate against the live Otzaria SDK spec
+        uses: Otzaria/otzaria-plugin-validator@v1
+        with:
+          path: v2/dist
+          publish: 'false'
+          fail-on-warnings: 'true'
 
       # ה-manifest חייב לשבת בשורש הארכיון — לכן דוחסים את תוכן dist ולא את
       # התיקייה עצמה.

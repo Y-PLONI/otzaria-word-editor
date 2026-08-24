@@ -20,7 +20,10 @@ const BOOT: BootPayload = {
     version: '0.9.97',
     platform: 'dev',
     locale: 'he-IL',
+    language: 'he',
     textDirection: 'rtl',
+    devMode: true,
+    runMode: 'foreground',
   },
   theme: {
     mode: 'light',
