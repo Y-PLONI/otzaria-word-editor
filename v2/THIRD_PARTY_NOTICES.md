@@ -79,18 +79,72 @@
 
 ## Fluent System Icons 1.1.338 — MIT
 
-אייקוני לשונית „קובץ” ב־`src/ui/icons/icons.ts` הם ה־path data המקורי של
-Microsoft, ולא ציור בבית:
+אייקונים ב־`src/ui/icons/icons.ts` שהם ה־path data המקורי של Microsoft, ולא
+ציור בבית. כל הווריאנטים הם `*_20_regular`.
+
+**לשונית „קובץ”**
 
 | שם ב־`ICONS` | פקד | אייקון מקורי |
 |---|---|---|
-| `newDoc` | מסמך חדש | `document_add_20_regular` |
-| `folder` | פתח קובץ | `folder_open_20_regular` |
-| `save` | שמור (וגם סרגל הגישה המהירה) | `save_20_regular` |
-| `saveAs` | שמור בשם... | `save_edit_20_regular` |
-| `export` | ייצוא ל־Word | `arrow_export_rtl_20_regular` |
-| `print` | הדפסה | `print_20_regular` |
-| `info` | אודות | `info_20_regular` |
+| `newDoc` | מסמך חדש | `document_add` |
+| `folder` | פתח קובץ | `folder_open` |
+| `save` | שמור (וגם סרגל הגישה המהירה) | `save` |
+| `saveAs` | שמור בשם... | `save_edit` |
+| `export` | ייצוא ל־Word | `arrow_export_rtl` |
+| `print` | הדפסה | `print` |
+| `info` | אודות | `info` |
+
+**לשונית „בית” — לוח**
+
+| שם ב־`ICONS` | פקד | אייקון מקורי |
+|---|---|---|
+| `paste` | הדבק | `clipboard_paste` |
+| `cut` | גזור | `cut` |
+| `copy` | העתק | `copy` |
+| `formatPainter` | מברשת עיצוב | `paint_brush` |
+
+**לשונית „בית” — גופן**
+
+| שם ב־`ICONS` | פקד | אייקון מקורי |
+|---|---|---|
+| `bold` | מודגש | `text_bold` |
+| `italic` | נטוי | `text_italic` |
+| `underline` | קו תחתון | `text_underline` |
+| `strikethrough` | קו חוצה | `text_strikethrough` |
+| `subscript` | כתב תחתי | `text_subscript` |
+| `superscript` | כתב עילי | `text_superscript` |
+| `fontColor` | צבע גופן | `text_color` |
+| `highlight` | הדגשת טקסט | `highlight` |
+| `clearFormatting` | נקה עיצוב | `text_clear_formatting` |
+| `growFont` | הגדל גופן | `font_increase` |
+| `shrinkFont` | הקטן גופן | `font_decrease` |
+
+**לשונית „בית” — פיסקה**
+
+| שם ב־`ICONS` | פקד | אייקון מקורי |
+|---|---|---|
+| `alignRight` | יישור לימין | `text_align_right` |
+| `alignCenter` | מרכז | `text_align_center` |
+| `alignLeft` | יישור לשמאל | `text_align_left` |
+| `alignJustify` | יישור לשני הצדדים | `text_align_justify` |
+| `bulletList` | רשימת תבליטים | `text_bullet_list_rtl` |
+| `numberList` | רשימה ממוספרת | `text_number_list_rtl` |
+| `indentIncrease` | הגדל כניסה | `text_indent_increase_rtl` |
+| `indentDecrease` | הקטן כניסה | `text_indent_decrease_rtl` |
+| `dirRtl` | כיוון פסקה מימין לשמאל | `text_paragraph_direction_left` |
+| `dirLtr` | כיוון פסקה משמאל לימין | `text_paragraph_direction_right` |
+| `pilcrow` | הצג/הסתר סימני עיצוב | `text_paragraph` |
+| `lineSpacing` | מרווח שורות | `text_line_spacing` |
+| `borders` | גבולות | `border_all` |
+| `shading` | צביעה | `paint_bucket` |
+
+**לשונית „בית” — עריכה**
+
+| שם ב־`ICONS` | פקד | אייקון מקורי |
+|---|---|---|
+| `search` | חיפוש (וגם סרגל הגישה המהירה) | `search` |
+| `replace` | החלפה | `arrow_swap` |
+| `select` | בחר הכל | `select_all_on` |
 
 - מקור: <https://github.com/microsoft/fluentui-system-icons>
 - חבילה: `@fluentui/svg-icons@1.1.338` ב־npm, וריאנט `*_20_regular`
@@ -116,8 +170,15 @@ MDL2 היא הספרייה של Office UI Fabric שיצאה משימוש, System
 הקיים, ויש לה וריאנטי RTL מוצהרים — `arrow_export_rtl` מול `arrow_export_ltr`
 — שזה בדיוק מה שנדרש בממשק עברי.
 
-> המיגרציה נעשית לשונית־לשונית. עד כה עברה לשונית „קובץ” בלבד; שאר הסט עדיין
-> מצויר בבית, במשקל קו כבד יותר. הטבלה כאן מתעדכנת עם כל לשונית שעוברת.
+שתי בחירות שאין להן מקבילה מדויקת אצל Microsoft, ולכן הן מתועדות כאן:
+
+- `replace` הוא `arrow_swap` — אין ב־System Icons אייקון „מצא והחלף”.
+- `formatPainter` הוא `paint_brush` ולא `clipboard_brush`, כי זה מה ש־Word
+  מציג, ולוח כבר מופיע בשלושת השכנים שלו באותה קבוצה.
+
+> המיגרציה נעשית לשונית־לשונית. עברו „קובץ” ו„בית”; נשארו הוספה, פריסה,
+> הפניות, סקירה, תצוגה, אוצריא, ה־chevron־ים, `undo`/`redo`, ו־`word`/`otzaria`
+> שהם מיתוג ויישארו ציור בבית. הטבלאות כאן מתעדכנות עם כל לשונית שעוברת.
 
 ## רכיבי MIT שנארזים
 

@@ -299,10 +299,20 @@ const FLAT_ICONS = new Set([
   'chevronRight',
   'undo',
   'redo',
-  'strikethrough',
   'fitWidth',
 ]);
 const FLAT_DOMINANT_MIN = 0.55;
+
+/**
+ * אייקוני גליף: הצורה שלהם היא אות, ורוחבה נקבע בטיפוגרפיה ולא בגריד. `bold`
+ * הוא ה-B של Fluent, ויוצא 47.5% רוחב מול מינימום 50% — למתוח אותו ל-50%
+ * פירושו לעוות את האות. המידה הדומיננטית שלו כן נבדקת, בטווח המלא.
+ *
+ * הרשימה סגורה במכוון, כמו FLAT_ICONS. `italic` (65%) ו-`underline` (50%)
+ * עוברים בלעדיה, ולכן הם אינם כאן — ההחרגה מכסה את מה שנמדד ולא את מה
+ * שאולי יימדד.
+ */
+const GLYPH_ICONS = new Set(['bold']);
 
 describe('גריד האייקונים', () => {
   it('הספרייה אינה ריקה, וכל שם מפנה ל-SVG', () => {
@@ -422,19 +432,44 @@ describe('משקל אופטי', () => {
       const dominant = Math.max(w, h);
       const minor = Math.min(w, h);
       const flat = FLAT_ICONS.has(name);
+      const glyph = GLYPH_ICONS.has(name);
       const min = flat ? FLAT_DOMINANT_MIN : DOMINANT_MIN;
       const detail = `${name}: ${(w * 100).toFixed(0)}%x${(h * 100).toFixed(0)}%`;
       if (dominant < min - 0.001 || dominant > DOMINANT_MAX + 0.001) {
         bad.push(`${detail} — מידה דומיננטית ${(dominant * 100).toFixed(0)}% מחוץ לטווח`);
-      } else if (!flat && minor < MINOR_MIN - 0.001) {
+      } else if (!flat && !glyph && minor < MINOR_MIN - 0.001) {
         bad.push(`${detail} — מידה קטנה ${(minor * 100).toFixed(0)}% מתחת למינימום`);
       }
     }
     expect(bad).toEqual([]);
   });
 
-  it('רשימת האייקונים השטוחים אינה מכילה שמות שאינם קיימים', () => {
+  it('רשימות ההחרגה אינן מכילות שמות שאינם קיימים', () => {
     expect([...FLAT_ICONS].filter((n) => !(n in ICONS))).toEqual([]);
+    expect([...GLYPH_ICONS].filter((n) => !(n in ICONS))).toEqual([]);
+  });
+
+  it('כל שם ברשימות ההחרגה באמת זקוק להחרגה', () => {
+    // בלי זה ההחרגות מתרחבות בשקט: אייקון שהוחלף ועכשיו עובר את הכלל הרגיל
+    // נשאר ברשימה, וההחרגה מכסה אותו לנצח. כך `strikethrough` יצא מ-FLAT_ICONS
+    // כשהוא הוחלף בגרסת Fluent שיחס המילוי שלה 70%x70%.
+    const ratio = (name: string): { dominant: number; minor: number } => {
+      const m = MEASURED.get(name)!;
+      const w = (m.maxX - m.minX) / VB_W;
+      const h = (m.maxY - m.minY) / VB_H;
+      return { dominant: Math.max(w, h), minor: Math.min(w, h) };
+    };
+    const needless: string[] = [];
+    for (const name of FLAT_ICONS) {
+      const { dominant, minor } = ratio(name);
+      if (dominant >= DOMINANT_MIN - 0.001 && minor >= MINOR_MIN - 0.001) {
+        needless.push(`${name} ב-FLAT_ICONS`);
+      }
+    }
+    for (const name of GLYPH_ICONS) {
+      if (ratio(name).minor >= MINOR_MIN - 0.001) needless.push(`${name} ב-GLYPH_ICONS`);
+    }
+    expect(needless).toEqual([]);
   });
 });
 
