@@ -52,6 +52,11 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # `npm test` חוסם ב-release-v2.yml, כלומר רק אחרי שהשינוי כבר ב-main.
+      # בלעדיו כאן, PR ששובר את חבילת הטסטים עובר ירוק ומפיל את ה-Release.
+      - name: Test
+        run: npm test
+
       # הוולידטור בודק את מה שנארז בפועל, ולכן הוא דורש בנייה: מניפסט
       # תקין ב-public לא מוכיח שהנכסים שה-HTML מפנה אליהם נמצאים בארכיון.
       - name: Build (Vite -> v2/dist)
