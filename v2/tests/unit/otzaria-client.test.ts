@@ -159,7 +159,10 @@ describe('on', () => {
 });
 
 describe('ה-latch ב-index.html', () => {
-  const html = readFileSync(join(process.cwd(), 'index.html'), 'utf8');
+  // הנרמול הוא מה שמפעיל את הבדיקה הראשונה בכלל: index.html נשמר ב-CRLF,
+  // וההשוואה שם מצפה למפריד שורה יחיד בתוך קריאת ה-addEventListener. בלעדיו
+  // הבדיקה נכשלה תמיד — כלומר שער הסדר של ה-latch לא היה שמור בפועל.
+  const html = readFileSync(join(process.cwd(), 'index.html'), 'utf8').replace(/\r\n/g, '\n');
 
   it('נרשם ל-plugin.boot בתוך ה-head, לפני סקריפט התוסף', () => {
     const head = html.slice(0, html.indexOf('</head>'));

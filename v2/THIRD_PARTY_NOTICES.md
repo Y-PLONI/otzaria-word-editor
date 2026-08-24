@@ -146,6 +146,62 @@
 | `replace` | החלפה | `arrow_swap` |
 | `select` | בחר הכל | `select_all_on` |
 
+**לשונית „הוספה”**
+
+| שם ב־`ICONS` | פקד | אייקון מקורי |
+|---|---|---|
+| `table` | טבלה | `table` |
+| `image` | תמונה | `image` |
+| `link` | קישור | `link` |
+| `pageBreak` | מעבר עמוד | `document_page_break` |
+| `toc` | תוכן עניינים (וגם „הפניות”) | `document_bullet_list` |
+
+**לשונית „פריסה”**
+
+| שם ב־`ICONS` | פקד | אייקון מקורי |
+|---|---|---|
+| `margins` | שוליים | `document_margins` |
+| `orientation` | כיוון | `document_landscape` |
+| `paperSize` | גודל | `slide_size` |
+| `columns` | עמודות | `text_column_two` |
+
+**לשונית „הפניות”**
+
+| שם ב־`ICONS` | פקד | אייקון מקורי |
+|---|---|---|
+| `footnote` | הערת שוליים | `text_footnote` |
+
+**לשונית „סקירה”**
+
+| שם ב־`ICONS` | פקד | אייקון מקורי |
+|---|---|---|
+| `trackChanges` | עקוב אחר שינויים | `document_edit` |
+| `accept` | אשר שינוי | `checkmark_circle` |
+| `reject` | דחה שינוי | `dismiss_circle` |
+| `comment` | הערה | `comment` |
+| `proofing` | בדיקת איות | `text_proofing_tools` |
+
+**לשונית „תצוגה”**
+
+| שם ב־`ICONS` | פקד | אייקון מקורי |
+|---|---|---|
+| `ruler` | סרגל | `ruler` |
+| `zoom` | זום | `zoom_in` |
+| `fitWidth` | התאם לרוחב | `arrow_autofit_width` |
+| `focusMode` | מצב מיקוד | `full_screen_maximize` |
+
+**לשונית „אוצריא” והמעטפת**
+
+| שם ב־`ICONS` | פקד | אייקון מקורי |
+|---|---|---|
+| `book` | פתח ספרייה | `book` |
+| `undo` | בטל | `arrow_undo` |
+| `redo` | בצע שוב | `arrow_redo` |
+| `chevronDown` | פתיחת תפריט וכיווץ הרצועה | `chevron_down` |
+| `chevronUp` | כיווץ הרצועה | `chevron_up` |
+| `chevronLeft` | גלילת גלריית הסגנונות | `chevron_left` |
+| `chevronRight` | גלילת גלריית הסגנונות | `chevron_right` |
+
 - מקור: <https://github.com/microsoft/fluentui-system-icons>
 - חבילה: `@fluentui/svg-icons@1.1.338` ב־npm, וריאנט `*_20_regular`
 - רישיון: MIT, Copyright © 2020 Microsoft Corporation
@@ -170,15 +226,24 @@ MDL2 היא הספרייה של Office UI Fabric שיצאה משימוש, System
 הקיים, ויש לה וריאנטי RTL מוצהרים — `arrow_export_rtl` מול `arrow_export_ltr`
 — שזה בדיוק מה שנדרש בממשק עברי.
 
-שתי בחירות שאין להן מקבילה מדויקת אצל Microsoft, ולכן הן מתועדות כאן:
+שש בחירות שאין להן מקבילה מדויקת אצל Microsoft, ולכן הן מתועדות כאן:
 
 - `replace` הוא `arrow_swap` — אין ב־System Icons אייקון „מצא והחלף”.
 - `formatPainter` הוא `paint_brush` ולא `clipboard_brush`, כי זה מה ש־Word
   מציג, ולוח כבר מופיע בשלושת השכנים שלו באותה קבוצה.
+- `orientation` הוא `document_landscape` ולא `orientation` — האייקון שנקרא כך
+  אצל Microsoft הוא סיבוב **מכשיר**, לא כיוון דף.
+- `paperSize` הוא `slide_size` — אין „גודל נייר”, וזה הגליף שאומר גודל בלי
+  להיות דף נוסף ליד `margins`.
+- `accept`/`reject` הם `checkmark_circle`/`dismiss_circle` ולא הגרסאות
+  העירומות: `dismiss` יוצא 60% ונופל מהמינימום של 70%, ואז הוא נראה קטן
+  מה־`checkmark` שלצידו. שני העיגולים 80%×80%.
+- `dirRtl` הוא `text_paragraph_direction_left`. בשתי הגרסאות סימן הפיסקה יושב
+  בימין והחץ בשמאל; מה שמבדיל הוא כיוון החץ, כלומר כיוון הזרימה.
 
-> המיגרציה נעשית לשונית־לשונית. עברו „קובץ” ו„בית”; נשארו הוספה, פריסה,
-> הפניות, סקירה, תצוגה, אוצריא, ה־chevron־ים, `undo`/`redo`, ו־`word`/`otzaria`
-> שהם מיתוג ויישארו ציור בבית. הטבלאות כאן מתעדכנות עם כל לשונית שעוברת.
+> **המיגרציה הושלמה.** 65 מתוך 67 האייקונים ב־`icons.ts` הם Fluent System
+> Icons. היוצאים היחידים הם `word` ו־`otzaria`, שנשארים ציור בבית: ה־MIT מכסה
+> אייקוני ממשק ולא סמלי מוצר, ו־`otzaria` אינו של Microsoft כלל.
 
 ## רכיבי MIT שנארזים
 
