@@ -1,0 +1,90 @@
+# אימות התוסף מול הולידטור הרשמי של אוצריא, בכל PR.
+#
+# למה בנפרד מ-release-v2.yml: זה רץ על `push` ל-main בלבד, כלומר אחרי
+# שהשינוי כבר נכנס. שער ההתקנה של אוצריא ושל החנות מופעל בדיוק על
+# מה ש-PR משנה — מניפסט, הרשאות, הפניות לנכסים — ולכן המקום לבדוק הוא כאן.
+#
+# הוולידטור מושך את `spec.json` החי מ-Otzaria/otzaria@dev — ארטיפקט שמיוצר מקוד
+# ה-Dart של האפליקציה — ולכן API או הרשאה שאוצריא שינתה מורגשת כאן בלי לעדכן דבר.
+# נפילת האחזור אינה מכשילה: ה-action נופל לעותק המצורף בו, שהוא אותו ארטיפקט.
+name: Validate
+
+on:
+  pull_request:
+    paths:
+      - 'v2/**'
+      - 'src/**'
+      - '.github/workflows/validate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # להערת הסיכום על ה-PR. ב-PR מ-fork הטוקן לקריאה בלבד והפרסום מדולג
+  # באזהרה — הבדיקה עצמה רצה בכל מקרה, והתוצאה נכתבת ל-job summary.
+  pull-requests: write
+
+concurrency:
+  group: validate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  v2:
+    name: v2 (SuperDoc)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: v2
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: v2/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # הוולידטור בודק את מה שנארז בפועל, ולכן הוא דורש בנייה: מניפסט
+      # תקין ב-public לא מוכיח שהנכסים שה-HTML מפנה אליהם נמצאים בארכיון.
+      - name: Build (Vite -> v2/dist)
+        run: npm run build
+
+      - name: Check dist
+        run: npm run check:dist
+
+      # `fail-on-warnings: true` משקף את החנות, שחוסמת גם על אזהרות. v2/dist עובר
+      # ב-0 אזהרות, ולכן זה שער אמיתי ולא רעש.
+      - name: Validate v2/dist against the live SDK spec
+        uses: Otzaria/otzaria-plugin-validator@v1
+        with:
+          path: v2/dist
+          publish: 'false'
+          fail-on-warnings: 'true'
+          pr-comment: 'true'
+          github-token: ${{ github.token }}
+
+  v1:
+    name: v1 (legacy)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # v1 אינו נבנה — `src/` הוא הארכיון. בלי `fail-on-warnings`: הגרסה הזו
+      # נושאת אזהרות קיימות (הרשאות בסיס מוצהרות לשוא, ו-mammoth.min.js מפנה למודולים
+      # שאינם בארכיון), ושבירת ה-CI על חוב קיים הייתה הופכת את השער לרעש.
+      # שגיאה חוסמת גם כאן.
+      - name: Validate src/ against the live SDK spec
+        uses: Otzaria/otzaria-plugin-validator@v1
+        with:
+          path: src
+          publish: 'false'
