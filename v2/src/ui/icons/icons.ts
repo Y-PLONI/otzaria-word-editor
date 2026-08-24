@@ -1,6 +1,12 @@
 /**
  * ספריית אייקוני ה-SVG של הסרגל, בסגנון Microsoft Word / Fluent UI.
  *
+ * המיגרציה ל-Fluent System Icons (Fluent 2) נעשית לשונית-לשונית. עד כה
+ * הועברה לשונית "קובץ" — newDoc, folder, save, saveAs, export, print, info —
+ * ובה ה-path data הוא של Microsoft, בגרסת regular בגריד 20. כל השאר עדיין
+ * מצויר בבית, במשקל קו כבד יותר; לכן `save` שיושב גם בסרגל הגישה המהירה
+ * ייראה קל יותר מ-undo/redo/search שלצידו עד שגם הם יעברו.
+ *
  * שלוש מגבלות שמחייבות את כל האייקונים כאן, ו-tests/unit/icons.test.ts אוכף
  * אותן על הנתונים האמיתיים:
  *
@@ -10,9 +16,11 @@
  * 2. אף נקודה על ה-path אינה חורגת מה-viewBox. חריגה אינה נראית כשגיאה —
  *    היא פשוט נחתכת בשקט (נמדד: `dirRtl`/`dirLtr` חרגו 1.1 יחידות מעל הגבול
  *    העליון, ו-`cut` 1.3 מתחת לתחתון).
- * 3. יחס מילוי אחיד: המידה הדומיננטית של ה-bounding box תופסת 70%–86%
+ * 3. יחס מילוי אחיד: המידה הדומיננטית של ה-bounding box תופסת 70%–85%
  *    מה-viewBox. בלי זה מתקבלת שורה שבה שכנים נראים בגדלים שונים (נמדד:
- *    `reject` תפס 47%x47% ליד `footnote` שתפס 90%x75%).
+ *    `reject` תפס 47%x47% ליד `footnote` שתפס 90%x75%). התקרה היא 85% ולא
+ *    84% כי זה הגריד של Fluent עצמו: גליף מלבני כמו `info` יושב 2–18
+ *    (80%), אבל דף עם תג כמו `document_add` יושב 2–19 לגובה ו-1–16 לרוחב.
  *
  * כל האייקונים בנויים ממילוי (`fill="currentColor"`) ולא מקווי stroke, כדי
  * שהמשקל האופטי יהיה נשלט במידות ה-path עצמו — וכדי שבדיקת ה-bounding box
@@ -23,6 +31,41 @@
  * נדרשים לגלילת גלריית הסגנונות ולכיווץ הסרגל. הם מוגדרים כאן ויחוברו
  * לפקדים בקומיטים נפרדים; הבדיקה מחריגה אותם דרך רשימת PLANNED_ICONS
  * כדי שהחרגה לא תתרחב בשקט לאייקונים שנשכחו.
+ */
+
+/*!
+ * Fluent System Icons — MIT
+ *
+ * The SVG path data of the icons marked "Fluent System Icons" in this file
+ * is taken from Fluent System Icons by Microsoft
+ * (https://github.com/microsoft/fluentui-system-icons), as published in the
+ * npm package @fluentui/svg-icons@1.1.338. Only path data was copied; the
+ * <svg> wrapper, the icon names and the rest of this file are the plugin's
+ * own code.
+ *
+ * MIT License
+ *
+ * Copyright (c) 2020 Microsoft Corporation
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ * @license MIT
  */
 
 /** אייקונים שמוגדרים לפני שיש להם צרכן. ראו הערת הפתיחה. */
@@ -46,14 +89,24 @@ export const ICONS: Record<string, string> = {
   // החור. היפוך כיוון של אחת הטבעות „יסתום” את הדף לכתם מלא.
   otzaria: `<svg viewBox="0 0 20 20" fill="currentColor"><path d="M2.2 5L10 7v9l-7.8-2zM3.5 6.6v6.4l5.5 1.4V8zM10 7l7.8-2v9l-7.8 2zM16.5 6.6L11 8v6.4l5.5-1.4zM4.5 9.2h3.4v1H4.5zM4.5 11.4h3.4v1H4.5zM12.1 9.2h3.4v1h-3.4zM12.1 11.4h3.4v1h-3.4z"/></svg>`,
 
-  // קובץ: מסמך חדש, פתיחה, שמירה, ייצוא
-  newDoc: `<svg viewBox="0 0 20 20" fill="currentColor"><path d="M2.5 2.4h9v1.5h-9zM2.5 12.5h9V14h-9zM2.5 3.9H4v8.6H2.5zM10 3.9h1.5v8.6H10zM12.4 13.9h5.5v1.7h-5.5zM14.3 12H16v5.6h-1.7z"/></svg>`,
-  folder: `<svg viewBox="0 0 20 20" fill="currentColor"><path d="M2 3.5h6.3l1.7 2.2H18V16.5H2zM3.7 5.2V14.8h12.6V7.4H9.2L7.5 5.2z"/></svg>`,
-  save: `<svg viewBox="0 0 20 20" fill="currentColor"><path d="M2.5 2.5h15v1.7h-15zM2.5 15.8h15v1.7h-15zM2.5 4.2h1.7v11.6H2.5zM15.8 4.2h1.7v11.6h-1.7zM7.2 4.2h5.6v3.4H7.2zM5.5 11.4h9V13h-9zM5.5 13.9H12v1.6H5.5z"/></svg>`,
-  // "שמור בשם" = דיסקט עם עיפרון, כמו ב-Word. הדיסקט מצומצם ל-x2.5–12 כדי
-  // שהעיפרון לא יתמזג איתו לכתם אחד (שני ה-paths באותו צבע ובאותו כיוון).
-  saveAs: `<svg viewBox="0 0 20 20" fill="currentColor"><path d="M2.5 3H12v1.5H2.5zM2.5 11.5H12V13H2.5zM2.5 4.5H4v7H2.5zM10.5 4.5H12v7h-1.5zM5.5 4.5H9V7H5.5zM10.7 17.5l.7-1.9 1.2 1.2zM11.4 15.6l1.2 1.2 3.9-3.9-1.2-1.2zM15.3 11.7l1.2 1.2 1-1-1.2-1.2z"/></svg>`,
-  export: `<svg viewBox="0 0 20 20" fill="currentColor"><path d="M2.5 2.5h9V4h-9zM2.5 16h9v1.5h-9zM2.5 4H4v12H2.5zM10 4h1.5v3.4H10zM10 12.6h1.5V16H10zM7.6 9.2H14v1.6H7.6zM13.3 6.6L17.5 10l-4.2 3.4z"/></svg>`,
+  // קובץ: מסמך חדש, פתיחה, שמירה, ייצוא. שבעת האייקונים של לשונית "קובץ"
+  // — כולל print ו-info שיושבים למטה — הם Fluent System Icons מקוריים,
+  // גרסת regular בגריד 20. ראו את באנר הרישוי בראש הקובץ.
+  //
+  // `document_add`: דף עם קיפול בפינה הימנית-העליונה, ותג "+" בעיגול
+  // בפינה השמאלית-התחתונה. ל-Microsoft אין גרסת RTL לאייקון הזה, והוא
+  // נשאר לא משוקף — כמו אייקוני המסמך ב-Word בעברית.
+  newDoc: `<svg viewBox="0 0 20 20" fill="currentColor"><path d="M6 2a2 2 0 0 0-2 2v5.2q.49-.13 1-.18V4a1 1 0 0 1 1-1h4v3.5c0 .83.67 1.5 1.5 1.5H15v8a1 1 0 0 1-1 1h-3.6q-.27.54-.66 1H14a2 2 0 0 0 2-2V7.41c0-.4-.16-.78-.44-1.06l-3.91-3.91A1.5 1.5 0 0 0 10.59 2zm8.8 5h-3.3a.5.5 0 0 1-.5-.5V3.2zM10 14.5a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0m-4-2a.5.5 0 0 0-1 0V14H3.5a.5.5 0 0 0 0 1H5v1.5a.5.5 0 0 0 1 0V15h1.5a.5.5 0 0 0 0-1H6z"/></svg>`,
+  // `folder_open`: המעטפת נמדדת 85% רוחב, אך הדיו נעצר ב-x=18 — ההפרש הוא
+  // נקודות בקרה של בזייה, שבדיקת המעטפת סופרת בכוונה כגבול שמרני.
+  folder: `<svg viewBox="0 0 20 20" fill="currentColor"><path d="M3 5.5v6.6l1.5-2.6A3 3 0 0 1 7.1 8H15v-.5c0-.83-.67-1.5-1.5-1.5h-4a.5.5 0 0 1-.35-.15l-1.71-1.7A.5.5 0 0 0 7.09 4H4.5C3.67 4 3 4.67 3 5.5m1.28 10.48.22.02h9.4a2 2 0 0 0 1.73-1l2.17-3.75A1.5 1.5 0 0 0 16.5 9H7.1a2 2 0 0 0-1.73 1L3.2 13.75a1.5 1.5 0 0 0 1.08 2.23M2 14.46V5.5A2.5 2.5 0 0 1 4.5 3h2.59c.4 0 .78.16 1.06.44L9.7 5h3.79A2.5 2.5 0 0 1 16 7.5V8h.5a2.5 2.5 0 0 1 2.16 3.75L16.5 15.5a3 3 0 0 1-2.6 1.5H4.5a2.5 2.5 0 0 1-1.62-.6A2.5 2.5 0 0 1 2 14.46"/></svg>`,
+  save: `<svg viewBox="0 0 20 20" fill="currentColor"><path d="M3 5c0-1.1.9-2 2-2h8.38a2 2 0 0 1 1.41.59l1.62 1.62A2 2 0 0 1 17 6.62V15a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zm2-1a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1v-4.5c0-.83.67-1.5 1.5-1.5h7c.83 0 1.5.67 1.5 1.5V16a1 1 0 0 0 1-1V6.62a1 1 0 0 0-.3-.7L14.1 4.28a1 1 0 0 0-.71-.29H13v2.5c0 .83-.67 1.5-1.5 1.5h-4A1.5 1.5 0 0 1 6 6.5V4zm2 0v2.5c0 .28.22.5.5.5h4a.5.5 0 0 0 .5-.5V4zm7 12v-4.5a.5.5 0 0 0-.5-.5h-7a.5.5 0 0 0-.5.5V16z"/></svg>`,
+  // "שמור בשם" = `save_edit`, דיסקט עם עיפרון — אותה כוונה שהייתה לאייקון
+  // המצויר שקדם לו, עכשיו בגריד ובמשקל הקו של Fluent.
+  saveAs: `<svg viewBox="0 0 20 20" fill="currentColor"><path d="M5 3a2 2 0 0 0-2 2v10c0 1.1.9 2 2 2h3l.06-.35.16-.65H6v-4.5c0-.28.22-.5.5-.5h5.44l1-1H6.5c-.83 0-1.5.67-1.5 1.5V16a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h1v2.5C6 7.33 6.67 8 7.5 8h4c.83 0 1.5-.67 1.5-1.5V4h.38a1 1 0 0 1 .7.3l1.63 1.61a1 1 0 0 1 .29.71V8q.52-.02 1 .13v-1.5a2 2 0 0 0-.59-1.42L14.8 3.59A2 2 0 0 0 13.38 3zm2 3.5V4h5v2.5a.5.5 0 0 1-.5.5h-4a.5.5 0 0 1-.5-.5m7.8 3.05-4.82 4.83a2 2 0 0 0-.58 1.02l-.37 1.5a.9.9 0 0 0 1.08 1.07l1.5-.37q.58-.16 1.01-.58l4.83-4.83a1.87 1.87 0 0 0-2.64-2.64"/></svg>`,
+  // `arrow_export_rtl` ולא `arrow_export_ltr`: הרצועה RTL, ולכן "החוצה"
+  // הוא שמאלה. שתי הגרסאות קיימות אצל Microsoft בדיוק בשביל ההבחנה הזאת.
+  export: `<svg viewBox="0 0 20 20" fill="currentColor"><path d="M17.5 4a.5.5 0 0 0-.5.5v11a.5.5 0 0 0 1 0v-11a.5.5 0 0 0-.5-.5M15 10a.5.5 0 0 0-.5-.5H3.7l3.15-3.15a.5.5 0 0 0-.7-.7l-4 4a.5.5 0 0 0 0 .7l4 4a.5.5 0 0 0 .7-.7L3.71 10.5H14.5a.5.5 0 0 0 .5-.5"/></svg>`,
 
   // סרגל גישה מהירה
   undo: `<svg viewBox="0 0 20 20" fill="currentColor"><path d="M10.5 6.5A6.5 6.5 0 0 0 5 9.1L2.5 6.5v7h7l-2.8-2.8A4.8 4.8 0 0 1 15 13.5l1.6-1.2A6.5 6.5 0 0 0 10.5 6.5z"/></svg>`,
@@ -140,7 +193,9 @@ export const ICONS: Record<string, string> = {
   zoom: `<svg viewBox="0 0 20 20" fill="currentColor"><path d="M8.5 3a5.5 5.5 0 0 1 4.3 8.9l4.4 4.4-1.3 1.3-4.4-4.4A5.5 5.5 0 1 1 8.5 3zm0 1.8a3.7 3.7 0 1 0 0 7.4 3.7 3.7 0 0 0 0-7.4zm.9 1.8h-1.8v1.8H5.8v1.8h1.8v1.8h1.8v-1.8h1.8V8.4H9.4V6.6z"/></svg>`,
   fitWidth: `<svg viewBox="0 0 20 20" fill="currentColor"><path d="M3.4 5.5h13.2V7H3.4zM3.4 13h13.2v1.5H3.4zM3.4 7h1.5v6H3.4zM15.1 7h1.5v6h-1.5zM2 5.5h1.2v9H2zM16.8 5.5H18v9h-1.2z"/></svg>`,
   focusMode: `<svg viewBox="0 0 20 20" fill="currentColor"><path d="M4.5 4.5h3.5V3H3v5h1.5V4.5zm8-1.5v1.5H16V8h1.5V3h-5zm3.5 12.5h-3.5V17H17v-5h-1.5v3.5zM8 15.5H4.5V12H3v5h5v-1.5z"/></svg>`,
-  print: `<svg viewBox="0 0 20 20" fill="currentColor"><path d="M15.5 6.5h-11V3h11v3.5zm1 1.5H3.5a1.5 1.5 0 0 0-1.5 1.5v5h2.5v4h11v-4H18v-5a1.5 1.5 0 0 0-1.5-1.5zm-2 9h-9v-4.5h9V17zm1.5-6a.8.8 0 1 1 .8-.8.8.8 0 0 1-.8.8z"/></svg>`,
-  info: `<svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 2.5a7.5 7.5 0 1 1 0 15 7.5 7.5 0 0 1 0-15zM10 4.2a5.8 5.8 0 1 0 0 11.6 5.8 5.8 0 0 0 0-11.6zM10 5.6a1.1 1.1 0 1 1 0 2.2 1.1 1.1 0 0 1 0-2.2zM9 9h2v5.4H9z"/></svg>`,
+  // print ו-info הם פקדים של לשונית "קובץ" שיושבים בקבוצה הזאת היסטורית.
+  // `info` הוא טבעת עם גליף ולא דיסק מלא, ולכן הוא אינו "צועק" ליד סט קווי.
+  print: `<svg viewBox="0 0 20 20" fill="currentColor"><path d="M5 4.5C5 3.67 5.67 3 6.5 3h7c.83 0 1.5.67 1.5 1.5V5h.5A2.5 2.5 0 0 1 18 7.5v5c0 .83-.67 1.5-1.5 1.5H15v1.5c0 .83-.67 1.5-1.5 1.5h-7A1.5 1.5 0 0 1 5 15.5V14H3.5A1.5 1.5 0 0 1 2 12.5v-5A2.5 2.5 0 0 1 4.5 5H5zM6 5h8v-.5a.5.5 0 0 0-.5-.5h-7a.5.5 0 0 0-.5.5zm-1 8v-1.5c0-.83.67-1.5 1.5-1.5h7c.83 0 1.5.67 1.5 1.5V13h1.5a.5.5 0 0 0 .5-.5v-5c0-.83-.67-1.5-1.5-1.5h-11C3.67 6 3 6.67 3 7.5v5c0 .28.22.5.5.5zm1.5-2a.5.5 0 0 0-.5.5v4c0 .28.22.5.5.5h7a.5.5 0 0 0 .5-.5v-4a.5.5 0 0 0-.5-.5z"/></svg>`,
+  info: `<svg viewBox="0 0 20 20" fill="currentColor"><path d="M10.5 8.91a.5.5 0 0 0-1 .09v4.6a.5.5 0 0 0 1-.1V8.91m.3-2.16a.75.75 0 1 0-1.5 0 .75.75 0 0 0 1.5 0M18 10a8 8 0 1 0-16 0 8 8 0 0 0 16 0M3 10a7 7 0 1 1 14 0 7 7 0 0 1-14 0"/></svg>`,
   book: `<svg viewBox="0 0 20 20" fill="currentColor"><path d="M15.5 2.5H5a1.5 1.5 0 0 0-1.5 1.5v12a1.5 1.5 0 0 0 1.5 1.5h10.5v-15zM5.2 4.3h4v6.5L7.2 9.5 5.2 10.8V4.3z"/></svg>`,
 };

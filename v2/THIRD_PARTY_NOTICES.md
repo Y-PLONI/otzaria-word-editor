@@ -77,6 +77,48 @@
 > `fsType = 8`). לא היה לזה היתר הפצה, והוא הוחלף. הקבצים ההם נוקו גם
 > מהיסטוריית ה־git.
 
+## Fluent System Icons 1.1.338 — MIT
+
+אייקוני לשונית „קובץ” ב־`src/ui/icons/icons.ts` הם ה־path data המקורי של
+Microsoft, ולא ציור בבית:
+
+| שם ב־`ICONS` | פקד | אייקון מקורי |
+|---|---|---|
+| `newDoc` | מסמך חדש | `document_add_20_regular` |
+| `folder` | פתח קובץ | `folder_open_20_regular` |
+| `save` | שמור (וגם סרגל הגישה המהירה) | `save_20_regular` |
+| `saveAs` | שמור בשם... | `save_edit_20_regular` |
+| `export` | ייצוא ל־Word | `arrow_export_rtl_20_regular` |
+| `print` | הדפסה | `print_20_regular` |
+| `info` | אודות | `info_20_regular` |
+
+- מקור: <https://github.com/microsoft/fluentui-system-icons>
+- חבילה: `@fluentui/svg-icons@1.1.338` ב־npm, וריאנט `*_20_regular`
+- רישיון: MIT, Copyright © 2020 Microsoft Corporation
+- הודעה: באנר `@license MIT` בראש `src/ui/icons/icons.ts`
+
+חובות מעשיות שהקוד מחויב להן:
+
+- **סעיף היחיד ב־MIT:** נוסח הרישיון והקרדיט מופצים עם כל עותק. הם אינם קובץ
+  נפרד תחת `third-party/` אלא באנר legal comment בראש `icons.ts`, שנאסף
+  לסוף `assets/app.js` דרך `esbuild.legalComments: 'eof'`. `npm run check:dist`
+  מאמת שהבאנר שרד את המינימיזציה, בדיוק כמו באנר מנוע ה־DOCX.
+- **אין תלות חדשה.** `@fluentui/svg-icons` אינו ב־`package.json` ואינו נארז.
+  הועתק ה־path data בלבד; מעטפת ה־`<svg>`, השמות ב־`ICONS` והמנגנון סביבם הם
+  קוד של התוסף.
+- **אין אייקוני מיתוג.** ה־MIT מכסה את האייקונים, אך סמלי לוגו ומוצר של
+  Microsoft הם סימני מסחר. נלקחו אייקוני ממשק גנריים בלבד — דף, תיקייה,
+  דיסקט, מדפסת, חץ, עיגול מידע. `word` ו־`otzaria` נשארו ציור בבית.
+
+למה דווקא Fluent System Icons ולא Fluent MDL2, שדומה יותר ל־Ribbon של Word:
+MDL2 היא הספרייה של Office UI Fabric שיצאה משימוש, System Icons היא הסט
+הפעיל של Fluent 2 תחת MIT, יש לה גריד 20 שמתאים בדיוק ל־`viewBox` של הסט
+הקיים, ויש לה וריאנטי RTL מוצהרים — `arrow_export_rtl` מול `arrow_export_ltr`
+— שזה בדיוק מה שנדרש בממשק עברי.
+
+> המיגרציה נעשית לשונית־לשונית. עד כה עברה לשונית „קובץ” בלבד; שאר הסט עדיין
+> מצויר בבית, במשקל קו כבד יותר. הטבלה כאן מתעדכנת עם כל לשונית שעוברת.
+
 ## רכיבי MIT שנארזים
 
 נכנסים לחבילה דרך התלויות של superdoc ושל הממשק. הודעות הרישוי שלהם נאספות
@@ -93,7 +135,9 @@
 
 ## קוד שהועתק ממאגרים אחרים
 
-אין. הממשק נכתב מאפס. מקורות שהיוו השראה חזותית בלבד מתועדים ב־
+ה־path data של אייקוני לשונית „קובץ” — ראו [Fluent System Icons](#fluent-system-icons-11338--mit)
+למעלה. הקובץ המושפע הוא `src/ui/icons/icons.ts` בלבד.
+
+מלבד זה הממשק נכתב מאפס. מקורות שהיוו השראה חזותית בלבד מתועדים ב־
 [../docs/word-plugin-implementation-plan.md](../docs/word-plugin-implementation-plan.md) §3.3.
-אם בעתיד יועתק קוד ממשי ממאגר AGPL/MIT — יש להוסיף אותו כאן עם קישור, קומיט,
-רישיון ורשימת הקבצים המושפעים.
+כל העתקה נוספת מתועדת כאן עם קישור, גרסה, רישיון ורשימת הקבצים המושפעים.

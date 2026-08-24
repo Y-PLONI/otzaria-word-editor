@@ -80,6 +80,15 @@ const CDN_HINTS = ['cdn.jsdelivr.net', 'unpkg.com', 'cdnjs.cloudflare.com', 'fon
 const ENGINE_LICENSE_MARK = 'DOCX Engine Proprietary License Agreement';
 const ENGINE_BEARING_FILES = ['assets/app.js', 'assets/engine-workers.js'];
 
+/**
+ * ה-path data של אייקוני Fluent System Icons מוטמע ב-src/ui/icons/icons.ts,
+ * ורישיון ה-MIT מחייב שהודעת הרישוי תופץ עם כל עותק. ההודעה אינה קובץ נפרד
+ * אלא באנר legal comment בראש הקובץ, שנשען על esbuild.legalComments: 'eof'
+ * כדי לשרוד את המינימיזציה. אם ההגדרה תיפול, הבאנר ייעלם בשקט — הבנייה
+ * תצליח, וההפצה תהיה בהפרה. לכן שער ולא הערה.
+ */
+const ICONS_LICENSE_MARK = 'Fluent System Icons — MIT';
+
 const files = [];
 function walk(dir, prefix = '') {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -122,6 +131,17 @@ for (const rel of ENGINE_BEARING_FILES) {
   if (!readFileSync(full, 'utf8').includes(ENGINE_LICENSE_MARK)) {
     errors.push(
       `${rel} אינו נושא את באנר הרישוי של מנוע ה-DOCX — ` +
+        "בדקו את esbuild.legalComments ב-vite.config.ts",
+    );
+  }
+}
+
+{
+  const rel = 'assets/app.js';
+  const full = join(DIST, rel);
+  if (existsSync(full) && !readFileSync(full, 'utf8').includes(ICONS_LICENSE_MARK)) {
+    errors.push(
+      `${rel} אינו נושא את באנר ה-MIT של Fluent System Icons — ` +
         "בדקו את esbuild.legalComments ב-vite.config.ts",
     );
   }
