@@ -112,6 +112,7 @@ import {
   type ViewportSource,
 } from '../../engine/page-ruler';
 import {
+  MIN_TEXT_AREA_TWIPS,
   clampIndent,
   clampMargin,
   measureLabel,
@@ -341,7 +342,7 @@ const handles = computed<Handle[]>(() => {
       shape: 'margin',
       posTwips: geo.startMarginTwips,
       valueTwips: geo.startMarginTwips,
-      maxValueTwips: geo.pageWidthTwips - geo.endMarginTwips,
+      maxValueTwips: Math.max(0, geo.pageWidthTwips - geo.endMarginTwips - MIN_TEXT_AREA_TWIPS),
       px: toPx(geo.startMarginTwips),
     },
     {
@@ -350,7 +351,7 @@ const handles = computed<Handle[]>(() => {
       shape: 'margin',
       posTwips: geo.pageWidthTwips - geo.endMarginTwips,
       valueTwips: geo.endMarginTwips,
-      maxValueTwips: geo.pageWidthTwips - geo.startMarginTwips,
+      maxValueTwips: Math.max(0, geo.pageWidthTwips - geo.startMarginTwips - MIN_TEXT_AREA_TWIPS),
       px: toPx(geo.pageWidthTwips - geo.endMarginTwips),
     },
   ];

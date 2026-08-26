@@ -9,6 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   CM_PER_INCH,
+  MIN_TEXT_AREA_TWIPS,
   MIN_TEXT_WIDTH_TWIPS,
   TWIPS_PER_CM,
   TWIPS_PER_INCH,
@@ -16,6 +17,7 @@ import {
   clampIndent,
   clampMargin,
   formatUnits,
+  marginsLeaveRoom,
   labelInterval,
   measureLabel,
   pixelOffset,
@@ -175,8 +177,39 @@ describe('חסמים', () => {
       pageWidthTwips: A4_WIDTH_TWIPS,
       otherMarginTwips: 1440,
     });
-    expect(max).toBe(A4_WIDTH_TWIPS - 1440 - MIN_TEXT_WIDTH_TWIPS);
-    expect(A4_WIDTH_TWIPS - 1440 - max).toBeGreaterThanOrEqual(MIN_TEXT_WIDTH_TWIPS);
+    expect(max).toBe(A4_WIDTH_TWIPS - 1440 - MIN_TEXT_AREA_TWIPS);
+    expect(A4_WIDTH_TWIPS - 1440 - max).toBeGreaterThanOrEqual(MIN_TEXT_AREA_TWIPS);
+  });
+
+  it('החסם של השוליים גדול מזה של הכניסות — הצוק שלו אינו הפיך', () => {
+    // גובה טקסט אפס מפיל את הפריסה לאפס עמודים ואינה חוזרת (נמדד).
+    expect(MIN_TEXT_AREA_TWIPS).toBeGreaterThan(MIN_TEXT_WIDTH_TWIPS);
+  });
+
+  it('רצפה של המנוע עוצרת את הידית, ואינה מאפשרת לרדת מתחתיה', () => {
+    // כותרת עליונה מרימה את שולי הטקסט ל-1748 twips (48px + 18.4px).
+    expect(clampMargin(0, { pageWidthTwips: 16838, otherMarginTwips: 1440, minTwips: 1748 })).toBe(
+      1748,
+    );
+    expect(
+      clampMargin(2880, { pageWidthTwips: 16838, otherMarginTwips: 1440, minTwips: 1748 }),
+    ).toBe(2880);
+  });
+
+  it('רצפה שגבוהה מהתקרה מנצחת — מסמך חנוק לא ייגרר לערך שלילי', () => {
+    // עמוד קטן שכבר אין בו מקום: החסם העליון יוצא מתחת לרצפה.
+    expect(clampMargin(5000, { pageWidthTwips: 2000, otherMarginTwips: 1440, minTwips: 1748 })).toBe(
+      1748,
+    );
+  });
+
+  it('marginsLeaveRoom שותק כשאין גודל עמוד, ופוסל כשאין מקום', () => {
+    expect(marginsLeaveRoom(null, 1440, 1440)).toBe(null);
+    expect(marginsLeaveRoom(0, 1440, 1440)).toBe(null);
+    expect(marginsLeaveRoom(16838, 1440, 1440)).toBe(true);
+    // בדיוק על החסם — עדיין מותר.
+    expect(marginsLeaveRoom(16838, 16838 - MIN_TEXT_AREA_TWIPS, 0)).toBe(true);
+    expect(marginsLeaveRoom(16838, 16838 - MIN_TEXT_AREA_TWIPS + 1, 0)).toBe(false);
   });
 
   it('כניסה אינה שלילית ואינה בולעת את העמודה', () => {

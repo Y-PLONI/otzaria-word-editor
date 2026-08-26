@@ -442,6 +442,10 @@ export function createRulerModel(source: RulerModelSource): RulerModel {
       a.page.rightTwips === b.page.rightTwips &&
       a.page.topTwips === b.page.topTwips &&
       a.page.bottomTwips === b.page.bottomTwips &&
+      // גם הערכים האפקטיביים: הוספת כותרת עליונה מרימה את שולי הטקסט בלי
+      // שאיש נגע ב-`w:top`, והשוואה חלקית הייתה משאירה את הסרגל על הישן.
+      a.page.effectiveTopTwips === b.page.effectiveTopTwips &&
+      a.page.effectiveBottomTwips === b.page.effectiveBottomTwips &&
       a.page.direction === b.page.direction &&
       a.indents?.leftTwips === b.indents?.leftTwips &&
       a.indents?.rightTwips === b.indents?.rightTwips &&

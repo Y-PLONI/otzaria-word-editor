@@ -247,6 +247,8 @@ const PAGE: PageMarginsState = {
   rightTwips: 1440,
   topTwips: 1440,
   bottomTwips: 1440,
+  effectiveTopTwips: 1440,
+  effectiveBottomTwips: 1440,
   direction: 'rtl',
 };
 

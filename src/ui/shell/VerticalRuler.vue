@@ -40,11 +40,11 @@
         :tabindex="canEdit ? 0 : -1"
         :aria-label="handle.label"
         :aria-disabled="canEdit ? undefined : 'true'"
-        :aria-valuemin="0"
+        :aria-valuemin="round2(handle.minValueTwips / unitTwips)"
         :aria-valuemax="round2(handle.maxValueTwips / unitTwips)"
         :aria-valuenow="round2(handle.valueTwips / unitTwips)"
         :aria-valuetext="measureLabel(handle.valueTwips, unit)"
-        :title="`${handle.label}: ${measureLabel(handle.valueTwips, unit)}`"
+        :title="handleTitle(handle)"
         :style="{ top: `${handle.px}px` }"
         @pointerdown="onPointerDown(handle, $event)"
         @keydown="onKeyDown(handle, $event)"
@@ -77,6 +77,18 @@
  *   3. **העמוד שנמדד הוא זה שנראה**, ולא הראשון: המשתמש גלל לעמוד השני, והמידה
  *      שהוא צריך היא של מה שמולו. ההכרעה עצמה ב-`measurePageRect` עם `axis: 'y'`.
  *
+ * ## הרצפה של הכותרת
+ *
+ * הצד האנכי הוא היחיד שבו המנוע **אינו** מכבד את מה שביקשנו: כשיש כותרת
+ * עליונה, שולי הטקסט מורמים ל-`headerDistance + גובה הכותרת`, וכל ערך קטן
+ * מזה פשוט אינו מזיז את הטקסט. סרגל שמצייר את הערך שביקשנו במצב הזה מראה
+ * ידית שנגררת ורצועה שזזה, ומתחתן טקסט שאינו זז — כלומר משקר.
+ *
+ * לכן כאן מציירים את `effectiveTopTwips`/`effectiveBottomTwips` (מה שנמדד
+ * אצל המנוע) ולא את ערכי המסמך, והידית **נעצרת** על הרצפה במקום להמשיך אל
+ * תוך אזור שאין לו כיסוי. ה-`title` אומר למה. המספרים והמדידה עצמה
+ * ב-`readEffectiveMargins` שב-page-setup.ts.
+ *
  * כל השאר — הצמדה, חסמים, כתיבה בשחרור, מקלדת ו-`role="slider"` — זהה
  * ל-DocumentRuler.vue ומגיע מאותם מודולים, כדי ששני הסרגלים לא יתחילו
  * להתנהג שונה.
@@ -93,6 +105,7 @@ import {
   type ViewportSource,
 } from '../../engine/page-ruler';
 import {
+  MIN_TEXT_AREA_TWIPS,
   clampMargin,
   measureLabel,
   pixelOffset,
@@ -183,6 +196,9 @@ interface Geometry {
   pageHeightTwips: number;
   topMarginTwips: number;
   bottomMarginTwips: number;
+  /** הרצפה שהמנוע כופה על הצד הזה, או 0 כשאין רצפה פעילה. */
+  floorTopTwips: number;
+  floorBottomTwips: number;
   textTopPx: number;
   textHeightPx: number;
   pxPerUnit: number;
@@ -195,9 +211,13 @@ const geometry = computed<Geometry | null>(() => {
 
   const drag = dragValue.value;
   const pageHeightTwips = reading.page.pageHeightTwips;
-  const topMarginTwips = drag?.id === 'margin-top' ? drag.valueTwips : reading.page.topTwips;
+  // מה שהמנוע צייר, ולא מה שכתוב במסמך: כותרת עליונה מרימה את שולי הטקסט,
+  // וסרגל שמצייר את הערך שביקשנו מראה רצועה שאין מתחתיה טקסט. ראו
+  // `readEffectiveMargins` ב-page-setup.ts.
+  const topMarginTwips =
+    drag?.id === 'margin-top' ? drag.valueTwips : reading.page.effectiveTopTwips;
   const bottomMarginTwips =
-    drag?.id === 'margin-bottom' ? drag.valueTwips : reading.page.bottomTwips;
+    drag?.id === 'margin-bottom' ? drag.valueTwips : reading.page.effectiveBottomTwips;
   const pxPerTwip = rect.heightPx / pageHeightTwips;
 
   return {
@@ -206,6 +226,14 @@ const geometry = computed<Geometry | null>(() => {
     pageHeightTwips,
     topMarginTwips,
     bottomMarginTwips,
+    // הרצפה ידועה רק כשהיא **פעילה**, כלומר כשהמנוע הרים את מה שביקשנו.
+    // כשהם שווים הרצפה נמצאת אי-שם מתחת, ואין מה לחסום.
+    floorTopTwips:
+      reading.page.effectiveTopTwips > reading.page.topTwips ? reading.page.effectiveTopTwips : 0,
+    floorBottomTwips:
+      reading.page.effectiveBottomTwips > reading.page.bottomTwips
+        ? reading.page.effectiveBottomTwips
+        : 0,
     textTopPx: topMarginTwips * pxPerTwip,
     textHeightPx: Math.max(0, (pageHeightTwips - topMarginTwips - bottomMarginTwips) * pxPerTwip),
     pxPerUnit: pxPerTwip * twipsPerUnit(unit.value),
@@ -253,9 +281,17 @@ interface Handle {
   label: string;
   posTwips: number;
   valueTwips: number;
+  minValueTwips: number;
   maxValueTwips: number;
+  /** למה הידית נעצרת, כשיש רצפה. ריק כשאין. */
+  floorHint: string;
   px: number;
 }
+
+const FLOOR_HINT: Record<HandleId, string> = {
+  'margin-top': 'הכותרת העליונה אינה מאפשרת פחות',
+  'margin-bottom': 'הכותרת התחתונה אינה מאפשרת פחות',
+};
 
 const handles = computed<Handle[]>(() => {
   const geo = geometry.value;
@@ -266,7 +302,9 @@ const handles = computed<Handle[]>(() => {
       label: 'שוליים עליונים',
       posTwips: geo.topMarginTwips,
       valueTwips: geo.topMarginTwips,
-      maxValueTwips: geo.pageHeightTwips - geo.bottomMarginTwips,
+      minValueTwips: geo.floorTopTwips,
+      maxValueTwips: Math.max(0, geo.pageHeightTwips - geo.bottomMarginTwips - MIN_TEXT_AREA_TWIPS),
+      floorHint: geo.floorTopTwips > 0 ? FLOOR_HINT['margin-top'] : '',
       px: toPx(geo.topMarginTwips),
     },
     {
@@ -274,7 +312,9 @@ const handles = computed<Handle[]>(() => {
       label: 'שוליים תחתונים',
       posTwips: geo.pageHeightTwips - geo.bottomMarginTwips,
       valueTwips: geo.bottomMarginTwips,
-      maxValueTwips: geo.pageHeightTwips - geo.topMarginTwips,
+      minValueTwips: geo.floorBottomTwips,
+      maxValueTwips: Math.max(0, geo.pageHeightTwips - geo.topMarginTwips - MIN_TEXT_AREA_TWIPS),
+      floorHint: geo.floorBottomTwips > 0 ? FLOOR_HINT['margin-bottom'] : '',
       px: toPx(geo.pageHeightTwips - geo.bottomMarginTwips),
     },
   ];
@@ -292,6 +332,7 @@ function clampValue(id: HandleId, valueTwips: number): number {
   return clampMargin(valueTwips, {
     pageWidthTwips: geo.pageHeightTwips,
     otherMarginTwips: id === 'margin-top' ? geo.bottomMarginTwips : geo.topMarginTwips,
+    minTwips: id === 'margin-top' ? geo.floorTopTwips : geo.floorBottomTwips,
   });
 }
 
@@ -425,6 +466,12 @@ async function commit(id: HandleId, valueTwips: number): Promise<void> {
 
 function round2(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+/** „שוליים עליונים: 1.17 ס"מ (הכותרת העליונה אינה מאפשרת פחות)”. */
+function handleTitle(handle: Handle): string {
+  const base = `${handle.label}: ${measureLabel(handle.valueTwips, unit.value)}`;
+  return handle.floorHint ? `${base} (${handle.floorHint})` : base;
 }
 </script>
 

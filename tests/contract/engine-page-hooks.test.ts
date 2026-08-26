@@ -26,6 +26,11 @@ const ENGINE = join(process.cwd(), 'node_modules/@superdoc/docx-engine/dist/docx
 const SUPERDOC_TYPES = join(process.cwd(), 'node_modules/superdoc/dist/superdoc/src');
 
 const bundle = readFileSync(ENGINE, 'utf8');
+/** האריזה הציבורית — זו שאנחנו מייבאים, ושדרכה `activeEditor` מגיע. */
+const superdocBundle = readFileSync(
+  join(process.cwd(), 'node_modules/superdoc/dist/superdoc.es.js'),
+  'utf8',
+);
 
 /** כל קובצי הטיפוסים של superdoc — הנתיב הפנימי אינו חוזה, ולכן סורקים. */
 function typeDeclarations(dir = SUPERDOC_TYPES): string {
@@ -65,5 +70,40 @@ describe('העיגון של העמוד המצויר', () => {
 
   it('`viewport.observe` עדיין שם — בלעדיו הסרגל לא היה יודע על שינוי זום', () => {
     expect(types).toContain('observe(listener: () => void): () => void');
+  });
+});
+
+/**
+ * העיגון השני: המדידה של השוליים ה**אפקטיביים**.
+ *
+ * `activeEditor.pageMetrics.getSnapshot()` מחזיר `pages[0].base.marginTopPx` —
+ * ושם, בשונה מ-`sections.list()`, מופיע הערך אחרי הרצפה שהמנוע כופה כשיש
+ * כותרת עליונה. זה מה שמונע מהסרגל להבטיח שוליים שהטקסט לא יזוז אליהם.
+ *
+ * כמו `data-page-index`, גם זה אינו חוזה מוקלד: `pageMetrics` אינו מופיע
+ * ב-`.d.ts` של `superdoc`. הקריאה עצמה מתגוננת ויש לה נפילה אחורה
+ * (`readEffectiveMargins` ב-page-setup.ts), ולכן שדרוג שישמיט אותה **לא**
+ * ישבור כלום — הסרגל פשוט יחזור לשקר בשקט. הבדיקה הזאת היא מה שהופך את
+ * ההשמטה לרועשת.
+ */
+describe('המדידה של השוליים האפקטיביים', () => {
+  it('`pageMetrics` עדיין באריזה של superdoc', () => {
+    // כאן הוא נחשף על `activeEditor`, וזה הצד שאנחנו קוראים.
+    expect(bundle.length).toBeGreaterThan(1_000_000);
+    expect(superdocBundle).toContain('pageMetrics');
+    expect(superdocBundle).toContain('getSnapshot');
+  });
+
+  it('התצלום עדיין נושא את השוליים בפיקסלים', () => {
+    // `marginTopPx`/`marginBottomPx` הם השדות שהסרגל קורא. הם נבנים במנוע.
+    expect(bundle).toContain('marginTopPx');
+    expect(bundle).toContain('marginBottomPx');
+  });
+
+  it('הרצפה עצמה עדיין בקוד — `headerDistance + גובה הכותרת`', () => {
+    // התיעוד של מנוע הפריסה מנסח את זה כ-`Math.max(top, headerDistance + h)`,
+    // וזה השם שנושא את התוצאה. בלעדיו אין למי להתאים את החסם.
+    expect(bundle).toContain('pendingTopMargin');
+    expect(bundle).toContain('activeHeaderDistance');
   });
 });

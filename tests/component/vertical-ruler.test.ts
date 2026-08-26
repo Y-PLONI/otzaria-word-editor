@@ -74,7 +74,7 @@ function engineHost(pages = 1): HTMLElement {
   return host;
 }
 
-function reading(): RulerReading {
+function reading(effective: { top?: number; bottom?: number } = {}): RulerReading {
   return {
     page: {
       pageWidthTwips: PAGE_WIDTH_TWIPS,
@@ -83,6 +83,8 @@ function reading(): RulerReading {
       rightTwips: A_INCH,
       topTwips: A_INCH,
       bottomTwips: A_INCH,
+      effectiveTopTwips: effective.top ?? A_INCH,
+      effectiveBottomTwips: effective.bottom ?? A_INCH,
       direction: 'rtl',
     },
     indents: null,
@@ -241,5 +243,74 @@ describe('מקלדת', () => {
 
     const input = harness.superdoc.inputs('sections.setPageMargins')[0] as { bottom: number };
     expect(input.bottom).toBeCloseTo(2.79 / 2.54, 3);
+  });
+});
+
+/**
+ * הרצפה של הכותרת.
+ *
+ * נמדד על ה-`dist` הארוז: כותרת עליונה ריקה במרחק חצי אינץ' מרימה את ראש
+ * הטקסט ל-66.4px, וכל ערך שוליים קטן מזה **אינו מזיז את הטקסט**. סרגל
+ * שממשיך לגרור שם מבטיח מידה שאין לה כיסוי — וזה מה שמשתמש רואה כ„הסרגל לא
+ * מעלה את הטקסט מעל קו מסוים”.
+ */
+describe('רצפת הכותרת', () => {
+  /** 66.4px = 996 twips. */
+  const FLOOR_TWIPS = 996;
+
+  it('הרצועה מציירת את מה שנמדד, ולא את מה שכתוב במסמך', async () => {
+    const harness = await mountRuler({
+      reading: { ...reading({ top: FLOOR_TWIPS }), page: { ...reading({ top: FLOOR_TWIPS }).page, topTwips: 720 } },
+    });
+
+    const area = harness.wrapper.find('.doc-vruler__text-area').element as HTMLElement;
+    // 996 twips = 66.4px, ולא 48px שהם השוליים שכתובים במסמך.
+    expect(Math.round(Number.parseFloat(area.style.top))).toBe(66);
+  });
+
+  it('הידית נעצרת על הרצפה, ואינה יורדת מתחתיה', async () => {
+    const base = reading({ top: FLOOR_TWIPS });
+    const harness = await mountRuler({
+      reading: { ...base, page: { ...base.page, topTwips: 720 } },
+    });
+    const handle = handleByLabel(harness.wrapper, 'שוליים עליונים')!;
+
+    handle.element.dispatchEvent(pointer('pointerdown', 0, { button: 0 }));
+    await settle();
+    window.dispatchEvent(pointer('pointermove', -500)); // הרבה מעל ראש העמוד
+    await settle();
+    window.dispatchEvent(pointer('pointerup', -500));
+    await settle();
+
+    const input = harness.superdoc.inputs('sections.setPageMargins')[0] as { top: number };
+    expect(input.top).toBeCloseTo(FLOOR_TWIPS / 1440, 6);
+  });
+
+  it('הידית מספרת למה היא נעצרת', async () => {
+    const base = reading({ top: FLOOR_TWIPS });
+    const harness = await mountRuler({
+      reading: { ...base, page: { ...base.page, topTwips: 720 } },
+    });
+
+    const handle = handleByLabel(harness.wrapper, 'שוליים עליונים')!;
+    expect(handle.attributes('title')).toContain('הכותרת העליונה אינה מאפשרת פחות');
+    expect(handle.attributes('aria-valuemin')).toBe('1.76');
+  });
+
+  it('בלי רצפה פעילה הידית מגיעה עד 0, וההסבר אינו מופיע', async () => {
+    const harness = await mountRuler();
+    const handle = handleByLabel(harness.wrapper, 'שוליים עליונים')!;
+
+    expect(handle.attributes('aria-valuemin')).toBe('0');
+    expect(handle.attributes('title')).not.toContain('אינה מאפשרת');
+
+    handle.element.dispatchEvent(pointer('pointerdown', 0, { button: 0 }));
+    await settle();
+    window.dispatchEvent(pointer('pointermove', -500));
+    await settle();
+    window.dispatchEvent(pointer('pointerup', -500));
+    await settle();
+
+    expect(harness.superdoc.inputs('sections.setPageMargins')[0]).toMatchObject({ top: 0 });
   });
 });

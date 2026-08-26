@@ -215,22 +215,63 @@ export function snapTwips(twips: number, unit: RulerUnit, free = false): number 
 }
 
 /**
- * הרוחב המינימלי שנשאר לטקסט. שוליים או כניסות שמצטמצמים אל מתחת לזה יוצרים
- * עמוד בלי עמודת טקסט — Word אינו מרשה את זה, וגם המנוע היה מקבל את הערך
- * ומצייר מסמך שאי אפשר לכתוב בו.
+ * הרוחב המינימלי שנשאר לטקסט בין שני סמני כניסה. כניסות שנפגשות יוצרות פסקה
+ * שאי אפשר לכתוב בה, ודיאלוג הפסקה של Word אינו מרשה את זה.
  */
 export const MIN_TEXT_WIDTH_TWIPS = Math.round(TWIPS_PER_CM); // ס"מ אחד
+
+/**
+ * המידה המינימלית שחייבת להישאר לטקסט **בין שני שוליים**, ולמה היא גדולה
+ * מזו של הכניסות.
+ *
+ * זה לא חסם של נוחות אלא של הישרדות המסמך. נמדד על ה-`dist` הארוז, A4 עם
+ * שוליים תחתונים של אינץ':
+ *
+ *     top = 10.68"  → גובה טקסט 1.3px  → 4 עמודים, הטקסט מצויר
+ *     top = 10.70"  → גובה טקסט ‎-0.7px → **אפס עמודים**
+ *
+ * ואחרי הקריסה: `setPageMargins({top: 1})` מחזיר `success: true`,
+ * `pageMetrics` נשאר קפוא על התצלום האחרון, ו-`[data-page-index]` נשאר ריק.
+ * כלומר המסמך נעלם מהמסך ואינו חוזר עד טעינה מחדש. ראו docs/engine-gaps.md.
+ *
+ * חצי אינץ' הוא 48px מעל הצוק, וזה עדיין מתיר פריסות קיצוניות לגמרי. ס"מ
+ * אחד (37.8px) עבר במדידה, אבל מרווח של פחות מפיקסל מקריסה בלתי הפיכה אינו
+ * חסם — הוא צירוף מקרים.
+ */
+export const MIN_TEXT_AREA_TWIPS = 720; // חצי אינץ'
 
 export interface MarginBounds {
   pageWidthTwips: number;
   /** השוליים שבצד השני, שאינם זזים בגרירה הזאת. */
   otherMarginTwips: number;
+  /**
+   * הרצפה שהמנוע כופה על הצד הזה, אם יש כזאת. בציר האנכי היא
+   * `headerDistance + גובה הכותרת`: מתחתיה הטקסט פשוט אינו זז, והידית הייתה
+   * מבטיחה מידה שאין לה כיסוי. ראו engine/page-ruler.ts.
+   */
+  minTwips?: number;
 }
 
-/** גבולות הגרירה של ידית שוליים: לא שלילי, ולא על חשבון עמודת הטקסט. */
+/** גבולות הגרירה של ידית שוליים: לא מתחת לרצפה, ולא על חשבון עמודת הטקסט. */
 export function clampMargin(twips: number, bounds: MarginBounds): number {
-  const max = bounds.pageWidthTwips - bounds.otherMarginTwips - MIN_TEXT_WIDTH_TWIPS;
-  return Math.round(Math.min(Math.max(0, twips), Math.max(0, max)));
+  const min = Math.max(0, bounds.minTwips ?? 0);
+  // הרצפה גוברת על התקרה: במסמך שכבר חנוק החסם העליון יוצא מתחתיה, וגרירה
+  // הייתה מקבלת ערך שלילי.
+  const max = Math.max(min, bounds.pageWidthTwips - bounds.otherMarginTwips - MIN_TEXT_AREA_TWIPS);
+  return Math.round(Math.min(Math.max(twips, min), max));
+}
+
+/**
+ * האם זוג שוליים משאיר מקום לטקסט. `null` = אין מידע על גודל העמוד, ואז אין
+ * על מה להתלונן.
+ */
+export function marginsLeaveRoom(
+  pageTwips: number | null,
+  firstTwips: number,
+  secondTwips: number,
+): boolean | null {
+  if (pageTwips === null || !(pageTwips > 0)) return null;
+  return pageTwips - firstTwips - secondTwips >= MIN_TEXT_AREA_TWIPS;
 }
 
 export interface IndentBounds {
