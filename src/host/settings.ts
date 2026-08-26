@@ -59,6 +59,23 @@ export async function saveAutosaveEnabled(enabled: boolean): Promise<void> {
   await tryCall('storage.set', { key: AUTOSAVE_KEY, value: enabled });
 }
 
+const RULER_KEY = 'ruler-visible';
+
+/**
+ * האם סרגל המידות מוצג. ברירת המחדל **כבויה**, כמו ב-Word מ-2013 ואילך.
+ *
+ * למה זה נשמר בכלל: מצב הסרגל יושב על מופע המנוע (`config.rulers`), ומופע חדש
+ * נולד בכל פתיחת מסמך — כלומר בלי הזיכרון הזה הסרגל היה נכבה בכל פעם שמסמך
+ * נפתח. ב-Word זו העדפה של התוכנה ולא תכונה של המסמך, וכך גם כאן.
+ */
+export async function loadRulerVisible(): Promise<boolean> {
+  return (await tryCall<unknown>('storage.get', { key: RULER_KEY })) === true;
+}
+
+export async function saveRulerVisible(visible: boolean): Promise<void> {
+  await tryCall('storage.set', { key: RULER_KEY, value: visible });
+}
+
 /** נשמר בנפרד מ-tryCall כדי שכשל בכתיבה לא ייעלם בשקט בקריאה מפורשת. */
 export async function setSetting(key: string, value: unknown): Promise<void> {
   await call('storage.set', { key, value });

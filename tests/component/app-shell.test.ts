@@ -170,6 +170,8 @@ vi.mock('../../src/host/settings', () => ({
   saveAutosaveEnabled: async (enabled: boolean) => {
     stub.persistedAutosave.push(enabled);
   },
+  loadRulerVisible: async () => false,
+  saveRulerVisible: async () => {},
 }));
 
 // הייבוא **אחרי** ה-mocks במכוון (הם מורמים בכל מקרה, וזה הסדר שקורא נכון).

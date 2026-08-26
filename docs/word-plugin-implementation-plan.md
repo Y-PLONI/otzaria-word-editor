@@ -656,7 +656,11 @@ interface DocumentSession {
 - [ ] מספר עמודים מ־`onPaginationUpdate`; עמוד פעיל רק אם קיים מקור ציבורי אמין.
 - [ ] ספירת מילים/תווים דרך Document API (`getText` או info), עם debounce ולא בכל
   keystroke. לא לספור HTML.
-- [ ] ruler ו־formatting marks דרך controllers/commands ציבוריים.
+- [x] ruler ו־formatting marks דרך controllers/commands ציבוריים. הפקודה `ruler`
+  מנותבת ל־`SuperDoc.toggleRuler()` והמצב שלה הוא `config.rulers`, אבל הסרגל
+  המובנה **מושתק** ב־`ui: false` — ולכן הציור הוא שלנו
+  (`src/ui/shell/DocumentRuler.vue`, `VerticalRuler.vue`), מעל מדידה אחת של
+  העמוד המצויר. ראו „הסרגל” ב־[engine-gaps.md](engine-gaps.md).
 - [ ] Ctrl/Cmd+F, Ctrl/Cmd+H, Ctrl/Cmd+S, Ctrl/Cmd+Z/Y; לא לדרוס קיצור כשהפוקוס
   בתוך input והפעולה אינה עריכת מסמך.
 - [ ] Focus mode ו־compact Ribbon הם state של ה־shell.

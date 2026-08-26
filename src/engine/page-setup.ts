@@ -216,6 +216,10 @@ export const COLUMN_GAP_TWIPS = 720;
 interface SectionItem {
   address?: unknown;
   pageSetup?: { width?: number; height?: number; orientation?: string };
+  /** שולי הדף, באינצ'ים — אותה יחידה שבה `setPageMargins` מקבל אותם. */
+  margins?: { top?: number; right?: number; bottom?: number; left?: number };
+  /** `'rtl'` במסמך עברי. נכתב על ידי `<w:bidi>` ב-`sectPr`. */
+  sectionDirection?: string;
   lineNumbering?: {
     enabled?: boolean;
     countBy?: number;
@@ -404,6 +408,140 @@ export function applyMarginPreset(
         bottom: twipsToInches(preset.bottom),
         left: twipsToInches(preset.left),
       });
+  });
+}
+
+/** גיאומטריית הדף שהסרגל מצייר. הכול ב-twips, ההמרה מאינצ'ים כאן. */
+export interface PageMarginsState {
+  pageWidthTwips: number;
+  /** גובה הדף — מה שהסרגל האנכי מצייר עליו. */
+  pageHeightTwips: number;
+  leftTwips: number;
+  rightTwips: number;
+  topTwips: number;
+  bottomTwips: number;
+  /** כיוון המקטע. קובע איזה צד של העמוד הוא „ההתחלה” בסרגל. */
+  direction: 'rtl' | 'ltr';
+}
+
+/** אינצ'ים מ-`sections.list()` → twips שלמים. ערך פסול מוחזר כ-`null`. */
+function inchesToTwips(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return null;
+  return Math.round(value * TWIPS_PER_INCH);
+}
+
+/**
+ * רוחב הדף, השוליים והכיוון של המקטע הראשון — מה שהסרגל צריך כדי לצייר.
+ *
+ * המקטע הראשון ולא „המקטע שהסמן בו”, מאותה סיבה שכל המודול הזה פועל על כל
+ * המקטעים: מיפוי הסמן למקטע דורש את אינדקס הפסקה שלו, וה-selection API אינו
+ * חושף אותו (ראו „על מה זה מוחל” בהערת הפתיחה). במסמך רגיל יש מקטע אחד.
+ *
+ * `null` הוא מצב רגיל ולא כשל: כך זה נראה כשהמסמך עדיין נטען. הסרגל פשוט
+ * אינו מצייר — אין לו על מה להתלונן.
+ */
+export async function readPageMargins(host: PageSetupTarget): Promise<PageMarginsState | null> {
+  const list = (host as PageSetupHost | null | undefined)?.activeEditor?.doc?.sections?.list;
+  if (typeof list !== 'function') return null;
+
+  let first: SectionItem | undefined;
+  try {
+    first = (await list())?.items?.[0];
+  } catch {
+    return null;
+  }
+  if (!first) return null;
+
+  const pageWidthTwips = inchesToTwips(first.pageSetup?.width);
+  const pageHeightTwips = inchesToTwips(first.pageSetup?.height);
+  const leftTwips = inchesToTwips(first.margins?.left);
+  const rightTwips = inchesToTwips(first.margins?.right);
+  const topTwips = inchesToTwips(first.margins?.top);
+  const bottomTwips = inchesToTwips(first.margins?.bottom);
+  // הכול או כלום: סרגל שמצייר מידת דף אמיתית לצד שוליים משוערים הוא סרגל
+  // שמראה מספרים שאינם המסמך.
+  if (
+    pageWidthTwips === null ||
+    pageHeightTwips === null ||
+    leftTwips === null ||
+    rightTwips === null ||
+    topTwips === null ||
+    bottomTwips === null
+  ) {
+    return null;
+  }
+  if (pageWidthTwips <= 0 || pageHeightTwips <= 0) return null;
+
+  return {
+    pageWidthTwips,
+    pageHeightTwips,
+    leftTwips,
+    rightTwips,
+    topTwips,
+    bottomTwips,
+    direction: first.sectionDirection === 'rtl' ? 'rtl' : 'ltr',
+  };
+}
+
+/** מה שגרירה בסרגל משנה. מה שלא נשלח — לא נגעו בו. */
+export interface PageMarginsInput {
+  leftTwips?: number;
+  rightTwips?: number;
+  topTwips?: number;
+  bottomTwips?: number;
+}
+
+/**
+ * שוליים מגרירה בסרגל — האופקי (ימין/שמאל) או האנכי (מעלה/מטה).
+ *
+ * **רק הצדדים שנגררו נשלחים**, וזה נמדד ולא הונח: `setPageMargins({left, right})`
+ * החזיר `success: true` והשאיר את `w:top`/`w:bottom` כפי שהיו (הם נשארו 96px
+ * בתצלום המדדים של המנוע). כלומר הפעולה הזאת **אינה** מהמשפחה שמחליפה את
+ * האלמנט כולו, בשונה מ-`setIndentation` — ולכן אין צורך לשלוח מצב מלא, ואין
+ * סיכון למחוק צד שהמשתמש לא נגע בו.
+ *
+ * מוחל על כל המקטעים, כמו כל שאר המודול — ראו „על מה זה מוחל”. גרירה בסרגל
+ * ו„שוליים ← רגיל” ברצועה חייבות להתנהג אותו דבר; שתי התנהגויות לאותה פעולה
+ * הן באג בפני עצמו.
+ */
+export function applyPageMargins(
+  host: PageSetupTarget,
+  input: PageMarginsInput,
+): Promise<CommandOutcome> {
+  const failedAction = 'שינוי השוליים נכשל';
+  const sides = [
+    ['left', input.leftTwips],
+    ['right', input.rightTwips],
+    ['top', input.topTwips],
+    ['bottom', input.bottomTwips],
+  ] as const;
+
+  const payload: Record<string, number> = {};
+  for (const [side, twips] of sides) {
+    if (twips === undefined) continue;
+    if (!Number.isInteger(twips) || twips < 0) {
+      return Promise.resolve({
+        ok: false,
+        message: `${failedAction}: השוליים חייבים להיות מספרים שלמים לא-שליליים`,
+        reason: 'invalid-input',
+      });
+    }
+    payload[side] = twipsToInches(twips);
+  }
+
+  if (Object.keys(payload).length === 0) {
+    // באג בקוד שלנו: ידית שנגררה חייבת לשלוח צד. המנוע היה דוחה קריאה ריקה.
+    return Promise.resolve({
+      ok: false,
+      message: `${failedAction}: לא נמסר אף צד לשינוי`,
+      reason: 'invalid-input',
+    });
+  }
+
+  return applyToSections(host, failedAction, (sections) => {
+    const setPageMargins = sections.setPageMargins;
+    if (!setPageMargins) return null;
+    return (_section, target) => setPageMargins({ target, ...payload });
   });
 }
 

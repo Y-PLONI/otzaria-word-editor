@@ -132,6 +132,8 @@ vi.mock('../../src/host/settings', () => ({
   forgetLastDocument: async () => {},
   loadAutosaveEnabled: async () => true,
   saveAutosaveEnabled: async () => {},
+  loadRulerVisible: async () => false,
+  saveRulerVisible: async () => {},
 }));
 
 vi.mock('../../src/host/otzaria-client', async (importOriginal) => ({

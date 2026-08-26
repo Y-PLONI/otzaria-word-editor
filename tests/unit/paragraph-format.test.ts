@@ -21,6 +21,7 @@ import {
   clearParagraphSpacing,
   emptyParagraphFormat,
   readParagraphFormat,
+  readParagraphIndents,
   removeParagraphTabStop,
 } from '../../src/engine/paragraph-format';
 
@@ -286,6 +287,38 @@ describe('readParagraphFormat', () => {
     }
   });
 
+  it('הצומת מזוהה גם לפי `paragraphIds.paraId` — זו הצורה שהמנוע מחזיר', async () => {
+    // נמדד על המנוע: `doc.get()` מחזיר
+    // `{ kind:'paragraph', paragraphIds:{ paraId:'p3' }, paragraph:{ props } }`
+    // — בלי `id` בכלל, ועם `indent` ולא `indentation`. הקריאה שחיפשה `id`
+    // ו-`indentation` החזירה אפסים על **כל** מסמך, והדיאלוג שאושר אחריה מחק
+    // כניסות שהגיעו מ-Word.
+    const { host } = fakeDoc({
+      get: {
+        body: [
+          { kind: 'paragraph', paragraphIds: { paraId: 'other' }, paragraph: { inlines: [] } },
+          {
+            kind: 'paragraph',
+            paragraphIds: { paraId: 'p3' },
+            paragraph: { inlines: [], props: { indent: { left: 36, hanging: 18 }, bidi: true } },
+          },
+        ],
+      },
+    });
+
+    const result = await readParagraphFormat(host);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.snapshot.indentation).toEqual({
+        leftTwips: 720,
+        rightTwips: 0,
+        firstLineTwips: 0,
+        hangingTwips: 360,
+      });
+    }
+  });
+
   it('מסמך בלי הפסקה מחזיר ברירות מחדל ולא זריקה', async () => {
     const { host } = fakeDoc({ get: { body: [] } });
 
@@ -394,5 +427,74 @@ describe('clears and failure paths', () => {
 describe('unit constants', () => {
   it('TWIPS_PER_CM הוא 1440 / 2.54 — הקובע את ההמרה של הדיאלוג', () => {
     expect(TWIPS_PER_CM).toBeCloseTo(566.93, 2);
+  });
+});
+
+describe('readParagraphIndents', () => {
+  it('מחזירה את הכניסות ואת היעד לכתיבה', async () => {
+    const { host } = fakeDoc({
+      get: {
+        body: [
+          {
+            kind: 'paragraph',
+            paragraphIds: { paraId: 'p3' },
+            paragraph: { props: { indent: { left: 36, right: 18 }, bidi: true } },
+          },
+        ],
+      },
+    });
+
+    const reading = await readParagraphIndents(host);
+
+    expect(reading?.indents).toEqual({
+      leftTwips: 720,
+      rightTwips: 360,
+      firstLineTwips: 0,
+      hangingTwips: 0,
+      bidi: true,
+    });
+    expect(reading?.target).toMatchObject({ kind: 'block', nodeType: 'paragraph', nodeId: 'p3' });
+  });
+
+  it('פסקה בלי כניסות היא אפסים, לא היעדר', async () => {
+    const { host } = fakeDoc({
+      get: { body: [{ kind: 'paragraph', paragraphIds: { paraId: 'p3' }, paragraph: {} }] },
+    });
+
+    expect((await readParagraphIndents(host))?.indents.leftTwips).toBe(0);
+  });
+
+  it('אין סמן במסמך — `null`, ובלי הודעת כשל', async () => {
+    // הסרגל רץ ברקע ואינו פעולה של המשתמש: „יש למקם את הסמן במסמך” בשורת
+    // המצב על כל לחיצה מחוץ למסמך היה רעש, לא עזרה.
+    const host = {
+      activeEditor: {
+        doc: {
+          selection: { current: async () => ({ empty: true, target: null }) },
+          get: async () => ({ body: [] }),
+        },
+      },
+    };
+
+    expect(await readParagraphIndents(host as never)).toBeNull();
+  });
+
+  it('`get` שזורק מוחזר כ-`null` ואינו מפיל את הסרגל', async () => {
+    const host = {
+      activeEditor: {
+        doc: {
+          selection: { current: async () => CARET },
+          get: () => {
+            throw new Error('boom');
+          },
+        },
+      },
+    };
+
+    expect(await readParagraphIndents(host as never)).toBeNull();
+  });
+
+  it('גרסה בלי `get` אינה זורקת', async () => {
+    expect(await readParagraphIndents({ activeEditor: { doc: {} } } as never)).toBeNull();
   });
 });

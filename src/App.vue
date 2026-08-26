@@ -50,11 +50,42 @@
       @open-library="onOpenLibrary"
     />
 
-    <!-- אזור המסמך (SuperDoc Editor Stack) -->
-    <main
-      ref="editorStackRef"
-      class="editor-stack"
-    />
+    <!-- שורת הסרגל האופקי. הפינה שלפניו רחבה כמו הסרגל האנכי, וכך שניהם
+         מתחילים בדיוק במקום שבו אזור המסמך מתחיל — כמו ב-Word. -->
+    <div class="ruler-row">
+      <div
+        v-show="isRulerVisible"
+        class="ruler-corner"
+      />
+      <DocumentRuler
+        :visible="isRulerVisible"
+        :reading="rulerReading"
+        :host="rulerHost"
+        :viewport-source="rulerViewport"
+        :unit="rulerUnit"
+        :zoom="zoom.value"
+        :editable="isDocumentEditable"
+        @changed="onRulerChanged"
+      />
+    </div>
+
+    <!-- אזור המסמך: הסרגל האנכי ולצדו ה-stack שהמנוע מצייר בתוכו -->
+    <div class="editor-area">
+      <VerticalRuler
+        :visible="isRulerVisible"
+        :reading="rulerReading"
+        :host="rulerHost"
+        :viewport-source="rulerViewport"
+        :unit="rulerUnit"
+        :zoom="zoom.value"
+        :editable="isDocumentEditable"
+        @changed="onRulerChanged"
+      />
+      <main
+        ref="editorStackRef"
+        class="editor-stack"
+      />
+    </div>
 
     <LinkDialog
       :is-open="linkDialog.isOpen.value"
@@ -110,6 +141,8 @@ import { ref, provide, onMounted, onUnmounted, computed, shallowRef } from 'vue'
 import TitleBar from './ui/shell/TitleBar.vue';
 import Ribbon from './ui/ribbon/Ribbon.vue';
 import StatusBar from './ui/shell/StatusBar.vue';
+import DocumentRuler from './ui/shell/DocumentRuler.vue';
+import VerticalRuler from './ui/shell/VerticalRuler.vue';
 import FindReplaceDialog from './ui/panels/FindReplaceDialog.vue';
 import AboutDialog from './ui/panels/AboutDialog.vue';
 import LinkDialog from './ui/panels/LinkDialog.vue';
@@ -159,6 +192,17 @@ import {
 import { FALLBACK_ZOOM, observeZoom, type ZoomState } from './engine/zoom';
 import { createZoomCenter, type ZoomCenter } from './engine/zoom-center';
 import {
+  createRulerModel,
+  paintedHost,
+  readRulerUnit,
+  type RulerModel,
+  type RulerReading,
+  type ViewportSource,
+} from './engine/page-ruler';
+import { readPageMargins } from './engine/page-setup';
+import { readParagraphIndents } from './engine/paragraph-format';
+import type { RulerUnit } from './engine/ruler-geometry';
+import {
   applyHebrewDocumentDefaults,
   applyHebrewPaperSize,
 } from './engine/document-defaults';
@@ -183,6 +227,8 @@ import {
   forgetLastDocument,
   loadAutosaveEnabled,
   saveAutosaveEnabled,
+  loadRulerVisible,
+  saveRulerVisible,
 } from './host/settings';
 import { revealZone, type RevealZone } from './composables/focus-mode';
 import { selectWholeDocument } from './engine/clipboard';
@@ -289,6 +335,33 @@ const zoom = ref<ZoomState>({ ...FALLBACK_ZOOM });
 const canUndo = ref(false);
 const canRedo = ref(false);
 
+/**
+ * סרגל המידות.
+ *
+ * ## מי בעל המצב
+ *
+ * **המנוע.** `ruler` היא פקודה ב-registry שלו, והיא מנותבת ל-
+ * `SuperDoc.toggleRuler()` שמחליף את `config.rulers`; המצב `active` של הפקודה
+ * נקרא מאותו דגל. נמדד על המנוע האמיתי שההרצה מודיעה למי שמאזין — כלומר
+ * הכפתור בלשונית „תצוגה” נדלק, והסרגל כאן מופיע, מאותו מקור אחד. הפיתוי היה
+ * להחזיק כאן `ref` משלנו ולקרוא ל-`toggleRuler` בצד; זה היה יוצר שני מצבים
+ * שיכולים להיפרד, ומצב שני הוא בדיוק מה שהופך פקד ל„לפעמים לא עובד”.
+ *
+ * מה שהמנוע **אינו** עושה הוא לצייר סרגל: `ui: false` מכבה את הסרגל המובנה
+ * שלו (הוא `suppressed` ולא רק כבוי), ולכן הכפתור עד עכשיו הדליק דגל שאיש לא
+ * הסתכל עליו. הציור הוא שלנו — ui/shell/DocumentRuler.vue.
+ */
+const isRulerVisible = ref(false);
+const rulerReading = shallowRef<RulerReading | null>(null);
+/** ה-host המצויר של המסמך הפתוח, ומקור אירועי הגיאומטריה. */
+const rulerHost = shallowRef<HTMLElement | null>(null);
+const rulerViewport = shallowRef<ViewportSource | null>(null);
+const rulerUnit = ref<RulerUnit>('cm');
+/** `false` במסמך שפתוח לקריאה בלבד — אז הידיות אינן נגררות. */
+const isDocumentEditable = ref(true);
+/** ההעדפה שנשמרת בין הפעלות. ראו host/settings.ts. */
+let rulerPreference = false;
+
 const saveSnapshot = ref<SaveSnapshot>({
   state: 'idle',
   isDirty: false,
@@ -303,6 +376,8 @@ let save: SaveCoordinator | null = null;
 let searchAdapter: SearchAdapter | null = null;
 /** מודד את המסמך הפתוח. מוחלף בכל מעבר מסמך, כמו אדפטר החיפוש. */
 let metrics: DocMetricsAdapter | null = null;
+/** קורא את מצב הסרגל של המסמך הפתוח. שייך ל-session, כמו המודד. */
+let ruler: RulerModel | null = null;
 
 /** מרכוז העמוד בזום. יחיד למאגס — אינו מוחלף בין מסמכים. */
 let zoomCenter: ZoomCenter | null = null;
@@ -472,9 +547,78 @@ async function openDocument(file?: UserFile): Promise<boolean> {
     }
   });
 
+  /**
+   * הסרגל של ה-session: הוא קורא את המקטע ואת הפסקה של **המסמך הזה**, ולכן
+   * הוא נבנה ונפרק איתו — אותה תבנית כמו המודד ואדפטר החיפוש, כולל המשתנה
+   * המקומי בפירוק (מסמך שנסגר אחרי שהבא נפתח אינו מפרק את הבא).
+   */
+  const sessionRuler = createRulerModel({
+    readPage: () => readPageMargins(editor.superdoc),
+    readIndents: () => readParagraphIndents(editor.superdoc),
+    onChange: (next) => {
+      rulerReading.value = next;
+    },
+  });
+  ruler = sessionRuler;
+  rulerHost.value = paintedHost(editor.ui);
+  rulerViewport.value = editor.ui as ViewportSource;
+  rulerUnit.value = readRulerUnit(editor.superdoc);
+  editor.onDispose(() => {
+    sessionRuler.dispose();
+    if (ruler === sessionRuler) {
+      ruler = null;
+      rulerReading.value = null;
+      rulerHost.value = null;
+      rulerViewport.value = null;
+    }
+  });
+
+  /**
+   * מצב הסרגל מגיע מהמנוע ולא ממתג שלנו — ראו `isRulerVisible`. ההרשמה כאן
+   * ולא ב-DocumentRuler.vue מפני שהיא גם **כותבת**: העדפת המשתמש נשמרת, וכל
+   * מסמך שנפתח מקבל אותה בחזרה (מופע חדש נולד עם `config.rulers: false`).
+   *
+   * נקודה אחת ויחידה שמשנה את המצב, ולא שלוש: מצב שנקבע בהשמה ישירה במקום
+   * אחד ובקריאה למודל במקום אחר הוא בדיוק איך שנוצר סרגל מוסתר שממשיך לקרוא
+   * את המסמך על כל תזוזת סמן.
+   */
+  const applyRulerVisible = (active: boolean): void => {
+    isRulerVisible.value = active;
+    sessionRuler.setEnabled(active);
+    if (rulerPreference === active) return;
+    rulerPreference = active;
+    void saveRulerVisible(active);
+  };
+
+  editor.onDispose(
+    adapter.observe('ruler', (state) => {
+      if (isRulerVisible.value !== state.active) applyRulerVisible(state.active);
+    })
+  );
+  applyRulerVisible(adapter.getState('ruler').active);
+  // ההעדפה חלה כאן, אחרי שה-observe רשום: `run` מחליף את הדגל במנוע, וההודעה
+  // חוזרת דרך אותו מסלול שהכפתור ברצועה עובר בו. `rulerPreference` נקרא לפני
+  // ההחלה, מפני שהיא עצמה כותבת אותו.
+  const wanted = rulerPreference;
+  if (wanted && !isRulerVisible.value) void adapter.run('ruler');
+
+  // מסמך שפתוח לקריאה בלבד — הידיות בסרגל אינן נגררות בו.
+  editor.onDispose(
+    adapter.observe('document-mode', (state) => {
+      isDocumentEditable.value = state.value !== 'viewing';
+    })
+  );
+  isDocumentEditable.value = adapter.getState('document-mode').value !== 'viewing';
+
   // עמוד הסמן מגיע מהבחירה, ולכן הוא נקרא כשהיא זזה. בלי ההאזנה המספר היה
-  // נכון רק ברגע שהמסמך נפתח.
-  editor.onDispose(editor.ui.selection.observe(() => sessionMetrics.noteSelectionChanged()));
+  // נכון רק ברגע שהמסמך נפתח. אותה האזנה מזינה גם את הסרגל — סמני הכניסה הם
+  // של הפסקה שהסמן בה.
+  editor.onDispose(
+    editor.ui.selection.observe(() => {
+      sessionMetrics.noteSelectionChanged();
+      sessionRuler.noteSelectionChanged();
+    })
+  );
 
   // גודל התצוגה: `observe` יורה מיד ואז על כל שינוי — כולל שינוי שלא בא
   // מאיתנו (התאמה לרוחב החלון), שאחרת היה משאיר את התווית על ערך שגוי.
@@ -491,6 +635,9 @@ async function openDocument(file?: UserFile): Promise<boolean> {
   // מדידה ראשונה, בלי להמתין לעריכה: מסמך שנפתח צריך להציג את מספר המילים
   // שלו. אם הפאסדה עוד לא מוכנה, הניסיון החוזר תלוי במעבר הפריסה הראשון.
   sessionMetrics.measureNow();
+  // אותו טעם, ואותו רגע: סרגל שנפתח על מסמך חדש צריך את השוליים שלו מיד ולא
+  // אחרי תזוזת הסמן הראשונה.
+  sessionRuler.refreshNow();
 
   const sessionSearch = createSearchAdapter(editor.ui);
   searchAdapter = sessionSearch;
@@ -863,6 +1010,17 @@ function onZoomChange(level: number): void {
 }
 
 /**
+ * אחרי גרירה בסרגל שנכתבה למסמך.
+ *
+ * הקריאה המיידית ולא ההמתנה ל-`onUpdate`: זו מגיעה בהשקטה של חצי שנייה, ובזמן
+ * הזה הידית הייתה קופצת בחזרה למקום הישן ואז שוב לחדש. הסמן אמור להישאר איפה
+ * שהמשתמש עזב אותו.
+ */
+function onRulerChanged(): void {
+  ruler?.refreshNow();
+}
+
+/**
  * דיווח לפקדי לשונית „אוצריא”.
  *
  * הצלחה אינה מכריזה על עצמה: התוצאה הנראית של „פתח ספרייה” ושל „חיפוש
@@ -1218,6 +1376,9 @@ onMounted(async () => {
     autosaveEnabled.value = await loadAutosaveEnabled();
     save.setAutosaveEnabled(autosaveEnabled.value);
 
+    // גם ההעדפה של הסרגל, ומאותו טעם: היא חלה על המסמך שנפתח מיד אחרי כאן.
+    rulerPreference = await loadRulerVisible();
+
     swap = createEditorSwap(editorStackRef.value, (host, source) =>
       createEditor({
         container: host,
@@ -1226,6 +1387,9 @@ onMounted(async () => {
         onUpdate: () => {
           save?.markDirty();
           metrics?.noteDocumentChanged();
+          // שוליים או כניסות יכולים להשתנות גם מפעולה ברצועה (גלריית
+          // „שוליים”, דיאלוג הפסקה) ולא רק מהסרגל עצמו.
+          ruler?.noteDocumentChanged();
         },
         // ה-callback נרשם פעם אחת, כאן, ולכן הוא מפנה למודד הנוכחי ולא
         // ל-session מסוים — בדיוק כמו `save?.markDirty()` שמעליו.
@@ -1280,17 +1444,48 @@ async function resolveLastDocument(): Promise<UserFile | undefined> {
   direction: rtl;
 }
 
+/* אזור המסמך: שורה של הסרגל האנכי וה-stack. `min-width: 0` על ה-stack הוא מה
+   שמאפשר לו להצטמצם — פריט flex אינו יורד מתחת לרוחב התוכן שלו בלעדיו, ומיכל
+   הגלילה של המנוע היה דוחף את הסרגל האנכי אל מחוץ למסך. */
+.editor-area {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 .editor-stack {
   position: relative;
   flex: 1 1 auto;
+  min-width: 0;
   min-height: 0;
   background: var(--color-surface-container-highest);
   overflow: hidden;
 }
 
-/* מצב מיקוד */
+/* שורת הסרגל האופקי */
+.ruler-row {
+  display: flex;
+  flex-shrink: 0;
+}
+
+/* הפינה שבין שני הסרגלים. אותו רוחב כמו הסרגל האנכי, ואותו רקע — כך הפינה
+   נראית כמו המשך שלהם ולא כמו חור. */
+.ruler-corner {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  background: var(--color-surface-container-highest);
+  border-block-end: 1px solid var(--color-outline-variant);
+  border-inline-end: 1px solid var(--color-outline-variant);
+}
+
+/* מצב מיקוד. הסרגל מצטרף לפסים העליונים: הוא חלק מאותה קבוצה שנחשפת בקצה
+   העליון, ומצב מיקוד שמשאיר סרגל מידות על המסך אינו מצב מיקוד. */
 .word-app-shell.focus-mode :deep(.word-titlebar),
 .word-app-shell.focus-mode :deep(.word-ribbon-container),
+.word-app-shell.focus-mode :deep(.doc-ruler),
+.word-app-shell.focus-mode :deep(.doc-vruler),
+.word-app-shell.focus-mode .ruler-corner,
 .word-app-shell.focus-mode :deep(.word-statusbar) {
   opacity: 0;
   pointer-events: none;
@@ -1301,6 +1496,9 @@ async function resolveLastDocument(): Promise<UserFile | undefined> {
    עכבר החזירה את שלושת הפסים — ומצב המיקוד לא הסתיר כלום. */
 .word-app-shell.focus-mode.reveal-top :deep(.word-titlebar),
 .word-app-shell.focus-mode.reveal-top :deep(.word-ribbon-container),
+.word-app-shell.focus-mode.reveal-top :deep(.doc-ruler),
+.word-app-shell.focus-mode.reveal-top :deep(.doc-vruler),
+.word-app-shell.focus-mode.reveal-top .ruler-corner,
 .word-app-shell.focus-mode.reveal-bottom :deep(.word-statusbar) {
   opacity: 1;
   pointer-events: auto;

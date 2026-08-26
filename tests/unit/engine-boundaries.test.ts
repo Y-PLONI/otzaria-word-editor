@@ -119,3 +119,45 @@ describe('עברות שכבת הכותרות', () => {
     );
   });
 });
+
+/**
+ * החריגה השנייה: מדידת המלבן של העמוד המצויר.
+ *
+ * מה שמצדיק אותה: לסרגל אין ערך אם הוא אינו מיושר לטקסט, ואין API ציבורי
+ * שמחזיר את המלבן של העמוד על המסך. החישוב החלופי — רוחב עמוד כפול זום,
+ * ממורכז במיכל — נמדד מול המנוע ונמצא שגוי בכל זום שאינו 100%, מפני שהמנוע
+ * מיישם זום ב-`transform: scale()` על wrapper רחב מהתוכן הנראה. הפירוט,
+ * כולל המספרים שנמדדו, בהערת הפתיחה של engine/page-ruler.ts.
+ *
+ * מה שהחריגה **אינה** מתירה, וזה מה שנמדד כאן: מקום שני שנוגע באותו עיגון,
+ * וכל דבר שאינו קריאת גיאומטריה. `getBoundingClientRect` הוא קריאה טהורה;
+ * בנייה, מחיקה או כתיבה אל תוך ה-DOM של המנוע היא כבר התוסף הישן.
+ */
+describe('מדידת העמוד המצויר', () => {
+  const MEASURER = 'engine/page-ruler.ts';
+
+  function normalize(path: string): string {
+    return path.split(sep).join('/');
+  }
+
+  it('רק page-ruler.ts נוגע בעיגון של העמוד', () => {
+    const offenders = hits(/data-page-index/).filter(
+      (hit) => !normalize(hit).startsWith(MEASURER),
+    );
+
+    expect(offenders).toEqual([]);
+  });
+
+  it('המדידה קוראת גיאומטריה בלבד — אינה בונה, מוחקת או כותבת', () => {
+    const measurer = sources.find(({ path }) => normalize(path) === MEASURER);
+    expect(measurer, MEASURER).toBeDefined();
+
+    const source = measurer?.text ?? '';
+    expect(source).toMatch(/getBoundingClientRect/);
+    expect(
+      /innerHTML|textContent|setAttribute|insertAdjacent|appendChild|removeChild|createElement/.test(
+        source,
+      ),
+    ).toBe(false);
+  });
+});

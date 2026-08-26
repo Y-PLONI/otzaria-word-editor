@@ -143,7 +143,7 @@ export interface ParagraphFormatHost {
 
 export type ParagraphFormatTarget = SuperDoc | ParagraphFormatHost | null | undefined;
 
-interface ParagraphTarget {
+export interface ParagraphTarget {
   kind: 'block';
   nodeType: 'paragraph';
   nodeId: string;
@@ -189,14 +189,111 @@ export function emptyParagraphFormat(): ParagraphFormatSnapshot {
   };
 }
 
-/** המודל שנקרא מהמסמך (`doc.get`): נקודות, לא twips — ההמרה כאן ולא בדיאלוג. */
+/**
+ * המודל שנקרא מהמסמך (`doc.get`): נקודות, לא twips — ההמרה כאן ולא בדיאלוג.
+ *
+ * ## מה שנמדד על המודל עצמו (Chrome headless, ה-dist הארוז, מסמך חדש)
+ *
+ * הצורה שחוזרת מ-`doc.get()` היא:
+ *
+ *     { kind: 'paragraph',
+ *       paragraphIds: { paraId: '41964671' },
+ *       paragraph: { inlines: [...], props: { indent: {...}, spacing: {...}, bidi: true } } }
+ *
+ * שלושה דברים שם שונים ממה שהקוד כאן הניח, וכל אחד מהם לבדו הספיק כדי
+ * שהקריאה תחזור **ריקה**:
+ *
+ *   1. **אין `id` על הצומת.** המזהה יושב ב-`paragraphIds.paraId`, והוא
+ *      גם בדיוק ה-`blockId` שהבחירה מחזירה (נמדד: שניהם `'41964671'`).
+ *   2. **המפתח הוא `indent` ולא `indentation`** — `setIndentation({left:720})`
+ *      החזיר במודל `indent: { left: 36 }` (נקודות).
+ *   3. **`tabs` ו-`keepNext`/`keepLines`/`widowControl` אינם במודל כלל**, גם
+ *      אחרי קריאה מוצלחת ל-`setTabStop`/`setKeepOptions` שהחזירה
+ *      `success: true`. המנוע כותב אותם ל-DOCX ואינו מחזיר אותם בקריאה.
+ *
+ * המשמעות של (1)+(2) הייתה חמורה: הדיאלוג נפתח על אפסים, ואישור שלו כתב
+ * `<w:ind>` ריק — כלומר **מחק** כניסות שהמשתמש הגדיר ב-Word. זה בדיוק הכשל
+ * שהערת הפתיחה של הקובץ מזהירה ממנו („דיאלוג שנפתח ריק ואושר היה מוחק בשקט”).
+ *
+ * שני שמות המפתחות נקראים כאן, הישן והנמדד: אין תיעוד שקובע איזה מהם החוזה,
+ * וגרסה שתחזיר את השני לא תשבור את הקריאה.
+ */
 interface RawParagraphProps {
+  /** השם שנמדד במנוע 2.8.0. */
+  indent?: { left?: number; right?: number; firstLine?: number; hanging?: number };
+  /** השם שהונח קודם. נשמר כרשת ביטחון — ראו הערת הפתיחה של הטיפוס. */
   indentation?: { left?: number; right?: number; firstLine?: number; hanging?: number };
   spacing?: { before?: number; after?: number; line?: number; lineRule?: string };
   keepWithNext?: boolean;
   keepLines?: boolean;
   widowControl?: boolean;
+  /** אינו מוחזר במנוע 2.8.0. ראו docs/engine-gaps.md. */
   tabs?: readonly { kind?: string; position?: number; alignment?: string; leader?: string }[];
+  /** `true` בפסקה שכיוונה מימין לשמאל. נכתב על ידי `<w:bidi>`. */
+  bidi?: boolean;
+}
+
+/**
+ * מזהה הפסקה של הצומת, לפי שני המקומות שהוא יכול לשבת בהם.
+ * `paragraphIds.paraId` הוא מה שנמדד; `id` נשאר כרשת ביטחון.
+ */
+function nodeParagraphId(node: object): string | undefined {
+  const direct = (node as { id?: unknown }).id;
+  if (typeof direct === 'string' && direct !== '') return direct;
+  const paraId = (node as { paragraphIds?: { paraId?: unknown } }).paragraphIds?.paraId;
+  return typeof paraId === 'string' && paraId !== '' ? paraId : undefined;
+}
+
+/**
+ * התכונות של הפסקה שמזהה שלה `blockId`, מתוך המסמך שהוחזר מ-`doc.get()`.
+ *
+ * מיוצאת מפני שהסרגל (engine/page-ruler.ts) קורא את אותה פסקה בדיוק, ושני
+ * מאתרים לאותו צומת היו נפרדים ביום שבו המודל ישנה צורה.
+ */
+export function findParagraphProps(document: unknown, blockId: string): RawParagraphProps | undefined {
+  if (!document || typeof document !== 'object') return undefined;
+  const body = (document as { body?: unknown }).body;
+  if (!Array.isArray(body)) return undefined;
+
+  for (const node of body) {
+    if (!node || typeof node !== 'object') continue;
+    if (nodeParagraphId(node) !== blockId) continue;
+    // פסקה/כותרת/פריט רשימה נושאות את התכונות תחת המפתח של סוגן.
+    const inner =
+      (node as { paragraph?: { props?: RawParagraphProps } }).paragraph ??
+      (node as { heading?: { props?: RawParagraphProps } }).heading ??
+      (node as { list?: { props?: RawParagraphProps } }).list;
+    return inner?.props;
+  }
+  return undefined;
+}
+
+/** הכניסות של הפסקה, ב-twips. `left`/`right` הם צד ההתחלה והסוף — ראו page-ruler.ts. */
+export interface ParagraphIndents {
+  leftTwips: number;
+  rightTwips: number;
+  firstLineTwips: number;
+  hangingTwips: number;
+  /** האם הפסקה מימין לשמאל (`<w:bidi>`). */
+  bidi: boolean;
+}
+
+/** נקודות מהמודל → twips שלמים. ערך פסול נקרא כאפס ולא מפיל את הקריאה. */
+function pointsToTwips(value: unknown): number {
+  const points = typeof value === 'number' && Number.isFinite(value) ? value : 0;
+  return Math.round(points * TWIPS_PER_PT);
+}
+
+/** הכניסות בלבד, מתוך תכונות פסקה שכבר נקראו. */
+export function indentsFromProps(props: RawParagraphProps | undefined): ParagraphIndents {
+  const indent = props?.indent ?? props?.indentation ?? {};
+  return {
+    leftTwips: Math.max(0, pointsToTwips(indent.left)),
+    rightTwips: Math.max(0, pointsToTwips(indent.right)),
+    firstLineTwips: Math.max(0, pointsToTwips(indent.firstLine)),
+    hangingTwips: Math.max(0, pointsToTwips(indent.hanging)),
+    bidi: props?.bidi === true,
+  };
 }
 
 const LINE_RULES: readonly LineSpacingRule[] = ['auto', 'exact', 'atLeast'];
@@ -210,7 +307,8 @@ const TAB_LEADERS: readonly TabLeader[] = ['none', 'dot', 'hyphen', 'underscore'
  * (ראו הערת הפתיחה). דיאלוג שנפתח ריק ואושר היה מוחק בשקט כניסות וריווח
  * שהוגדרו קודם — הרסני-למראית-עין, בדיוק התבנית שהגלים הקודמים סגרו.
  *
- * `doc.get()` מחזיר את המסמך כולו במודל SDM/1 — הפסקה מזוהה לפי `id`, ואותן
+ * `doc.get()` מחזיר את המסמך כולו במודל SDM/1 — הפסקה מזוהה לפי
+ * `paragraphIds.paraId` (ראו `findParagraphProps` ואת המדידה שמעליה), ואותן
  * התכונות ב**נקודות** ולא ב-twips. ערך שאינו מובן מוחזר כברירת מחדל ולא כשגיאה:
  * הקריאה נכשלת רק כשאין בכלל מה לפעול עליו.
  */
@@ -235,23 +333,10 @@ export async function readParagraphFormat(
     return { ok: false, outcome: { ok: false, message: thrownText('פתיחת תפריט הפסקה נכשלה', error), reason: 'threw' } };
   }
 
-  let raw: RawParagraphProps | undefined;
-  if (document && typeof document === 'object' && Array.isArray((document as { body?: unknown }).body)) {
-    for (const node of (document as { body: unknown[] }).body) {
-      if (!node || typeof node !== 'object') continue;
-      if ((node as { id?: unknown }).id !== resolved.target.nodeId) continue;
-      // פסקה/כותרת/פריט רשימה נושאות את התכונות תחת המפתח של סוגן.
-      const inner =
-        (node as { paragraph?: { props?: RawParagraphProps } }).paragraph ??
-        (node as { heading?: { props?: RawParagraphProps } }).heading ??
-        (node as { list?: { props?: RawParagraphProps } }).list;
-      raw = inner?.props;
-      break;
-    }
-  }
+  const raw = findParagraphProps(document, resolved.target.nodeId);
 
   const defaults = emptyParagraphFormat();
-  const ind = raw?.indentation ?? {};
+  const ind = raw?.indent ?? raw?.indentation ?? {};
   const sp = raw?.spacing ?? {};
   const rule = LINE_RULES.includes(sp.lineRule as LineSpacingRule) ? (sp.lineRule as LineSpacingRule) : 'auto';
   const ptToTwips = (value: number | undefined): number =>
@@ -292,6 +377,53 @@ export async function readParagraphFormat(
       widowControl: raw?.widowControl !== false,
       tabs,
     },
+  };
+}
+
+/** מה שהסרגל צריך לדעת על הפסקה שהסמן בה. */
+export interface ParagraphIndentReading {
+  /** היעד לכתיבה חזרה, כפי ש-`applyParagraphIndentation` מצפה לו. */
+  target: ParagraphTarget;
+  indents: ParagraphIndents;
+}
+
+/**
+ * הכניסות של הפסקה שהסמן בה — הקריאה שהסרגל עושה על כל תזוזת סמן.
+ *
+ * למה קריאה נפרדת ולא `readParagraphFormat`: זו מחזירה תצלום מלא ומנסחת
+ * הודעות כשל בעברית („פתיחת תפריט הפסקה נכשלה”), וזה נכון לדיאלוג שנפתח
+ * בלחיצה. הסרגל אינו פעולה של המשתמש אלא תצוגה שרצה ברקע: אין לו על מה
+ * להתלונן, ו„אין סמן במסמך” הוא אצלו מצב רגיל — פשוט אין סמני כניסה לצייר.
+ * לכן `null` בכל מסלול שאינו מצליח, ואף הודעה.
+ *
+ * המחיר של `doc.get()` מוכר — הוא סורק את המסמך כולו — ולכן הקריאה מושהית
+ * ב-`createRulerModel` (engine/page-ruler.ts), בדיוק כמו ספירת המילים.
+ */
+export async function readParagraphIndents(
+  host: ParagraphFormatTarget,
+): Promise<ParagraphIndentReading | null> {
+  const doc = docOf(host);
+  const get = doc?.get;
+  if (typeof get !== 'function') return null;
+
+  const selection = await readDocSelection(host);
+  if (!selection.blockId) return null;
+
+  let document: unknown;
+  try {
+    document = await get();
+  } catch {
+    return null;
+  }
+
+  return {
+    target: {
+      kind: 'block',
+      nodeType: 'paragraph',
+      nodeId: selection.blockId,
+      ...(selection.story ? { story: selection.story } : {}),
+    },
+    indents: indentsFromProps(findParagraphProps(document, selection.blockId)),
   };
 }
 
