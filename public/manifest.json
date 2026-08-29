@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "com.otzaria_word_editor.superdoc",
   "name": "וורד לאוצריא",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "עורך מסמכים בסגנון Word על מנוע SuperDoc, לכתיבת חידושי תורה בתוך אוצריא",
   "author": "ypl, netanel",
   "type": "webapp",
@@ -15,8 +15,7 @@
     "fs.user_files.read",
     "fs.user_files.write",
     "reader.open",
-    "navigation.write",
-    "clipboard.read"
+    "navigation.write"
   ],
   "contributes": {
     "toolTab": {
