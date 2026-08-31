@@ -93,12 +93,14 @@
       />
       <OtzariaTab
         v-else-if="currentTabId === 'otzaria'"
+        :book-completion-enabled="bookCompletionEnabled"
         @insert-citation="$emit('insert-citation')"
         @search-otzaria="$emit('search-otzaria')"
         @open-library="$emit('open-library')"
         @manage-macros="$emit('manage-macros')"
         @macro-record="$emit('macro-record')"
         @macro-play="$emit('macro-play')"
+        @toggle-book-completion="$emit('toggle-book-completion')"
       />
     </div>
   </div>
@@ -160,8 +162,9 @@ withDefaults(
     hasPdfExport?: boolean;
     isSaving?: boolean;
     isOpening?: boolean;
+    bookCompletionEnabled?: boolean;
   }>(),
-  { hasDocument: false, hasPdfExport: false, isSaving: false, isOpening: false },
+  { hasDocument: false, hasPdfExport: false, isSaving: false, isOpening: false, bookCompletionEnabled: false },
 );
 
 /**
@@ -211,6 +214,7 @@ defineEmits<{
   (e: 'manage-macros'): void;
   (e: 'macro-record'): void;
   (e: 'macro-play'): void;
+  (e: 'toggle-book-completion'): void;
 }>();
 
 /** רק הלשונית הפעילה נמצאת ב-tab order, ולכן החצים צריכים להזיז מיקוד בעצמם. */

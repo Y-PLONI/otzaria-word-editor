@@ -36,6 +36,7 @@
       :has-pdf-export="supportsPdfExport"
       :is-saving="saveSnapshot.isSaving"
       :is-opening="isOpening"
+      :book-completion-enabled="bookCompletionEnabled"
       @new-doc="onNewDocument"
       @open-doc="onPickAndOpen"
       @save-doc="onSave(false)"
@@ -56,6 +57,7 @@
       @manage-macros="isMacrosOpen = true"
       @macro-record="onMacroRecord"
       @macro-play="onMacroPlay"
+      @toggle-book-completion="onToggleBookCompletion"
     />
 
     <!-- שורת הסרגל האופקי. הפינה שלפניו רחבה כמו הסרגל האנכי, וכך שניהם
@@ -198,7 +200,6 @@ import AboutDialog from './ui/panels/AboutDialog.vue';
 import LinkDialog from './ui/panels/LinkDialog.vue';
 import ShortcutsDialog from './ui/panels/ShortcutsDialog.vue';
 import TooltipLayer from './ui/tooltip/TooltipLayer.vue';
-
 import { createCommandAdapter, type CommandAdapter, type CommandOutcome } from './engine/command-adapter';
 import type { CommandId } from './engine/capabilities';
 import {
@@ -246,6 +247,7 @@ import { createSaveCoordinator, type SaveCoordinator, type SaveSnapshot } from '
 import { createEditor, type EditorSession } from './engine/create-editor';
 import { ACTIVE_MACROS, installMacros, type MacrosHandle } from './engine/macros';
 import MacrosDialog from './ui/panels/MacrosDialog.vue';
+import { installBookCompletion } from './engine/book-completion-overlay';
 import { preflightSource } from './engine/docx-preflight';
 import { installDocumentFontAliases } from './engine/docx-fonts';
 import {
@@ -400,6 +402,13 @@ const activeSuperdoc = shallowRef<SuperDoc | null>(null);
 provide(ACTIVE_SUPERDOC, activeSuperdoc);
 
 /**
+ * ה-container של המסמך הפתוח — installBookCompletion (engine/book-completion-
+ * overlay.ts) מותקן עליו, לא על editorStackRef: זה ה-container הספציפי
+ * שהמנוע מרנדר לתוכו, ראו create-editor.ts:EditorSession.container.
+ */
+const activeEditorContainer = shallowRef<HTMLElement | null>(null);
+
+/**
  * מונה "מסמך אחר" — ראו ההסבר המלא ב-composables/keys.ts. מעודכן מ-`swap.
  * documentGeneration` באותו רגע בדיוק שבו `activeSuperdoc` מוחלף (openDocument),
  * כדי ששני העדכונים יגיעו לצרכנים באותו tick.
@@ -454,6 +463,7 @@ const statusText = ref('');
 const isStatusError = ref(false);
 const isFocusMode = ref(false);
 const revealed = ref<RevealZone>(null);
+const bookCompletionEnabled = ref(false);
 
 /**
  * הלשונית ברצועה ומצב הכיווץ. הוחזקו עד עכשיו בתוך `Ribbon.vue` עצמו, ועלו
@@ -812,11 +822,15 @@ async function openDocument(file?: UserFile, options: OpenOptions = {}): Promise
   // ה-`editor.superdoc` המקומי ולא `activeSuperdoc.value` בפירוק: אותה מלכודת
   // כמו באדפטר החיפוש — סגירת המסמך הקודם קורית אחרי שהחדש כבר נרשם.
   activeSuperdoc.value = editor.superdoc;
+  activeEditorContainer.value = editor.container;
   // אותו tick בדיוק כמו ההשמה שמעל: מי שמשווה זהות `documentGeneration` בין
   // שתי קריאות (`PageBreakTracker.syncDocument`) חייב לראות את שתיהן יחד.
   documentGeneration.value = swap.documentGeneration;
   editor.onDispose(() => {
-    if (activeSuperdoc.value === editor.superdoc) activeSuperdoc.value = null;
+    if (activeSuperdoc.value === editor.superdoc) {
+      activeSuperdoc.value = null;
+      activeEditorContainer.value = null;
+    }
     // בלי האיפוס הרצועה הייתה ממשיכה להחזיק את הקריאה של המסמך שנסגר.
     readoutSelection.value = UNSETTLED_SELECTION;
   });
@@ -1475,6 +1489,30 @@ function toggleFocusMode(): void {
   if (!isFocusMode.value) revealed.value = null;
 }
 
+function onToggleBookCompletion(): void {
+  bookCompletionEnabled.value = !bookCompletionEnabled.value;
+}
+
+/**
+ * מתקינה/מפרקת את "השלמה מהספר" (engine/book-completion-overlay.ts) על
+ * ה-container של המסמך הפתוח.
+ *
+ * `watch` על שלושתם ולא רק על הטוגל: מסמך שנפתח בזמן שהטוגל כבר דלוק צריך
+ * גם הוא התקנה, ומסמך שנסגר (`activeEditorContainer` הופך `null`) צריך
+ * פירוק — לא רק מעבר בין מסמכים, ולכן `documentGeneration` ולא `activeSuperdoc`
+ * לבד: שני מסמכים עשויים לחלוק את אותו container לרגע (`editor-swap.ts`) והמונה
+ * הוא הסימן החד-משמעי ל"מסמך אחר" (ראו doc על `documentGeneration`).
+ */
+let bookCompletion: ReturnType<typeof installBookCompletion> | null = null;
+watch([activeEditorContainer, activeSuperdoc, bookCompletionEnabled, documentGeneration], () => {
+  bookCompletion?.dispose();
+  bookCompletion = null;
+  if (!bookCompletionEnabled.value || !activeEditorContainer.value || !activeSuperdoc.value) return;
+  bookCompletion = installBookCompletion(activeEditorContainer.value, activeSuperdoc.value, {
+    onStatus: (message, isError) => setStatus(message, isError),
+  });
+});
+
 /**
  * במצב מיקוד הפסים מוסתרים, ומתגלים כשהמצביע מתקרב לקצה. הקצה ולא כל המעטפת:
  * `:hover` על השורש החזיר את כולם בכל תנועה בחלון, כלומר המצב לא הסתיר כלום.
@@ -2122,6 +2160,8 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  bookCompletion?.dispose();
+  bookCompletion = null;
   zoomCenter?.dispose();
   zoomCenter = null;
   shortcuts?.dispose();

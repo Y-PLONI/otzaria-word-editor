@@ -29,6 +29,15 @@
         :disabled="!sdkAvailable"
         @click="$emit('open-library')"
       />
+      <RibbonButton
+        icon="highlight"
+        label="השלמה מהספר"
+        variant="large"
+        :active="bookCompletionEnabled"
+        :tooltip="bookCompletionTooltip"
+        :disabled="!sdkAvailable"
+        @click="$emit('toggle-book-completion')"
+      />
     </RibbonGroup>
 
     <!-- מאקרו: הקלטה וניהול. הפעולות עצמן ב-engine/macros.ts, דרך App.vue. -->
@@ -109,6 +118,13 @@ import { ACTIVE_MACROS, type MacrosHandle } from '../../../engine/macros';
 import { isAvailable } from '../../../host/otzaria-client';
 import { canInsertText } from '../../../host/otzaria-reader';
 
+withDefaults(
+  defineProps<{
+    bookCompletionEnabled?: boolean;
+  }>(),
+  { bookCompletionEnabled: false },
+);
+
 defineEmits<{
   (e: 'insert-citation'): void;
   (e: 'search-otzaria'): void;
@@ -116,6 +132,7 @@ defineEmits<{
   (e: 'manage-macros'): void;
   (e: 'macro-record'): void;
   (e: 'macro-play'): void;
+  (e: 'toggle-book-completion'): void;
 }>();
 
 const superdoc = inject(ACTIVE_SUPERDOC, shallowRef<SuperDoc | null>(null));
@@ -210,6 +227,15 @@ const searchTooltip = computed(() => {
   if (!sdkAvailable) return OUTSIDE_OTZARIA;
   if (superdoc.value === null) return 'יש לפתוח מסמך ולסמן בו את הטקסט לחיפוש';
   return 'חיפוש הטקסט המסומן במסמך בכל ספריות אוצריא';
+});
+
+/**
+ * הטולטיפ הוא המקום היחיד שאומר למשתמש איך לקבל את ההצעה — "לחיצה על Tab
+ * משלימה" חייב להופיע כאן במפורש, ראו engine/book-completion-overlay.ts.
+ */
+const bookCompletionTooltip = computed(() => {
+  if (!sdkAvailable) return OUTSIDE_OTZARIA;
+  return 'בזמן הקלדה, אם הטקסט תואם את הספר הפתוח בקורא — Tab משלים 5 מילים מהמקור';
 });
 </script>
 

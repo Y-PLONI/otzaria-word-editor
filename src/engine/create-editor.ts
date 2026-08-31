@@ -24,6 +24,9 @@ export interface EditorSession {
   superdoc: SuperDoc;
   /** ה-controller של המופע. מושאל — לא לפרק אותו, ואין לו `destroy`. */
   ui: BorrowedSuperDocUI;
+  /** ה-container שהמנוע רינדר לתוכו. לשכבות חיצוניות שמותקנות/מפורקות מחוץ
+   * ל-create-editor (למשל book-completion-overlay.ts, תלוי-טוגל). */
+  container: HTMLElement;
   /** רושם ביטול של subscription שלנו. ירוץ ב-`destroy`, לפני פירוק המנוע. */
   onDispose(dispose: () => void): void;
   /** מבטל את ה-subscriptions שלנו ואז מפרק את המנוע. אידמפוטנטי. */
@@ -178,6 +181,7 @@ export function createEditor(options: CreateEditorOptions): Promise<EditorSessio
         const session: EditorSession = {
           superdoc: ready,
           ui: ready.ui,
+          container,
           onDispose(dispose) {
             if (destroyed) {
               dispose();

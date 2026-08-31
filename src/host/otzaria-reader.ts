@@ -25,9 +25,12 @@ import {
   type MaybePromise,
 } from '../engine/document-api';
 import type {
+  GetSectionTextMapArgs,
   NavigationTarget,
   OpenSearchTabArgs,
+  ReaderRefState,
   ReaderSelection,
+  SectionTextMapResult,
 } from '../types/otzaria_plugin';
 
 /**
@@ -46,6 +49,8 @@ export type ReaderResult<T = void> =
 export const READER_PERMISSIONS: Record<string, string> = {
   'reader.getSelection': 'reader.open',
   'reader.openSearchTab': 'reader.open',
+  'reader.getCurrentState': 'reader.open',
+  'reader.getSectionTextMap': 'reader.open',
   'navigation.goTo': 'navigation.write',
 };
 
@@ -169,6 +174,42 @@ export async function getReaderSelection(): Promise<ReaderResult<ReaderSelection
 
   if (!data || typeof data !== 'object') return { ok: true, value: null };
   return { ok: true, value: data as ReaderSelection };
+}
+
+/**
+ * מצב הקריאה הנוכחי: ספר, מיקום (`currentRef`) וטאב פעיל. `null` תקין —
+ * אין ספר פתוח (מסך ספרייה, למשל), וזה לא כשל.
+ */
+export async function getCurrentReaderState(): Promise<ReaderResult<ReaderRefState | null>> {
+  let data: unknown;
+  try {
+    data = await call<unknown>('reader.getCurrentState');
+  } catch (error) {
+    return hostFailure('reader.getCurrentState', 'קריאת מצב הקורא נכשלה', error);
+  }
+
+  if (!data || typeof data !== 'object') return { ok: true, value: null };
+  return { ok: true, value: data as ReaderRefState };
+}
+
+/**
+ * טקסט ה-section הנוכחי בספר, לצורך "השלמה מהספר" — ראו
+ * engine/book-completion.ts. `layer: 'source'` בלבד ובלי `includeWords`:
+ * הנרמול וחלוקת המילים נעשים מקומית (book-completion.ts), וזה גם מה שחוסך
+ * את משיכת שני שכבות הטקסט ואת מערך ה-tokens לכל section.
+ */
+export async function getSectionTextMap(
+  args: GetSectionTextMapArgs,
+): Promise<ReaderResult<SectionTextMapResult | null>> {
+  let data: unknown;
+  try {
+    data = await call<unknown>('reader.getSectionTextMap', { ...args });
+  } catch (error) {
+    return hostFailure('reader.getSectionTextMap', 'קריאת טקסט הספר נכשלה', error);
+  }
+
+  if (!data || typeof data !== 'object') return { ok: true, value: null };
+  return { ok: true, value: data as SectionTextMapResult };
 }
 
 /** הראשון מבין המועמדים שיש בו טקסט. `''` אינו „קיים” — הוא בחירה ריקה. */
