@@ -8,6 +8,10 @@
 
 ## 1. איפה עומדים (מצב הענף)
 
+- **עדכון 3.9.2026 (סשן שני):** הענף `feat/shulchan-safe-tools` נוצר מ-`origin/main` (אחרי PR #36),
+  קומיט התיעוד של `feat/shulchan-fidelity` הובא אליו ב-cherry-pick, ו**פריטים 1-8 של §5.1 מומשו**
+  (מנוע, דיאלוגים, לשונית, מבחנים, `docs/shulchan-haorech.md`). פריט 9 (מתאם „החל עיצובים”) עדיין פתוח.
+  הפסקאות שלמטה מתארות את המצב **לפני** הסשן הזה.
 - ענף עבודה: `feat/shulchan-fidelity`, נוצר מ-`main` אחרי `git pull` (120 קומיטים fast-forward).
 - **שום קובץ מקור ב-`src/` לא שונה עדיין.** נוספו רק מסמכים תחת `docs/`.
 - `origin` = `Y-PLONI/otzaria-word-editor` (upstream). הפורק של המשתמש = `palmoni5/otzaria-word-editor`
