@@ -1,0 +1,39 @@
+C:\Users\User\AppData\Roaming\Python\Python314\site-packages\oletools\olevba.py:920: PyparsingDeprecationWarning: 'enablePackrat' deprecated - use 'enable_packrat'
+  ParserElement.enablePackrat()
+C:\Users\User\AppData\Roaming\Python\Python314\site-packages\oletools\olevba.py:957: PyparsingDeprecationWarning: 'setParseAction' deprecated - use 'set_parse_action'
+  decimal_literal.setParseAction(lambda t: int(t[0]))
+C:\Users\User\AppData\Roaming\Python\Python314\site-packages\oletools\olevba.py:961: PyparsingDeprecationWarning: 'setParseAction' deprecated - use 'set_parse_action'
+  octal_literal.setParseAction(lambda t: int(t[0], base=8))
+C:\Users\User\AppData\Roaming\Python\Python314\site-packages\oletools\olevba.py:965: PyparsingDeprecationWarning: 'setParseAction' deprecated - use 'set_parse_action'
+  hex_literal.setParseAction(lambda t: int(t[0], base=16))
+C:\Users\User\AppData\Roaming\Python\Python314\site-packages\oletools\olevba.py:977: PyparsingDeprecationWarning: 'escQuote' argument is deprecated, use 'esc_quote'
+  quoted_string = QuotedString('"', escQuote='""')
+C:\Users\User\AppData\Roaming\Python\Python314\site-packages\oletools\olevba.py:978: PyparsingDeprecationWarning: 'setParseAction' deprecated - use 'set_parse_action'
+  quoted_string.setParseAction(lambda t: str(t[0]))
+C:\Users\User\AppData\Roaming\Python\Python314\site-packages\oletools\olevba.py:1059: PyparsingDeprecationWarning: 'setParseAction' deprecated - use 'set_parse_action'
+  vba_chr.setParseAction(vba_chr_tostr)
+C:\Users\User\AppData\Roaming\Python\Python314\site-packages\oletools\olevba.py:1067: PyparsingDeprecationWarning: 'setParseAction' deprecated - use 'set_parse_action'
+  vba_asc.setParseAction(lambda t: ord(t[0]))
+C:\Users\User\AppData\Roaming\Python\Python314\site-packages\oletools\olevba.py:1075: PyparsingDeprecationWarning: 'setParseAction' deprecated - use 'set_parse_action'
+  vba_val.setParseAction(lambda t: int(t[0].strip()))
+C:\Users\User\AppData\Roaming\Python\Python314\site-packages\oletools\olevba.py:1082: PyparsingDeprecationWarning: 'setParseAction' deprecated - use 'set_parse_action'
+  strReverse.setParseAction(lambda t: VbaExpressionString(str(t[0])[::-1]))
+C:\Users\User\AppData\Roaming\Python\Python314\site-packages\oletools\olevba.py:1089: PyparsingDeprecationWarning: 'setParseAction' deprecated - use 'set_parse_action'
+  environ.setParseAction(lambda t: VbaExpressionString('%%%s%%' % t[0]))
+C:\Users\User\AppData\Roaming\Python\Python314\site-packages\oletools\olevba.py:1099: PyparsingDeprecationWarning: 'initChars' argument is deprecated, use 'init_chars'
+  latin_identifier = Word(initChars=alphas, bodyChars=alphanums + '_')
+C:\Users\User\AppData\Roaming\Python\Python314\site-packages\oletools\olevba.py:1099: PyparsingDeprecationWarning: 'bodyChars' argument is deprecated, use 'body_chars'
+  latin_identifier = Word(initChars=alphas, bodyChars=alphanums + '_')
+C:\Users\User\AppData\Roaming\Python\Python314\site-packages\oletools\olevba.py:1108: PyparsingDeprecationWarning: 'setParseAction' deprecated - use 'set_parse_action'
+  quoted_hex_string.setParseAction(lambda t: str(t[0]))
+C:\Users\User\AppData\Roaming\Python\Python314\site-packages\oletools\olevba.py:1112: PyparsingDeprecationWarning: 'setParseAction' deprecated - use 'set_parse_action'
+  hex_function_call.setParseAction(lambda t: VbaExpressionString(binascii.a2b_hex(t.hex_string)))
+C:\Users\User\AppData\Roaming\Python\Python314\site-packages\oletools\olevba.py:1122: PyparsingDeprecationWarning: 'setParseAction' deprecated - use 'set_parse_action'
+  quoted_base64_string.setParseAction(lambda t: str(t[0]))
+C:\Users\User\AppData\Roaming\Python\Python314\site-packages\oletools\olevba.py:1126: PyparsingDeprecationWarning: 'setParseAction' deprecated - use 'set_parse_action'
+  base64_function_call.setParseAction(lambda t: VbaExpressionString(binascii.a2b_base64(t.base64_string)))
+C:\Users\User\AppData\Roaming\Python\Python314\site-packages\oletools\olevba.py:1143: PyparsingDeprecationWarning: 'infixNotation' deprecated - use 'infix_notation'
+  vba_expr_str <<= infixNotation(vba_expr_str_item,
+C:\Users\User\AppData\Roaming\Python\Python314\site-packages\oletools\olevba.py:1198: PyparsingDeprecationWarning: 'infixNotation' deprecated - use 'infix_notation'
+  vba_expr_int <<= infixNotation(vba_expr_int_item,
+Encoding for stdout is only cp1255, will auto-encode text with utf8 before output

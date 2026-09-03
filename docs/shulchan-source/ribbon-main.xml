@@ -1,0 +1,89 @@
+tab  | שולחן העורך |  |  | 
+group  | עימוד |  |  | 
+splitButton AlignPagesSplitButton |  |  |  | 
+button AlignPagesButton | יישור עמודים | SH_RibbonControl.AlignPages_OnAction | יישור העמודים הנוכחיים | מגדיל את המרווח בין הפיסקאות ומרחיב את העמוד עד למקסימום&#13;&#13;חל על העמודים הנבחרים
+menu AlignPagesMenu |  |  |  | 
+button AlignPagesAll | יישור עמודים בכל המסמך | SH_RibbonControl.AlignPages_OnAction |  | מגדיל את המרווח בין הפיסקאות ומרחיב את העמוד עד למקסימום&#13;&#13;חל על כל המסמך
+button AlignPagesToEnd | ייישור עמודים מעמוד זה עד סוף המסמך | SH_RibbonControl.AlignPages_OnAction |  | מגדיל את המרווח בין הפיסקאות ומרחיב את העמוד עד למקסימום&#13;&#13;חל על העמודים החל מהעמוד הנוכחי ואילך
+splitButton AlignColumnsSplitButton |  |  |  | 
+button AlignColumnsSec | יישור טורים | SH_RibbonControl.AlignColumns_OnAction | יישורים טורים במקטע הנוכחי בתוך העמוד | מיישר את הטורים במקטע על ידי הגדלת הרווח בין הפיסקאות&#13;&#13;חל על המקטע הנוכחי בתוך העמוד
+menu AlignColumnsMenu |  |  |  | 
+button AlignColumnsButton | יישור טורים בעמוד הנוכחי | SH_RibbonControl.AlignColumns_OnAction |  | מיישר את הטורים במקטע על ידי הגדלת הרווח בין הפיסקאות&#13;&#13;חל על העמוד הנוכחי
+button AlignColumnsAllSec | יישורים טורים בכל המקטע | SH_RibbonControl.AlignColumns_OnAction |  | מיישר את הטורים במקטע על ידי הגדלת הרווח בין הפיסקאות&#13;&#13;חל על כל המקטע
+button AlignColumnsAll | יישור טורים בכל המסמך | SH_RibbonControl.AlignColumns_OnAction |  | מיישר את הטורים במקטע על ידי הגדלת הרווח בין הפיסקאות&#13;&#13;חל על כל המסמך
+button AlignColumnsToEnd | יישור טורים מעמוד זה עד סוף המסמך | SH_RibbonControl.AlignColumns_OnAction |  | מיישר את הטורים במקטע על ידי הגדלת הרווח בין הפיסקאות&#13;&#13;חל על כל העמודים החל מהעמוד הנוכחי
+group TableContentsGroup | תוכן עניינים |  |  | 
+splitButton TableContentsSplitButton |  |  |  | 
+button TableContentsButton | צור תוכן עניינים | SH_RibbonControl.TableContents_OnAction |  | יוצר תוכן עניינים מותאם אישית על פי בחירת המשתמש&#13;&#13;תוכן העניינים מיוצר מכל הכותרות הנבחרות במסמך
+menu TableContentsMenu |  |  |  | 
+button TableContentsUpdate | עדכן תוכן עניינים | SH_RibbonControl.TableContents_OnAction |  | מעדכן את תוכני העניינים במסמך&#13;&#13;שימו לב!! הקוד אינו מעדכן כותרות שנוספו לאחר יצירת תוכן העניינים&#13;&#13;חל על כ
+button TableContentsRemove | הסר את תוכן העניינים הנוכחי | SH_RibbonControl.TableContents_OnAction |  | מסיר את תוכן העניינים הנוכחי כולל הסימונים בגוף המסמך&#13;&#13;חל על תוכן העניינים הנוכחי בלבד
+group DecorationsTitles | עיטורים לכותרות |  |  | 
+menu DecorationsTitlesCreateMenu | הוסף עיטורים |  |  | 
+button DecorationsTitlesCreateOption1 | מאחורי הטקסט | SH_RibbonControl.DecorationsTitlesOption1_OnAction |  | מוסיף עיטורים עם גלישת הטקסט 'מאחורי הטקסט' ומשכפל אותם על פני כל הפיסקאות עם סגנון דומה
+button DecorationsTitlesCreateOption2 | בשורה עם הטקסט | SH_RibbonControl.DecorationsTitlesOption2_OnAction |  | מוסיף עיטורים עם גלישת הטקסט 'בשורה עם הטקסט' ומשכפל אותם על פני כל הפיסקאות עם סגנון דומה
+menu DecorationsTitlesUpdateMenu | עדכן עיטורים |  |  | 
+button DecorationsTitlesUpdateOption1 | מאחורי הטקסט | SH_RibbonControl.DecorationsTitlesOption1_OnAction |  | מעדכן את העיטורים הקיימים בפיסקה הנוכחית&#13;&#13;מיועד עבור עיטורים עם גלישת טקסט 'מאחורי הטקסט'
+button DecorationsTitlesUpdateOption2 | בשורה עם הטקסט | SH_RibbonControl.DecorationsTitlesOption2_OnAction |  | מעדכן את העיטורים הקיימים בפיסקה הנוכחית&#13;&#13;מיועד עבור עיטורים עם גלישת טקסט 'בשורה עם הטקסט'
+menu DecorationsTitlesRemoveMenu | הסר עיטורים |  |  | 
+button DecorationsTitlesRemoveOption1 | מאחורי הטקסט | SH_RibbonControl.DecorationsTitlesOption1_OnAction |  | מסיר את העיטורים שבפיסקה ובכל הפיסקאות עם סגנון דומה&#13;&#13;מיועד עבור עיטורים עם גלישת טקסט 'מאחורי הטקסט'&#13;&#13;ב
+button DecorationsTitlesRemoveOption2 | בשורה עם הטקסט | SH_RibbonControl.DecorationsTitlesOption2_OnAction |  | מסיר את העיטורים שבפיסקה ובכל הפיסקאות עם סגנון דומה&#13;&#13;מיועד עבור עיטורים עם גלישת טקסט 'בשורה עם הטקסט'&#13;&#13
+group FootnoteGroup | הערות שולים |  |  | 
+splitButton ContinuousFootnotesSplitButton |  |  |  | 
+button ContinuousFootnotes | הערות ברצף | SH_RibbonControl.ContinuousFootnotes_OnAction | המר הערות להערות ברצף | ממיר את ההערות במסמך להערות ברצף&#13;&#13;ההערות המקוריות יעברו להערות סיום&#13;&#13;שימו לב!! מונע בקרת שורות מיותמות&#
+menu ContinuousFootnotesMenu |  |  |  | 
+button ContinuousFootnotesRemove | הסר הערות ברצף | SH_RibbonControl.ContinuousFootnotes_OnAction |  | מסיר את עיצוב הערות ברצף ומחזיר את המסמך למצבו הקודם&#13;&#13;חל על כל המסמך
+button ContinuousFootnotesAddSeparator | אפס מפריד הערות שולים | SH_RibbonControl.ContinuousFootnotes_OnAction |  | מוחק את מפריד הערות השולים הקודם ומחזיר את מפריד הערות השולים המקורי&#13;&#13;מיועד עבור הערות שולים ברצף בלבד&#13;&#13;
+button ContinuousFootnotesUpdateSeparator | עדכן מפריד הערות שולים (לפי הראשון) | SH_RibbonControl.ContinuousFootnotes_OnAction |  | מעדכן את מפריד הערות השולים, לפי מפריד הערות השולים שבעמוד הראשון&#13;&#13;שים לב כי במידה והמפריד יגדל/יקטן הדבר עלול ל
+splitButton FootnotesSplitButton |  |  |  | 
+button FootnoteButton | הערה ללא מספר | SH_RibbonControl.Footnotes_OnAction |  | מוסיף הערת שולים ללא מספר כאשר הטקסט המסומן מועתק להערה&#13;&#13;חל על הבחירה הנוכחית בלבד
+menu FootnoteMenu |  |  |  | 
+button FootnotesReplace | החלף את הערת השולים הנוכחית | SH_RibbonControl.Footnotes_OnAction |  | מחליף את הערת השולים הנוכחית להערה ללא מספר כאשר הטקסט המסומן מועתק להערה&#13;&#13;חל על הערת השולים הנוכחית בלבד
+button FootnotesReplaceAll | החלף הערות שולים בכל המסמך | SH_RibbonControl.Footnotes_OnAction |  | מחליף את הערות השולים בכל המסמך להערה ללא מספר, ניתן לקבוע כמה מילים יועתקו להערה&#13;&#13;חל על כל המסמך
+menu BracketsAndFootnotesMenu | סוגריים והערות |  |  | ממיר הערות שולים לסוגריים ולהיפך
+button ConvertToFootnots | המר סוגריים להערות | SH_RibbonControl.BracketsAndFootnotes_OnAction |  | המר את הסוגריים שבבחירה להערות שולים&#13;&#13;שימו לב!! הקוד עובר על כל פיסקה בנפרד כך שאם יש מספר פיסקאות בתוך סוגריים 
+button ConvertToBrackets | המר הערות לסוגריים | SH_RibbonControl.BracketsAndFootnotes_OnAction |  | המר את הערות השולים שבבחירה לסוגריים&#13;&#13;חל על הבחירה בלבד
+checkBox BracketsAndFootnotesAllDoc | בדוק את כל הבחירה כאחד | BracketsAndFootnotes.SH_RibbonControl_RngOnAction |  | 
+checkBox BracketsAndFootnotesEachPara | בדוק כל פיסקה בנפרד | BracketsAndFootnotes.SH_RibbonControl_RngOnAction |  | 
+checkBox RoundBrackets | () סוגריים עגולות | BracketsAndFootnotes.SH_RibbonControl_OnAction |  | המר מ/לסוגריים עגולות
+checkBox SquareBrackets | [] סוגריים מרובעות | BracketsAndFootnotes.SH_RibbonControl_OnAction |  | המר מ/לסוגריים מרובעות
+checkBox CurlyBrackets | {} סוגריים מסולסלות | BracketsAndFootnotes.SH_RibbonControl_OnAction |  | המר מ/לסוגריים מסולסלות
+checkBox AngleBrackets | &lt;&gt; סוגריים זויות | BracketsAndFootnotes.SH_RibbonControl_OnAction |  | המר מ/לסוגריים זויות
+group ErrorCorrection | תיקון שגיאות |  |  | 
+menu EditingErrorsMenu | שגיאות עריכה |  |  | 
+button EditingErrorPageSize | בדיקת גודל עמוד ושולים | SH_RibbonControl.EditingErrors_OnAction |  | בודק שכל המקטעים במסמך בעלי אותו גודל עמוד ורוחב שולים&#13;&#13;במידה ונמצאו גדלים שונים תינתן למשתמש אפשרות לעצב את כל 
+button EditingErrorColumnWidth | בדיקת רוחב ומרווח טורים | SH_RibbonControl.EditingErrors_OnAction |  | בודק שכל המקטעים בעלי 2 טורים במסמך הינם בעלי אותו רוחב של טורים&#13;&#13;במידה ונמצאו גדלים שונים תינתן למשתמש אפשרות ל
+button EditingErrorSwapDocumentStyles | החלפה בין סגנונות | SH_RibbonControl.EditingErrors_OnAction |  | יוצר רשימה של כל הסגנונות במסמך, ומאפשר להחליף ביניהם
+button EditingErrorDeleteUnusedStyles | מחיקת סגנונות שאינם בשימוש | SH_RibbonControl.EditingErrors_OnAction |  | מוחק סגנונות שאינם בשימוש במסמך שאינם סגנונות מערכת&#13;&#13;שימו לב! פעולה זאת אינה ניתנת לביטול
+menu TyposMenu | שגיאות הקלדה |  |  | 
+button TyposCommon | תיקון שגיאות מצויות | SH_RibbonControl.Typos_OnAction |  | מתקן שגיאות מצויות כגון רווחים מיותרים או סימני פיסוק שלא במקומם&#13;&#13;ניתן לבחור אלו שגיאות לתקן&#13;&#13;חל על כל ה
+button FixHebrewPunctuation | תיקון העתקה מתוכנות | SH_RibbonControl.Typos_OnAction |  | מתקן שיבושים של סוגריים הפוכות או סימני פיסוק בעייתיים שנובעים מהעתקה מתוכנות&#13;&#13;ומחליף רווחים קשיחים לרוחים רגילי
+menu UnclosedParenthesesMenu | שגיאות הקלדה |  |  | 
+button UnclosedParentheses | חיפוש סוגריים לא סגורים | SH_RibbonControl.Typos_OnAction |  | חיפוש סוגריים לא סגורות&#13;&#13;החיפוש מתבצע על כל המסמך כאחד
+button UnclosedParenthesesEachPara | חיפוש סוגריים לא סגורים | SH_RibbonControl.Typos_OnAction |  | חיפוש סוגריים לא סגורות&#13;&#13;החיפוש מתבצע על כל פיסקה בנפרד&#13;&#13;חל על כל המסמך
+group VariousTools | כלים שונים |  |  | 
+splitButton PageMarkingSplitButton |  |  |  | 
+button PageMarkingButton | סימון עמודים | SH_RibbonControl.PageMarking_OnAction |  | מוסיף סימון אדום בתחילת כל העמוד, וסימון ירוק בסופו&#13;&#13;חל על כל המסמך
+menu PageMarkingMenu |  |  |  | 
+button PageMarkingSearch | בדיקת מסמך | SH_RibbonControl.PageMarking_OnAction |  | בודק שאין סימונים שזזו ממקומם
+button PageMarkingRemove | הסרת העיצוב | SH_RibbonControl.PageMarking_OnAction |  | מסיר את הסימונים, ההסרה אינה פוגעת בצבעים אחרים במסמך&#13;&#13;חל על כל המסמך
+menu CropMarksMenu | סימני חיתוך     |  |  | 
+button CropMarksAdd | הוסף סימני חיתוך | SH_RibbonControl.CropMarks_OnAction |  | מגדיל את העמוד במספר מילימטרים על פי בחירת המשתמש, ומוסיף סימני חיתוך&#13;&#13;חל על כל המסמך
+button CropMarksRemove | הסר סימני חיתוך | SH_RibbonControl.CropMarks_OnAction |  | מסיר את סימני החיתוך, ומחזיר את גודל הדף לגודלו המקורי&#13;&#13;חל על כל המסמך
+splitButton LineCommentBoxSplitButton |  |  |  | 
+button LineCommentBox | פירוש תחת המילים | SH_RibbonControl.LineCommentBox_OnAction |  | מוסיף פירוש תיבות טקסט המקושרות אחת לשניה, ומאפשר להוסיף פירוש מתחת המילים&#13;&#13;חל על הפיסקאות הנבחרות
+menu LineCommentBoxMenu |  |  |  | 
+button LineCommentBoxShowLine | הצג מיתאר | SH_RibbonControl.LineCommentBox_OnAction |  | מציג את המיתאר של תיבות הטקסט המיועדות לפירוש תחת המילים&#13;&#13;חל על הפיסקאות הנבחרות
+button LineCommentBoxUnShowLine | הסתר מיתאר | SH_RibbonControl.LineCommentBox_OnAction |  | מסתיר את המיתאר של תיבות הטקסט המיועדות לפירוש תחת המילים&#13;&#13;חל על הפיסקאות הנבחרות
+button LineCommentBoxRemove | הסר פירוש תחת המילים | SH_RibbonControl.LineCommentBox_OnAction |  | מוחק את תיבות הטקסט המיועדות לפירוש תחת המילים&#13;&#13;חל על הפיסקאות הנבחרות
+splitButton SplitDocumentSplitButton |  |  |  | 
+button SplitDocument | פירוק מסמך | SH_RibbonControl.SplitDocument_OnAction |  | מוציא את הערות השולים והערות הסיום מהמסמך למסמך נפרד, ומשאיר את ההפניות במקומן&#13;&#13;חל על המסמך כולו
+menu SplitDocumentMenu |  |  |  | 
+button SplitDocumentFootnots | הערות שולים בלבד | SH_RibbonControl.SplitDocument_OnAction |  | מוציא את הערות השולים מהמסמך למסמך נפרד, ומשאיר את ההפניות במקומן&#13;&#13;חל על המסמך כולו
+button SplitDocumentEndnots | הערות סיום בלבד | SH_RibbonControl.SplitDocument_OnAction |  | מוציא את הערות הסיום מהמסמך למסמך נפרד, ומשאיר את ההפניות במקומן&#13;&#13;חל על המסמך כולו
+button DocReduction | צמצום מסמך | SH_RibbonControl.DocReduction_OnAction |  | מצמצם את המסמך ליעד עמודים לפי בחירת המשתמש, מאפשר למשתמש לבחור אלו נתונים לצמצם
+button TextAlternating | טקסט מתחלף | SH_RibbonControl.TextAlternating_OnAction |  | מדגיש את ד''ה בפיסקאות שנבחרו, על פי סימונים בבחירת המשתמש&#13;&#13;חל על הפיסקאות הנבחרות
+group AboutHelp | עזרה |  |  | 
+button About | אודות | SH_RibbonControl.About_OnAction |  | 
+button UnInstall | הסר | SH_RibbonControl.About_OnAction |  | 
+button Version | גירסה 4.0 |  |  | 

@@ -1,0 +1,15 @@
+# עובדות מנוע שכבר נמדדו (אל תחזרו על ה-grep ב-node_modules; קבלו כנתון)
+- superdoc מוצהר 2.11.0 (node_modules מיושן 2.10.0; superdoc-macros 0.9.0 מוצהר, 0.7.1 מותקן). npm ci נדרש.
+- אין API ציבורי למדדי layout: גבולות עמודים לבלוק, שורות בפסקה, מיקום אנכי/אופקי של טווח. totalPages רק דרך onPaginationUpdate בלי עיתוי יציב. מנוע פריסה קיים בחבילה (dist/layout-engine/paginator, resolved-layout) אך לא מיוצא. page-ruler.ts כבר קורא data-page-index ו-activeEditor.pageMetrics.getSnapshot() (לא ב-d.ts).
+- אין create.textbox/shape; יש רק create.{contentControl,heading,image,paragraph,sectionBreak,table,tableOfContents}; create.image מחזיר OPERATION_UNAVAILABLE. קריאת צורות קיימת (SDDrawingSource) אך לא כתיבה.
+- סגנונות: styles.apply (docDefaults) + styles.getCatalog בלבד; אין create/remove/rename; setStyle/setStyleRef/clearStyle מדווחים available אך מחזירים CAPABILITY_UNAVAILABLE; הפקודה linked-style היא המסלול היחיד להחלת סגנון.
+- paragraphs.setAlignment: left/center/right/justify בלבד; המודל קורא 'distributed' אך לא כותב.
+- הערות: footnotes.insert = {at?, type, content|body}; אין customMark; endnote ו-footnote אותה כתובת (TOCTOU); footnotes.configure מחליף footnotePr כולו; format.vanish קיים על ריצות.
+- undo אטומי: doc.mutations.apply({atomic:true,steps}) עובד עם text.rewrite where:{by:'select'}; by:'target' מוצהר בטיפוסים אך נדחה בריצה; by:'ref' לא נמדד.
+- w:ind firstLine/hanging בעברית מצוירים הפוך; ערך שלילי נדחה. doc.get() לא מחזיר tabs/keepNext. טורים RTL מתעלמים מ-w:bidi.
+- doc.insert מוסיף לפסקה האחרונה; create.paragraph({at,placement:'after'}) עובד.
+- ריבוי מסמכים: createNewDocumentSession() ב-App.vue:1136, openDocument(undefined,{draft:Blob}) ב-App.vue:1349 פותח Blob בטאב חדש; שמירה בלי targetToken פותחת "שמור בשם" במארח (save-coordinator.ts:278). ACTIVE_SUPERDOC הוא ref של הטאב הפעיל בלבד.
+- מארח אוצריא: storage.get/set (הגדרות), fs.pickUserFile, fs.beginBinaryWrite/commit, ui.print, ui.exportPdf, fonts.resolveFamilies/listInstalled, ui.showConfirm (כן/לא בלבד). אין חלון תוסף נוסף, אין סריקת תיקיות.
+- הדפסה: print.ts משתמש ב-window.print()+@page מוזרק; PDF דרך ui.exportPdf של המארח.
+- הכלים הקיימים כתובים על ShulchanTarget (shulchan-doc.ts): blocks.list, doc.get, replace, format.apply, format.paragraph.*, sections.*, footnotes.*; ורשומים דרך kit.registerTool (tools-registration.ts).
+- הבעלים: הריפו, superdoc-macros (palmoni5), ואוצריא כולם ניתנים לשינוי ע"י המשתמש. SuperDoc עצמו — רק PR upstream.

@@ -1,0 +1,32 @@
+tab  | שולחן העורך |  |  | 
+group PargraphFormat2 | עיצוב פיסקה |  |  | 
+splitButton ApplySplitButton |  |  |  | 
+button ApplyNonHeading | החל עיצובים | ApplyDesignButton_OnAction |  | העיצובים עוקפים באופן אוטומטי פיסקאות מיושרות למרכז או פסקאות עם סגנון כותרת. &#13;שים לב! כדי להחיל את העיצובים על פיסק
+menu ApplyMenu |  |  |  | 
+button ApplyAll | עצב הכל כולל כותרות ופיסקאות ממורכזות | ApplyDesignButton_OnAction |  | מעצב את כל הפיסקאות שבבחירה כולל כותרות ופיסקאות ממורכזות&#13;שים לב! כדי להחיל את העיצובים על פיסקאות ממוספרות יש להחלי
+button ApplyByStyle | עצב את הסגנונות הנבחרים בטווח הנבחר | ApplyDesignButton_OnAction |  | מעצב את כל הפיסקאות שבבחירה עם הסגנונות שנבחרו&#13;שים לב! כדי להחיל את העיצובים על פיסקאות ממוספרות יש להחליף את הרווח 
+button ApplyByNonStyle | עצב מלבד הסגנונות הנבחרים בטווח הנבחר | ApplyDesignButton_OnAction |  | מעצב את כל הפיסקאות שבבחירה מלבד הפיסקאות עם הסגנונות שנבחרו&#13;שים לב! כדי להחיל את העיצובים על פיסקאות ממוספרות יש לה
+splitButton RemoveSplitButton |  |  |  | 
+button RemoveAll | הסר עיצובים | RemoveDesignButton_OnAction |  | הסר את העיצובים מכל הפיסקאות הנבחרות
+menu RemoveMenu |  |  |  | 
+button RemoveByStyle | הסר עיצוב מהסגנונות הנבחרים בטווח הנבחר | RemoveDesignButton_OnAction |  | מסיר את העיצובים מכל הפיסקאות שבבחירה עם הסגנונות שנבחרו
+button RemoveByNonStyle | הסר עיצוב מלבד הסגנונות הנבחרים בטווח הנבחר | RemoveDesignButton_OnAction |  | מסיר את העיצובים בכל הפיסקאות שבבחירה מלבד הפיסקאות עם הסגנונות שנבחרו
+checkBox FirstWordCheckBox |  | CheckBox_OnAction | החל\הסר עיצוב מילה ראשונה | 
+checkBox HangingCheckBox |  | CheckBox_OnAction | החל\הסר עיצוב חלון תחת המילה הראשונה כמקובל בספרי קודש | התוכנה עוקפת באופן אוטומטי על פיסקאות עם פחות משתי שורות
+checkBox LastLineCheckBox |  | CheckBox_OnAction | החל\הסר עיצוב מירכוז שורה אחרונה | התוכנה עוקפת באופן אוטומטי על פיסקאות עם פחות משתי שורות
+menu FirstWordFormatOptions | מילה ראשונה |  | עיצוב מילה ראשונה בכל פיסקה | לחץ לפתיחת הגדרות עיצוב מילה ראשונה
+checkBox FirstWordOption2 | עם סגנון | FirstWord_OnAction |  | 
+checkBox FirstWordOption1 | ללא סגנון | FirstWord_OnAction |  | 
+checkBox FirstWordDinami | עצב באופן דינמי | CheckBox_OnAction | עצב באופן דינמי | מאפשר לשלוט על הפרמטרים שיעוצבו במילה הראשונה. כאשר שאר הפרמטרים יישארו עם עיצוב הפיסקה
+checkBox FirstWordLineSpacing | תיקון מרווח שורות | CheckBox_OnAction | תיקון מרווח שורות למדויק | מרווח שורות מדויק מונע את הרחבת המרווח בשורה הראשונה במקרה של הגדלת האות&#13;שים לב!! באם תרצה בעתיד להגדיל/להקטין את הפ
+checkBox FirstWordAlignmentUpwards | יישור כלפי מעלה | CheckBox_OnAction | יישור כלפי מעלה | משווה את גובה המילה הראשונה לגובה שאר הטקסט שבפיסקה
+menu HangingFirstWordOptions | עיצוב חלון    |  | עיצוב חלון תחת המילה הראשונה בכל פיסקה כמקובל בספרי קודש | לחץ לפתיחת הגדרות עיצוב חלון תחת המילה הראשונה
+checkBox HangingOption1 | רגיל | Hanging_OnAction |  | התוכנה עוקפת באופן אוטומטי על פיסקאות עם פחות משתי שורות
+checkBox HangingOption2 | חלון כפול | Hanging_OnAction |  | התוכנה עוקפת באופן אוטומטי על פיסקאות עם פחות משלוש שורות
+checkBox HangingOption3 | חלון כפול ב3 שורות | Hanging_OnAction |  | מחיל חלון כפול בפיסקאות של 3 שורות וחלון רגיל בשאר הפיסקאות
+checkBox HangingSkip2Lines | עקוף פסקאות עם שתי שורות | CheckBox_OnAction |  | 
+menu CenterLastLineOptions | שורה אחרונה |  | מירכוז שורה אחרונה כמקובל בספרי קודש |  לחץ לפתיחת הגדרות מירכוז שורה אחרונה
+checkBox LastLineCenterOption | מירכוז שורה אחרונה (Docx) | CheckBox_OnAction | השיטה הרווחת עבור מרכוז שורה אחרונה | שים לב! שיטה זו מגדירה את מרווח הטאבים במסמך ל-אפס
+checkBox LastLineBalanceOption | איזון שורה אחרונה | CheckBox_OnAction | איזון שורה אחרונה | מונע מילה בודדת בשורה האחרונה ע''י הגדלת המרווח בין המילים
+checkBox LastLineSkip2Lines | עקוף פסקאות עם שתי שורות | CheckBox_OnAction |  | במקרה והגדרתם עיצוב חלון כפול, עיצוב זה לא יחול על פיסקאות עם שלוש שורות
+button  | אפשרויות טורים |  |  | 
