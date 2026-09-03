@@ -8,6 +8,12 @@
 
 ## 1. איפה עומדים (מצב הענף)
 
+- **עדכון 3.9.2026 (סשן שלישי):** גם הקירובים 9-12 של מפת הפערים (§ג) מומשו ונדחפו ל-PR #37
+  (קומיט 105c4c9): צמצום מסמך (`doc-reduction.ts`, ספירה מ-`settledPageCount`), סימון עמודים
+  (`page-marking.ts` + `ui/shell/PageMarkingOverlay.vue`, תצלום ב-`storage`), סימני חיתוך
+  (`crop-marks.ts` + `styles/crop-marks.css`), פירוק מסמך — שוליים (`split-notes.ts` + `docx-builder.ts`,
+  נפתח בטאב חדש דרך `DRAFT_OPENER` ב-App.vue). **issue #39 במאגר** מרכז את כל התלויות במנוע —
+  להתחיל ממנו. עדיין פתוחים: §5.1 פריט 9 (מתאם), ו-13-14 (תלוי במדידת `<w:br/>` דרך `doc.replace`).
 - **עדכון 3.9.2026 (סשן שני):** הענף `feat/shulchan-safe-tools` נוצר מ-`origin/main` (אחרי PR #36),
   קומיט התיעוד של `feat/shulchan-fidelity` הובא אליו ב-cherry-pick, ו**פריטים 1-8 של §5.1 מומשו**
   (מנוע, דיאלוגים, לשונית, מבחנים, `docs/shulchan-haorech.md`). פריט 9 (מתאם „החל עיצובים”) עדיין פתוח.
