@@ -1489,3 +1489,60 @@ true })`, שנמדדה כקריאה טהורה: 1ms, ו-`history.get()` זהה �
 ושנדחתה כבר ב-`src/engine/line-number-layer.ts`. נמדד ש-`.editor-stack__host *`
 — מחלקה שלנו (`src/sessions/editor-swap.ts`) — נותנת תוצאה זהה בדיוק, ולכן גם
 אילו המסלול החזותי היה נשלח, לא היה בו צורך בשם פנימי.
+
+## גל 23 — אזכור „@” וקישורי עומק
+
+### `hyperlinks.wrap` נכשל על טווח שנכתב זה עתה
+
+`wrap` מחזירה `INVALID_TARGET` (`"hyperlinks.wrap could not resolve the target
+range."`) על טווח שנוצר בקריאת `doc.insert` שקדמה לה — גם כאשר
+`doc.ranges.resolve` על **אותו טווח בדיוק** מחזירה את הטקסט הנכון ואת אותם
+היסטים. נמדד ב-`scripts/qa/wrap-after-insert-probe.mjs`:
+
+```
+resolved: { text: "פסחים דף לד", start: 4, end: 15 }
+wrap:     { success: false, code: "INVALID_TARGET" }
+```
+
+**שלוש הסתעפויות שנשללו במדידה:**
+
+- **תזמון** — ניסיון שני אחרי `requestAnimationFrame` + 60ms נכשל זהה.
+- **`blockId` שהתחלף בהחלפה** — ה-`blockId` נקרא מהבחירה שאחרי ההכנסה והוא
+  זהה לזה שלפניה (`41964671`).
+- **סינון הסכימה** — `wrap` עם `href` של `https://example.com/x` על אותו טווח
+  נכשל באותה הודעה. כלומר ההודעה על „הטווח” אינה מכסה על דחיית `otzaria:`.
+
+`wrap` נמדדה עובדת רק על הטווח שהמשתמש סימן בעצמו — כך היא נקראת
+ב-`src/engine/hyperlinks-manage.ts`, וזה המסלול שממשיך לעבוד.
+
+### מה שנשלח במקומו
+
+מחיקת הטווח ואז הוספה: `doc.insert({ value: '' })` על האזכור, ואז
+`doc.hyperlinks.insert({ target: נקודה, text, link })`. שתי הפעולות נמדדו
+מצליחות ברצף, והתוצר נבדק ב-OOXML ולא בקבלה — `<w:hyperlink r:id>` בתוך
+`document.xml` יחד עם ה-`Relationship` התואם ב-`document.xml.rels`.
+
+`hyperlinks.insert` לבדה אינה מספיקה: נמדד שהיא **מוסיפה ואינה מחליפה**, וללא
+המחיקה שלפניה נשאר „@פסחים לד” לצד הקישור שנוצר.
+
+### `otzaria://` נחסם לציור, ולכן הקישור אינו לחיץ בתוך העורך
+
+ה-DomPainter מריץ כל `href` דרך סניטציה שמשווה את הסכימה מול רשימה קבועה —
+`http`, `https`, `mailto`, `tel`, `sms` (ו-`ftp`/`sftp`/`irc` כאופציונליות) —
+וחוסם את השאר עם `[DomPainter] Blocked potentially unsafe URL`. הקריאה
+לסניטציה נעשית **בלי להעביר אופציות**, כך ש-`allowedProtocols` הקיים בחתימה
+אינו נגיש מנקודת השימוש, ואין קונפיגורציה בבנאי.
+
+**מה זה כן שובר ומה לא:** הקישור נכתב ל-DOCX תקין ועובד בכל תוכנה שפותחת את
+הקובץ. מה שאינו עובד הוא לחיצה עליו **בתוך העורך שלנו**:
+`hyperlinks.onActivate` (`src/engine/otzaria-link-activation.ts`) אינו נקרא, כי
+המנוע חוסם את ה-href לפניו. ה-handler נשאר מחווט — הוא נכון, זול, ויתחיל
+לעבוד ברגע שהסכימה תעבור.
+
+השער `scripts/qa/at-mention-qa.mjs` מודד את הפער הזה בצעד נפרד ומדווח אותו
+כ„חלקי”, כך שסגירתו במעלה הזרם תיראה מיד.
+
+### `hyperlink-nested-unsupported`
+
+הוספת קישור כשהסמן כבר בתוך קישור קיים נכשלת בקוד הזה, עם הודעה באנגלית מן
+המנוע. `at-mention-overlay.ts` מתרגם אותו להודעה בעברית ואינו מנסה לעקוף.

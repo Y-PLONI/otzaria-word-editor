@@ -14,6 +14,7 @@
 import type { SuperDoc } from 'superdoc';
 import { call, isPermissionDenied, hostErrorCode } from './otzaria-client';
 import { readDocSelection, type SelectionDocumentApi } from '../engine/doc-selection';
+import type { OtzariaLinkTarget } from '../engine/otzaria-link';
 import {
   readDocCapabilities,
   type CapabilitiesDocumentApi,
@@ -26,6 +27,7 @@ import {
 } from '../engine/document-api';
 import type {
   GetSectionTextMapArgs,
+  ResolvedRefHit,
   NavigationTarget,
   OpenSearchTabArgs,
   ReaderRefState,
@@ -53,6 +55,8 @@ export const READER_PERMISSIONS: Record<string, string> = {
   'reader.getSectionTextMap': 'reader.open',
   'navigation.goTo': 'navigation.write',
   'reader.addContextMenuItem': 'reader.context_menu',
+  'library.resolveRef': 'library.books.read',
+  'reader.openBook': 'reader.open',
 };
 
 /**
@@ -211,6 +215,71 @@ export async function getSectionTextMap(
 
   if (!data || typeof data !== 'object') return { ok: true, value: null };
   return { ok: true, value: data as SectionTextMapResult };
+}
+
+/**
+ * פותרת הפניה חופשית („פסחים לד”) למיקומים מועמדים, דרך מנוע `find_ref` של
+ * אוצריא — אותו מנוע שמאחורי מסך „איתור מקורות”.
+ *
+ * הרזולוציה נשארת באוצריא במכוון: טבלת ראשי-התיבות שלה מונה עשרות אלפי
+ * מונחים, והנרמול שלה מוצמד לזה שבנה את אינדקס ההפניות. פורט מקומי היה סוטה
+ * ממנו בשקט, ובלי גישה לאותן טבלאות גם לא היה מגיע לרזולוציית שורה.
+ *
+ * רשימה ריקה אינה כשל — היא „לא נמצאה התאמה”, שהוא המצב השכיח בזמן הקלדה.
+ */
+export async function resolveRef(
+  ref: string,
+  limit = 8,
+): Promise<ReaderResult<ResolvedRefHit[]>> {
+  let data: unknown;
+  try {
+    data = await call<unknown>('library.resolveRef', { ref, limit });
+  } catch (error) {
+    return hostFailure('library.resolveRef', 'איתור ההפניה נכשל', error);
+  }
+
+  if (!Array.isArray(data)) return { ok: true, value: [] };
+  return { ok: true, value: data.filter(isResolvedRefHit) };
+}
+
+/**
+ * שומרת שהצורה שהגיעה מהגשר היא באמת התאמה. `index` הוא השדה שהקישור נבנה
+ * ממנו, ולכן ערך חסר או לא-מספרי חייב להיפסל כאן ולא להפוך ל-`NaN` ב-href.
+ */
+function isResolvedRefHit(value: unknown): value is ResolvedRefHit {
+  if (!value || typeof value !== 'object') return false;
+  const hit = value as Record<string, unknown>;
+  return (
+    typeof hit.title === 'string' &&
+    typeof hit.reference === 'string' &&
+    typeof hit.index === 'number' &&
+    Number.isFinite(hit.index)
+  );
+}
+
+/**
+ * פותחת יעד של קישור `otzaria://` שנלחץ במסמך.
+ *
+ * `detection` מועבר כשאילתה למסך „איתור מקורות” של אוצריא — זה היעד שנכתב
+ * כשלא היה מזהה חד-משמעי, והפתירה שם היא של אוצריא עצמה.
+ */
+export async function openOtzariaLink(target: OtzariaLinkTarget): Promise<ReaderResult> {
+  try {
+    if (target.kind === 'detection') {
+      await call('reader.openSearchTab', { query: target.query });
+      return { ok: true, value: undefined };
+    }
+    await call('reader.openBook', {
+      id: target.id,
+      index: target.index,
+      type: target.kind === 'pdf' ? 'pdf' : 'text',
+      navigateToPositionIfReused: true,
+    });
+    return { ok: true, value: undefined };
+  } catch (error) {
+    const method = target.kind === 'detection' ? 'reader.openSearchTab' : 'reader.openBook';
+    return hostFailure(method, 'פתיחת הקישור נכשלה', error);
+  }
 }
 
 /** הראשון מבין המועמדים שיש בו טקסט. `''` אינו „קיים” — הוא בחירה ריקה. */

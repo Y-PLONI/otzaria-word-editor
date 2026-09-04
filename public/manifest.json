@@ -19,7 +19,8 @@
     "app.startup_contributions",
     "navigation.write",
     "clipboard.read",
-    "library.refresh"
+    "library.refresh",
+    "library.books.read"
   ],
   "contributes": {
     "startup": {

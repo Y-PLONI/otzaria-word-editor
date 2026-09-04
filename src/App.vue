@@ -427,6 +427,7 @@ import { ACTIVE_MACROS, installMacros, type MacrosHandle } from './engine/macros
 import { registerShulchanTools } from './engine/shulchan/tools-registration';
 import MacrosDialog from './ui/panels/MacrosDialog.vue';
 import { installBookCompletion } from './engine/book-completion-overlay';
+import { installAtMention } from './engine/at-mention-overlay';
 import { preflightSource } from './engine/docx-preflight';
 import { installDocumentFontAliases } from './engine/docx-fonts';
 import {
@@ -3727,6 +3728,23 @@ watch([activeEditorContainer, activeSuperdoc, bookCompletionEnabled, documentGen
 });
 
 /**
+ * אזכור „@” (engine/at-mention-overlay.ts), על אותו container ובאותו תנאי
+ * `documentGeneration` כמו ההשלמה מהספר.
+ *
+ * בלי טוגל, בשונה ממנה: „@” כמעט אינו מופיע בטקסט עברי רץ, ולכן אין כאן רעש
+ * להשתיק — הרשימה נפתחת רק על אזכור, וגם אז רק אחרי שני תווים.
+ */
+let atMention: ReturnType<typeof installAtMention> | null = null;
+watch([activeEditorContainer, activeSuperdoc, documentGeneration], () => {
+  atMention?.dispose();
+  atMention = null;
+  if (!activeEditorContainer.value || !activeSuperdoc.value) return;
+  atMention = installAtMention(activeEditorContainer.value, activeSuperdoc.value, {
+    onStatus: (message, isError) => setStatus(message, isError),
+  });
+});
+
+/**
  * עד איפה מגיעים הפסים בפועל — הגובל שמחזיק את החשיפה פתוחה.
  *
  * נמדד ולא קבוע: הגובה תלוי במה שמוצג — רצועה מכונסת, סרגל מידות כבוי, שורת
@@ -4679,6 +4697,8 @@ onUnmounted(() => {
   unsavedPrompt.dispose();
   bookCompletion?.dispose();
   bookCompletion = null;
+  atMention?.dispose();
+  atMention = null;
   zoomCenter?.dispose();
   zoomCenter = null;
   shortcuts?.dispose();

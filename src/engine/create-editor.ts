@@ -19,6 +19,8 @@ import { installFormatPainter } from './format-painter';
 import { localizeEngineChrome } from './hf-chrome';
 import { installPointerSnap } from './pointer-snap';
 import { installWordSelection } from './word-selection';
+import { createOtzariaLinkActivation } from './otzaria-link-activation';
+import { openOtzariaLink } from '../host/otzaria-reader';
 import { engineWorkerUrls } from './workers';
 
 export interface EditorSession {
@@ -197,6 +199,16 @@ export function createEditor(options: CreateEditorOptions): Promise<EditorSessio
 
       // התוסף עובד אופליין וללא הרשאת רשת; טלמטריה תיצור קריאות שייחסמו.
       telemetry: { enabled: false },
+
+      // לחיצה על קישור `otzaria://` מנווטת בקורא. ברירת המחדל של המנוע היא
+      // פתיחה בדפדפן, וה-WebView חוסם `window.open` — כלומר בלי זה קישור
+      // עומק שנוצר במסמך (ראו at-mention.ts) אינו עושה דבר. כל href אחר
+      // ממשיך להתנהג כרגיל.
+      hyperlinks: {
+        onActivate: createOtzariaLinkActivation({
+          navigate: (target) => void openOtzariaLink(target),
+        }),
+      },
 
       // דיאלוג הסיסמה המובנה של המנוע פועל גם כש-ui: false — הוא surface של
       // modules ולא של ui — והוא "לוקח אחריות" על DOCX מוצפן: הוא מטפל
