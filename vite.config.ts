@@ -3,6 +3,8 @@ import vue from '@vitejs/plugin-vue';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { TORAH_DICTIONARY_FILE, TORAH_DICTIONARY_GLOBAL } from './src/engine/spellcheck';
+import { ACRONYMS_FILE, ACRONYMS_GLOBAL } from './src/engine/acronyms-constants';
+import { STATIC_COMPLETION_FILE, STATIC_COMPLETION_GLOBAL } from './src/engine/static-completion-constants';
 import { patchBlankDocumentXml, patchBlankStylesXml } from './src/engine/blank-document';
 import { deriveHebrewBlankDocx } from './scripts/blank-docx';
 
@@ -310,6 +312,75 @@ function torahDictionaryAsset(): Plugin {
   };
 }
 
+/**
+ * מילון ראשי-התיבות (`Acronyms.json`, 13,105 ערכים) — נכס נפרד באותה שיטה
+ * בדיוק כמו `torahDictionaryAsset` למעלה, ומאותו טעם: IIFE יחיד עם
+ * `inlineDynamicImports: true` היה בולע `import` של הנתונים לתוך `assets/app.js`.
+ *
+ * שלא כמו מילון האיות (מחרוזת שטוחה, ליטרל תבנית), כאן המבנה הוא אובייקט
+ * מקונן — `JSON.stringify` מייצר ליטרל אובייקט חוקי ב-JS ישירות (הבטיחות
+ * מובנית בו, לא צריך את מגבלת התווים הידנית של `PACKABLE`), ולכן אין טעם
+ * להעתיק את תבנית ה-backtick.
+ */
+function acronymsAsset(): Plugin {
+  const SOURCE = fileURLToPath(new URL('./src/data/acronyms.json', import.meta.url));
+
+  function build(): string {
+    const raw = readFileSync(SOURCE, 'utf8');
+    const data = JSON.parse(raw) as Record<string, unknown>; // זורק אם ה-JSON פגום — כשל build, לא כשל בזמן ריצה
+    return `window.${ACRONYMS_GLOBAL} = ${JSON.stringify(data)};\n`;
+  }
+
+  return {
+    name: 'otzaria-acronyms',
+
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        if (!req.url || req.url.split('?')[0] !== `/${ACRONYMS_FILE}`) return next();
+        res.setHeader('Content-Type', 'text/javascript; charset=utf-8');
+        res.end(build());
+      });
+    },
+
+    generateBundle() {
+      this.emitFile({ type: 'asset', fileName: ACRONYMS_FILE, source: build() });
+    },
+  };
+}
+
+/**
+ * ביטויים תלמודיים + מחברים (`src/data/talmudic-phrases.json`,
+ * `authors.json`) — נכס נפרד, מאותו טעם בדיוק כמו `acronymsAsset` למעלה:
+ * `import` ישיר הכניס אותם ל-`assets/app.js` ואחד הביטויים התנגש בטעות עם
+ * סמן ה-`check:dist` של המילון התורני (ר' `static-completion.ts`).
+ */
+function staticCompletionAsset(): Plugin {
+  const PHRASES_SOURCE = fileURLToPath(new URL('./src/data/talmudic-phrases.json', import.meta.url));
+  const AUTHORS_SOURCE = fileURLToPath(new URL('./src/data/authors.json', import.meta.url));
+
+  function build(): string {
+    const phrases = JSON.parse(readFileSync(PHRASES_SOURCE, 'utf8')) as unknown;
+    const authors = JSON.parse(readFileSync(AUTHORS_SOURCE, 'utf8')) as unknown;
+    return `window.${STATIC_COMPLETION_GLOBAL} = ${JSON.stringify({ phrases, authors })};\n`;
+  }
+
+  return {
+    name: 'otzaria-static-completion',
+
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        if (!req.url || req.url.split('?')[0] !== `/${STATIC_COMPLETION_FILE}`) return next();
+        res.setHeader('Content-Type', 'text/javascript; charset=utf-8');
+        res.end(build());
+      });
+    },
+
+    generateBundle() {
+      this.emitFile({ type: 'asset', fileName: STATIC_COMPLETION_FILE, source: build() });
+    },
+  };
+}
+
 const BLANK_DOCX_MODULE = 'virtual:otzaria-blank-docx';
 
 /**
@@ -334,7 +405,15 @@ function hebrewBlankDocx(): Plugin {
 
 export default defineConfig({
   base: './',
-  plugins: [vue(), hebrewBlankDocx(), torahDictionaryAsset(), inlineEngineWorkers(), deferredEntry()],
+  plugins: [
+    vue(),
+    hebrewBlankDocx(),
+    torahDictionaryAsset(),
+    acronymsAsset(),
+    staticCompletionAsset(),
+    inlineEngineWorkers(),
+    deferredEntry(),
+  ],
   worker: { format: 'iife' },
 
   // ברירת המחדל של Vite ב-build היא legalComments: 'none', והיא מוחקת את באנר

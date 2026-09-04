@@ -15,6 +15,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { READER_PERMISSIONS, SEND_TO_DOCUMENT_ITEM } from '../../src/host/otzaria-reader';
+import { LIBRARY_PERMISSIONS } from '../../src/host/otzaria-library';
 
 /** vitest רץ משורש המאגר, ולכן public/ נמצא ביחס ל-cwd. */
 const manifest = JSON.parse(
@@ -29,6 +30,15 @@ describe('public/manifest.json', () => {
   it('מצהיר על כל ההרשאות שהקוד צורך מהקורא ומהניווט', () => {
     const declared = new Set(manifest.permissions ?? []);
     const missing = [...new Set(Object.values(READER_PERMISSIONS))].filter(
+      (permission) => !declared.has(permission),
+    );
+
+    expect(missing).toEqual([]);
+  });
+
+  it('מצהיר על כל ההרשאות שתיוג המקורות (source-tagging) צורך מהספרייה', () => {
+    const declared = new Set(manifest.permissions ?? []);
+    const missing = [...new Set(Object.values(LIBRARY_PERMISSIONS))].filter(
       (permission) => !declared.has(permission),
     );
 

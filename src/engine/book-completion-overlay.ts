@@ -53,15 +53,27 @@ import {
   sliceWords,
   type SectionWordCache,
 } from './book-completion';
+import { matchStaticCompletion, loadStaticSources } from './static-completion';
+import {
+  findOpenTagToken,
+  findBookNameInQuery,
+  resolveSourceTag,
+  buildSourceTagHref,
+  buildTocIndex,
+} from './source-tagging';
 import {
   getCurrentReaderState,
   getSectionTextMap,
   normalizeSelectedText,
 } from '../host/otzaria-reader';
+import { getLibraryBookNames, getBookMetadata, getBookToc } from '../host/otzaria-library';
 import { on } from '../host/otzaria-client';
 
 export interface CompletionDoc extends WordSelectionDoc {
   insert?: (input: { value: string; type: 'text'; target?: unknown }) => MaybePromise<DocReceipt>;
+  hyperlinks?: {
+    wrap?: (input: Record<string, unknown>) => MaybePromise<DocReceipt>;
+  };
 }
 
 /** מלבן צבוע, כפי ש-`ui.selection.getAnchorRect` מחזירה אותו. */
@@ -159,6 +171,14 @@ interface TypedSnapshot {
   cursorOffset: number;
   blockId: string;
   story: unknown;
+  /**
+   * הטקסט הגולמי בחלון, מתחילתו ועד הסמן — כולל `@` ורווחים, לא רק מילים.
+   * נדרש לזיהוי token של תיוג מקורות (source-tagging.ts); שאר ההשלמות בקובץ
+   * הזה עובדות על `precedingWords`/`partialWord` בלבד.
+   */
+  rawBeforeText: string;
+  /** ההיסט בבלוק שבו מתחיל `rawBeforeText` (תואם ל-`base` הפנימי). */
+  rawBeforeStart: number;
 }
 
 async function readTypedSnapshot(doc: CompletionDoc): Promise<TypedSnapshot | null> {
@@ -212,6 +232,8 @@ async function readTypedSnapshot(doc: CompletionDoc): Promise<TypedSnapshot | nu
     cursorOffset: seed.offset,
     blockId: seed.blockId,
     story: seed.story,
+    rawBeforeText: beforeText,
+    rawBeforeStart: base,
   };
 }
 
@@ -440,6 +462,17 @@ export function installBookCompletion(
       return;
     }
 
+    // תיוג מקורות עם @ חוסם את שתי צורות ההשלמה הקיימות לגמרי לאותה הקשה —
+    // שתיהן מאזינות לאותו input/keyup ותופסות את אותו Tab, וההתנגשות נמדדה
+    // מראש (docs/smart-source-completion-plan.md). אין ghost לתיוג — ההמרה
+    // לקישור שקטה וחיה, ברגע שסימון העמוד מזוהה.
+    const tagToken = findOpenTagToken(snapshot.rawBeforeText);
+    if (tagToken) {
+      clearSuggestion();
+      void evaluateSourceTag(tagToken, snapshot, token);
+      return;
+    }
+
     const titleMatch = currentBook
       ? matchBookTitle(currentBook, currentRef, snapshot)
       : null;
@@ -499,7 +532,94 @@ export function installBookCompletion(
       }
     }
 
+    // אין התאמה מהספר הפתוח בקורא — fallback למילונים הסטטיים (ביטויים
+    // תלמודיים, מחברים). לא זזה עדיפות: זה תמיד המסלול האחרון, אחרי ששני
+    // המסלולים למעלה כבר לא מצאו כלום לאותה הקשה בדיוק. הנכס נטען עצלה —
+    // רק כשיש בפועל צורך ב-fallback, לא בעליית התוסף.
+    const staticSources = await loadStaticSources();
+    if (token !== evalToken || disposed) return; // ריצה מאוחרת יותר כבר התחילה בזמן ההמתנה לנכס
+    const staticMatch = staticSources ? matchStaticCompletion(snapshot, staticSources) : null;
+    if (staticMatch) {
+      const ghostText = normalizeSelectedText(staticMatch.text);
+      if (ghostText !== '') {
+        suggestion = {
+          kind: 'suggesting',
+          ghostText,
+          insertText: ghostText,
+          replaceStart: snapshot.replaceStart,
+          cursorOffset: snapshot.cursorOffset,
+          blockId: snapshot.blockId,
+          story: snapshot.story,
+          continueFrom: null,
+        };
+        showGhost(ghostText);
+        return;
+      }
+    }
+
     clearSuggestion();
+  }
+
+  /** ההיסט האחרון שכבר עטפנו כקישור — למניעת wrap חוזר על אותו token פתוח. */
+  let lastWrappedKey: string | null = null;
+
+  /**
+   * תיוג מקורות: פענוח `token`, פתרון מול הספרייה (RPC עצל), ועטיפה כקישור
+   * `otzaria://` אמיתי ברגע שנמצאת התאמה. שרשרת א-סינכרונית (עד שלוש קריאות
+   * RPC) — `expectedToken` בודק בכל צעד שההקשה הזאת עדיין הרלוונטית, כמו כל
+   * מקום אחר בקובץ שממתין למנוע.
+   *
+   * **לא נבדק מול מנוע אמיתי** (אין סביבת בדיקה זמינה כאן) — `doc.hyperlinks.wrap`
+   * על טווח שכבר נעטף פעם קודמת (אם `lastWrappedKey` פספס מקרה קצה) הוא
+   * המסלול שהכי דורש אימות ידני לפני מיזוג.
+   */
+  async function evaluateSourceTag(
+    tagToken: { atOffset: number; query: string },
+    snapshot: TypedSnapshot,
+    expectedToken: number,
+  ): Promise<void> {
+    if (!doc) return;
+
+    const namesResult = await getLibraryBookNames();
+    if (expectedToken !== evalToken || disposed) return;
+    if (!namesResult.ok) return; // כשל טעינה — לא מציגים שגיאה על כל הקשה, פשוט אין הצעה
+
+    const bookMatch = findBookNameInQuery(namesResult.value, tagToken.query);
+    if (!bookMatch) return;
+
+    const metaResult = await getBookMetadata(bookMatch.bookId);
+    if (expectedToken !== evalToken || disposed) return;
+    if (!metaResult.ok || typeof metaResult.value.id !== 'number') return;
+
+    const tocResult = await getBookToc(bookMatch.bookId);
+    if (expectedToken !== evalToken || disposed) return;
+    if (!tocResult.ok) return;
+
+    const resolved = resolveSourceTag(tagToken.query, bookMatch, buildTocIndex(tocResult.value));
+    if (!resolved) return; // אין סימון עמוד מוכר, או שהוא לא נמצא ב-toc — נשאר טקסט רגיל, בכוונה
+
+    const blockAtOffset = snapshot.rawBeforeStart + tagToken.atOffset;
+    const blockEndOffset = blockAtOffset + 1 + resolved.consumedLength; // ה-1 הוא ה-`@` עצמו
+    const key = `${snapshot.blockId}:${blockAtOffset}`;
+    if (key === lastWrappedKey) return; // כבר עטפנו את ה-token הזה — לא חוזרים על wrap בכל הקשה נוספת אחריו
+
+    const wrap = doc.hyperlinks?.wrap;
+    if (typeof wrap !== 'function') return;
+
+    const href = buildSourceTagHref(metaResult.value.id, resolved.tocIndex);
+    const target: Record<string, unknown> = {
+      kind: 'text',
+      blockId: snapshot.blockId,
+      range: { start: blockAtOffset, end: blockEndOffset },
+      ...(snapshot.story ? { story: snapshot.story } : {}),
+    };
+
+    lastWrappedKey = key; // נקבע לפני ה-await: לא רוצים מרוץ שמנסה לעטוף פעמיים תוך כדי ההמתנה לתשובה
+    try {
+      await wrap({ target, link: { destination: { href } } });
+    } catch (error) {
+      console.warn('[otzaria-word] תיוג מקור: יצירת הקישור נכשלה', error);
+    }
   }
 
   function scheduleEvaluate(): void {
