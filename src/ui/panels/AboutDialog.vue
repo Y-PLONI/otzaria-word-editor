@@ -101,7 +101,7 @@ import SvgIcon from '../icons/SvgIcon.vue';
 
 /** ראו ההסבר למעלה: מקור האמת הוא package.json. */
 const APP_VERSION = '2.0.0';
-const ENGINE_VERSION = '2.12.0';
+const ENGINE_VERSION = '2.13.0';
 
 /** מקשר את החלון לכותרת שלו — השם הנגיש שחסר לו. */
 const TITLE_ID = 'about-dialog-title';
