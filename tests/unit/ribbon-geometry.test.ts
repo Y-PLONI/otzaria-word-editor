@@ -148,6 +148,14 @@ describe('גאומטריה נגזרת', () => {
     expect(body).not.toMatch(/min-height/);
   });
 
+  it('לגובה הרצועה הגדרה אחת — אין רוחב חלון שדורס אותה', () => {
+    // `@media (max-width: 600px) { --ribbon-height: auto }` נשאר מהשלד הראשון,
+    // ומתחת ל-600px כל לשונית קיבלה שוב את גובה התוכן שלה: 49px ללשונית שכל
+    // קבוצותיה צ'יפים, 94px לשכנתה (scripts/qa/ribbon-collapse-qa.mjs).
+    const code = TOKENS.replace(/\/\*[\s\S]*?\*\//g, '');
+    expect([...code.matchAll(/--ribbon-height\s*:/g)]).toHaveLength(1);
+  });
+
   it('תוכן הקבוצה בגובה קבוע — זה מה שמשווה בין הלשוניות', () => {
     const content = block(RIBBON_CSS, '\\.word-group-content');
     expect(content).toMatch(/height:\s*var\(--ribbon-content-h\)/);

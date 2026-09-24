@@ -197,23 +197,36 @@
   overflow: auto;
 }
 
-/* הצ'יפ תופס את גובה הקבוצה כולה — תוכן וכותרת גם יחד — ולכן `flex: 1`
-   ולא גובה משלו: הקבוצה נמתחת לגובה הרצועה (`align-items: stretch` בגוף). */
+/* הצ'יפ הוא הכפתור הגדול של Word לקבוצה מכווצת: אייקון 32, השם מתחתיו, והחץ
+   בסוף השם. הוא תופס את גובה הקבוצה כולה — תוכן וכותרת גם יחד, כי השם שלו
+   הוא הכותרת — ולכן `flex: 1` ולא גובה משלו: הקבוצה נמתחת לגובה הרצועה.
+
+   מה שעושה אותו אחיד עם השכנים הוא הריפוד העליון, ולא מרכוז: `.btn-large`
+   ממרכז אייקון + רווח + שורת תווית בתוך `--ribbon-content-h`, והריפוד כאן הוא
+   בדיוק אותו מרחק (פחות הגבול). כך האייקון והשורה הראשונה של השם יושבים על
+   אותם פיקסלים של האייקון והתווית של כל כפתור גדול ברצועה, ושם בן שתי שורות
+   ממשיך למטה לאזור הכותרת — כמו ב-Word — במקום להזיז את האייקון למעלה.
+   `1.2em` הוא גובה השורה של התווית, ולכן `font-size` ו-`line-height` כאן
+   חייבים להיות אלה של `.btn-large .btn-label`. */
 .word-group-chip {
+  --chip-icon: 32px;
+  --chip-gap: 2px;
   display: flex;
   flex: 1;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 3px;
-  min-width: 44px;
-  max-width: 104px;
-  padding: 2px 6px;
+  justify-content: flex-start;
+  gap: var(--chip-gap);
+  min-width: 48px;
+  max-width: 84px;
+  padding: calc((var(--ribbon-content-h) - var(--chip-icon) - var(--chip-gap) - 1.2em) / 2 - 1px) 6px 2px;
   background: transparent;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   color: var(--color-on-surface);
   font-family: var(--font-main);
+  font-size: 11px;
+  line-height: 1.2;
   cursor: pointer;
   transition: background 0.08s ease, border-color 0.08s ease;
 }
@@ -233,22 +246,26 @@
   outline-offset: -2px;
 }
 
+/* עד שתי שורות, ואז חיתוך — ולא שורה אחת עם שלוש נקודות: „כותרת עליונה
+   ות…” לא אמר למשתמש מה יש בפנים. שתי שורות נכנסות בגובה הקבוצה (אייקון 32
+   ועוד 2×13 בתוך 85), וזה מה שמאפשר גם צ'יפ צר מ-84px. `balance` מחלק שם
+   ארוך לשתי שורות דומות, כמו ב-Word, ולא למילה אחת יתומה בשנייה. */
 .word-group-chip__label {
-  display: flex;
-  align-items: center;
-  gap: 2px;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
   max-width: 100%;
-  color: var(--word-group-label-color);
-  font-size: var(--font-size-group-title);
-  line-height: 1.2;
+  text-align: center;
+  text-wrap: balance;
+  overflow-wrap: anywhere;
 }
 
-/* השם נחתך ולא עוטף: צ'יפ שגדל לשתי שורות היה מוציא את הקבוצה מגובה הרצועה,
-   וכל החשבון של הכיווץ נשען על כך שרוחב הצ'יפ ידוע וקטן. */
-.word-group-chip__text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* החץ נצמד למילה האחרונה (ה-word joiner ב-RibbonGroup.vue). */
+.word-group-chip__arrow {
+  margin-inline-start: 3px;
+  vertical-align: middle;
+  color: var(--color-on-surface-variant);
 }
 
 /* קבוצה שנצמדת לקצה הרצועה (בעברית — שמאל), כמו „עזרה” ב-Word. `auto` על
@@ -471,6 +488,89 @@
 .word-split__arrow:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+/* ------------------------------------------------------------------ */
+/* שלבי ההקטנה שלפני הכיווץ (ui/ribbon/overflow.ts)                      */
+/* ------------------------------------------------------------------ */
+
+/* השלב נכתב כ-`data-scale` על שורש הקבוצה: 1 בינוני, 2 קטן, ובלי התכונה —
+   פרוש. CSS בלבד, בכוונה: הבקר מודד את רוחב הקבוצה בכל שלב בכתיבה וקריאה
+   סינכרונית, ומה שדורש רינדור של Vue לא היה ניתן למדידה כך.
+
+   **בינוני** — מה ש-Word עושה: הכפתורים הגדולים נעשים קטנים, בטורים של
+   שלושה. רשת של שלוש שורות מפורשות: שלוש שורות של `--ribbon-row-h` עם שני
+   רווחים הן בדיוק `--ribbon-content-h`, ולכן הגובה של הקבוצה אינו זז באף
+   שלב, ו-`span 3` אומר במפורש „טור שלם” על מה שאינו כפתור בודד.
+
+   מה שאינו כפתור גדול בודד — מחסנית, גלריה, בורר, כפתור מפוצל גדול — תופס
+   טור שלם ונשאר כמו שהוא: הוא כבר בנוי לגובה הקבוצה.
+
+   גם הגדול הראשון בקבוצה אינו מוקטן באף שלב (`:nth-child(1 of …)` בכל
+   הכללים למטה): הוא הפעולה הראשית שלה — „הדבק”, „תוכן עניינים”, „אודות” —
+   ו-Word משאיר אותו גדול עד שהקבוצה כולה מתקפלת. הגדול הראשון ולא הילד
+   הראשון: ב„מידע” המחסנית קודמת ל„אודות”, ו-`:first-child` הקטין את „אודות”
+   לאייקון בודד שצף בראש הטור. קבוצה של כפתור גדול אחד („טבלה”) אינה
+   מתכווצת בשלבים כלל, רק לצ'יפ. */
+.word-ribbon-group[data-scale] .word-group-content:not(.column-flow) {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(3, var(--ribbon-row-h));
+  row-gap: var(--ribbon-row-gap);
+  column-gap: 3px;
+  align-items: center;
+  justify-items: stretch;
+}
+
+.word-ribbon-group[data-scale] .word-group-content:not(.column-flow) > * {
+  grid-row: span 3;
+}
+
+.word-ribbon-group[data-scale] .word-group-content:not(.column-flow) > .word-btn.btn-large:not(:nth-child(1 of .word-btn.btn-large, .ribbon-menu--large, .color-picker-container--large)),
+.word-ribbon-group[data-scale] .word-group-content:not(.column-flow) > .ribbon-menu--large:not(.ribbon-menu--split):not(:nth-child(1 of .word-btn.btn-large, .ribbon-menu--large, .color-picker-container--large)) {
+  grid-row: span 1;
+}
+
+.word-ribbon-group[data-scale] .word-group-content > .word-separator {
+  display: none;
+}
+
+/* הכפתור הגדול בלבוש של `.btn-small`, בדיוק באותן מידות — כדי שבטור אחד עם
+   מחסנית שכנה השורות יתיישרו. האייקון מקבל גודל מה-`style` של SvgIcon, ולכן
+   `!important` הוא הדרך היחידה לגבור עליו מכאן. */
+.word-ribbon-group[data-scale] .word-group-content > .word-btn.btn-large:not(:nth-child(1 of .word-btn.btn-large, .ribbon-menu--large, .color-picker-container--large)),
+.word-ribbon-group[data-scale] .word-group-content > .ribbon-menu--large:not(.ribbon-menu--split):not(:nth-child(1 of .word-btn.btn-large, .ribbon-menu--large, .color-picker-container--large)) > .word-btn.btn-large {
+  flex-direction: row;
+  justify-content: flex-start;
+  gap: 4px;
+  height: var(--ribbon-row-h);
+  min-width: 0;
+  width: 100%;
+  padding: 2px 6px;
+}
+
+.word-ribbon-group[data-scale] .word-group-content > .word-btn.btn-large:not(:nth-child(1 of .word-btn.btn-large, .ribbon-menu--large, .color-picker-container--large)) > .svg-icon,
+.word-ribbon-group[data-scale] .word-group-content > .ribbon-menu--large:not(.ribbon-menu--split):not(:nth-child(1 of .word-btn.btn-large, .ribbon-menu--large, .color-picker-container--large)) > .word-btn.btn-large > .svg-icon {
+  width: 16px !important;
+  height: 16px !important;
+}
+
+/* **קטן** — התוויות יורדות ונשאר האייקון. מוסתרות לעין ולא `display: none`:
+   בכפתור עם תווית גלויה אין `aria-label` (RibbonButton.vue), והתווית היא
+   השם הנגיש שלו. הטולטיפ נושא את השם גם הוא (`data-tip-title`).
+
+   רק בכפתור שיש לו אייקון (`.word-btn--icon`, RibbonButton.vue): ב„שולחן העורך” יש כפתורים
+   של תווית בלבד („גודל עמוד ושוליים”, „סמן עמודים”), והסתרת התווית השאירה
+   שם קבוצה ריקה. */
+.word-ribbon-group[data-scale='2'] .word-btn--icon.btn-small > .btn-label,
+.word-ribbon-group[data-scale='2'] .word-group-content > .word-btn--icon.btn-large:not(:nth-child(1 of .word-btn.btn-large, .ribbon-menu--large, .color-picker-container--large)) > .btn-label,
+.word-ribbon-group[data-scale='2'] .word-group-content > .ribbon-menu--large:not(.ribbon-menu--split):not(:nth-child(1 of .word-btn.btn-large, .ribbon-menu--large, .color-picker-container--large)) > .word-btn--icon.btn-large > .btn-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 /* @pointerdown.prevent על פקדי הרצועה שומר את הבחירה בעורך, ובמחיר הזה הכפתור

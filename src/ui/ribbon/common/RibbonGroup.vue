@@ -23,17 +23,19 @@
       @pointerdown.prevent
       @click="toggle"
     >
+      <!-- 32 ולא 18: הצ'יפ הוא כפתור גדול לכל דבר, כמו ב-Word, והאייקון שלו
+           יושב באותו גובה בדיוק של האייקונים הגדולים בקבוצות השכנות. -->
       <SvgIcon
         :name="icon"
-        :size="18"
+        :size="32"
       />
-      <span class="word-group-chip__label">
-        <span class="word-group-chip__text">{{ menuString(title) }}</span>
-        <SvgIcon
-          name="chevronDown"
-          :size="8"
-        />
-      </span>
+      <!-- U+2060 (word joiner) בין השם לחץ: אלמנט מוטבע הוא נקודת שבירה, ובלעדיו
+           החץ יכול לרדת לבדו לשורה שנייה. -->
+      <span class="word-group-chip__label">{{ menuString(title) }}&#8288;<SvgIcon
+        class="word-group-chip__arrow"
+        name="chevronDown"
+        :size="8"
+      /></span>
     </button>
 
     <!--
@@ -56,10 +58,9 @@
       >
         <slot />
       </div>
-      <div
-        v-if="!collapsed"
-        class="word-group-footer"
-      >
+      <!-- הכותרת נשארת גם בפופאובר: הקבוצה שנפתחת מהצ'יפ נראית בדיוק כמו
+           ברצועה, באותו גובה — כמו ב-Word — ולא כפס פקדים בלי שם. -->
+      <div class="word-group-footer">
         <span class="word-group-title">{{ menuString(title) }}</span>
       </div>
     </div>

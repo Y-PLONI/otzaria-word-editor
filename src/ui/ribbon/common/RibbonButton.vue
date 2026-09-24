@@ -4,7 +4,7 @@
     class="word-btn"
     :class="[
       `btn-${variant}`,
-      { active: active }
+      { active: active, 'word-btn--icon': !!icon }
     ]"
     :disabled="disabled"
     :aria-label="accessibleName"
