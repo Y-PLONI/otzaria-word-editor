@@ -152,7 +152,10 @@ describe('הטוקן שב-TypeScript הוא הטוקן שב-CSS', () => {
 
   it('המסילה משתמשת בצבע משטח נפרד מצבע הקנבס', () => {
     expect(source('styles', 'shell.css')).toContain(
-      'scrollbar-color: var(--color-outline) var(--color-surface-container-high);',
+      'scrollbar-color: var(--color-outline) var(--color-surface);',
+    );
+    expect(source('styles', 'shell.css')).toContain(
+      'background: var(--statusbar-bg);',
     );
   });
 });

@@ -86,6 +86,39 @@ async function palette() {
   if (!await app.click('צבע רקע העורך', { after: 100 })) throw new Error('בורר הרקע לא נפתח');
 }
 
+async function checkScrollbarMatchesStatusBar(theme) {
+  const point = JSON.parse(await app.js(`JSON.stringify((() => {
+    const r = document.querySelector('.editor-stack__host').getBoundingClientRect();
+    return { x: r.left + 50, y: r.top + 50 };
+  })())`));
+  await app.cdp.send('Input.dispatchMouseEvent', {
+    type: 'mouseMoved', x: point.x, y: point.y,
+  });
+  await sleep(150);
+  const state = JSON.parse(await app.js(`JSON.stringify((() => {
+    const host = document.querySelector('.editor-stack__host');
+    const track = getComputedStyle(host, '::-webkit-scrollbar-track');
+    const status = getComputedStyle(document.querySelector('.word-statusbar'));
+    return {
+      standard: getComputedStyle(host).scrollbarColor,
+      trackColor: track.backgroundColor,
+      trackImage: track.backgroundImage,
+      statusColor: status.backgroundColor,
+      statusImage: status.backgroundImage,
+    };
+  })())`));
+  const expectedStandardTrack = hexRgb(theme.colorScheme.surface);
+  check(
+    `${theme.mode} — רקע פס הגלילה תואם למשטח שורת המצב`,
+    state.standard.endsWith(expectedStandardTrack)
+      && state.trackColor === state.statusColor
+      && state.trackImage === state.statusImage,
+    `תקני=${state.standard}, מסילה=${state.trackColor} ${state.trackImage}, שורת מצב=${state.statusColor} ${state.statusImage}`,
+  );
+  await app.cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 600, y: 15 });
+  await sleep(150);
+}
+
 try {
   await app.cdp.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false });
   await app.tab('תצוגה');
@@ -161,6 +194,7 @@ try {
     await app.escape();
     await app.cdp.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false });
     await app.tab('תצוגה');
+    await checkScrollbarMatchesStatusBar(theme);
   }
 
   const hostRect = JSON.parse(await app.js(`JSON.stringify((() => {
@@ -178,7 +212,7 @@ try {
   await sleep(150);
   const hidden = await scrollbar();
   check('פס הגלילה נחשף רק בריחוף על אזור המסמך', visible !== hidden && hidden.includes('rgba(0, 0, 0, 0)'), `${visible} → ${hidden}`);
-  const railTrack = hexRgb(THEMES[1].colorScheme.surfaceContainerHigh);
+  const railTrack = hexRgb(THEMES[1].colorScheme.surface);
   check(
     'מסילת הגלילה נשארת בגוון נפרד מהקנבס',
     visible.includes(railTrack) && railTrack !== canvasBackground,

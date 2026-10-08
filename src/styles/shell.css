@@ -148,13 +148,15 @@ button:disabled {
 .editor-stack__host:hover {
   background-image: linear-gradient(
     to right,
-    var(--color-surface-container-high),
-    var(--color-surface-container-high)
+    var(--color-surface),
+    var(--color-surface)
   );
   background-repeat: no-repeat;
   background-size: var(--editor-scrollbar-w) 100%;
   background-position: right top;
-  scrollbar-color: var(--color-outline) var(--color-surface-container-high);
+  /* Standard scrollbars accept only solid colors; match the base layer of
+     --statusbar-bg. WebKit below uses the complete status-bar background. */
+  scrollbar-color: var(--color-outline) var(--color-surface);
   scrollbar-width: auto;
 }
 
