@@ -122,6 +122,7 @@
       <main
         ref="editorStackRef"
         class="editor-stack"
+        :class="{ 'canvas-default': canvasColor === null }"
       />
       <PageBorderOverlay
         :host="rulerHost"
@@ -637,7 +638,7 @@ import {
 } from './host/workspace';
 import { onPluginHidden, onPluginShown } from './host/lifecycle';
 import { revealZone, type RevealBounds, type RevealZone } from './composables/focus-mode';
-import { applyCanvasColor, normalizeCanvasColor } from './composables/canvas-color';
+import { applyCanvasColor, canvasColor, normalizeCanvasColor } from './composables/canvas-color';
 import { enterFullscreen, exitFullscreen, isFullscreen, watchFullscreen } from './composables/window-fullscreen';
 import SvgIcon from './ui/icons/SvgIcon.vue';
 import { copySelection, cutSelection, pasteFromClipboard, selectWholeDocument } from './engine/clipboard';
@@ -6135,8 +6136,8 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
 }
 
 /* הרקע הוא `--word-canvas-bg` ולא טוקן ערכת הנושא ישירות: זהו הבד, והוא
-   האלמנט היחיד שהמשתמש יכול לצבוע (composables/canvas-color.ts). ברירת
-   המחדל ב-tokens.css זהה לצבע שהבורר מציג. אין שכבת הכהייה מעל צבע הבחירה. */
+   האלמנט היחיד שהמשתמש יכול לצבוע (composables/canvas-color.ts). הכהיה
+   עדינה קיימת רק לברירת המחדל, ולעולם לא מעל בחירת משתמש. */
 .editor-stack {
   position: relative;
   flex: 1 1 auto;
@@ -6144,6 +6145,10 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
   min-height: 0;
   background: var(--word-canvas-bg);
   overflow: hidden;
+}
+
+.editor-stack.canvas-default {
+  background-image: linear-gradient(var(--color-shell-dim), var(--color-shell-dim));
 }
 
 /* שורת הסרגל האופקי */

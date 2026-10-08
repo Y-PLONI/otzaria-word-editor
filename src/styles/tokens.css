@@ -11,6 +11,7 @@
   --color-surface: #f8f9fa;
   --color-on-surface: #1a1a2e;
   --color-on-surface-variant: #49454f;
+  --color-surface-container-lowest: var(--color-surface);
   --color-surface-container-high: #f3f2f1;
   --color-surface-container-highest: #edebe9;
   --color-error: #b00020;
@@ -53,19 +54,9 @@
   --word-group-label-color: var(--color-on-surface-variant);
   --word-group-border: var(--color-outline-variant);
 
-  /* צבע הבד — המשטח שסביב הדף, ורק הוא.
-
-     ברירת המחדל היא „חום בהיר” — הגוון הבסיסי של העמודה הזאת בפלטה של
-     ColorPickerPopover.vue — ולא צבע ערכת הנושא: זו בחירה של מראה, והיא
-     קבועה גם במצב כהה, כמו הדף הלבן שהיא מקיפה. הטוקן נפרד מ-
-     `--color-surface-container-highest` מפני שזה צובע גם את שני הסרגלים, את
-     הפינה שביניהם ואת כפתור היציאה ממצב מיקוד — ובלי טוקן נפרד, „צבע רקע” של
-     המשתמש היה נצבע גם עליהם.
-
-     הדריסה היא סגנון inline על שורש המסמך, כמו כל צבעי אוצריא — ולכן היעדר
-     העדפה הוא היעדר ההצהרה והבד מקבל את ברירת המחדל הקבועה הזאת. ראו
-     composables/canvas-color.ts. */
-  --word-canvas-bg: #eeece1;
+  /* צבע הבד כברירת מחדל עוקב אחרי ערכת הנושא. בחירת משתמש דורסת אותו inline;
+     שכבת ההכהיה מוחלת בנפרד ורק כשאין בחירה (App.vue). */
+  --word-canvas-bg: var(--color-surface-container-lowest);
   /* פקדי המעטפת נשארים בצבע הנושא גם כשהמשתמש משנה את הבד. */
   --word-doctab-active-bg: color-mix(in srgb, var(--color-surface) 93%, black);
   --statusbar-bg: linear-gradient(to top, var(--color-surface-highlight), transparent var(--statusbar-height)), var(--color-surface);

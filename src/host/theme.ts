@@ -80,6 +80,15 @@ export function applyTheme(theme: ThemePayload): void {
     if (typeof value === 'string' && value !== '') root.style.setProperty(name, value);
   }
 
+  // תפקיד אופציונלי ב-SDK 1.1.0. להסיר ערך ישן כשמחליפים לערכה שאינה מספקת
+  // אותו, כדי שברירת המחדל של הקנבס תחזור לעקוב אחרי --color-surface.
+  const surfaceLowest = colors.surfaceContainerLowest;
+  if (typeof surfaceLowest === 'string' && surfaceLowest !== '') {
+    root.style.setProperty('--color-surface-container-lowest', surfaceLowest);
+  } else {
+    root.style.removeProperty('--color-surface-container-lowest');
+  }
+
   // surfaceContainerHigh הוא הרקע שהמדריך מחייב לפס העליון, אבל הוא נוסף
   // ב-SDK 1.1.0 ואופציונלי בטיפוס. בגרסה שלא מחזירה אותו נופלים ל-highest,
   // כדי שהפס לא ייראה כמו גוף המסמך.

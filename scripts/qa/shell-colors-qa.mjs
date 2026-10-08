@@ -7,11 +7,11 @@
 import { openApp, createReport, sleep } from './harness.mjs';
 
 const report = createReport('צבעי מעטפת ובד', { strict: true });
-const DEFAULT_CANVAS = 'rgb(238, 236, 225)';
 const THEMES = [
   {
     mode: 'light', colorScheme: {
       primary: '#1565c0', onPrimary: '#ffffff', surface: '#f8f9fa',
+      surfaceContainerLowest: '#f7f8fa',
       onSurface: '#1a1a2e', onSurfaceVariant: '#49454f',
       surfaceContainerHigh: '#f3f2f1', surfaceContainerHighest: '#edebe9', outline: '#cbd5e1',
     },
@@ -21,6 +21,7 @@ const THEMES = [
     // לפקדי onSurface היה הופך אותם לבהירים על לבן.
     mode: 'dark', colorScheme: {
       primary: '#1565c0', onPrimary: '#ffffff', surface: '#101014',
+      surfaceContainerLowest: '#09090c',
       onSurface: '#e6e6e6', onSurfaceVariant: '#c9c5d0',
       surfaceContainerHigh: '#2b2930', surfaceContainerHighest: '#36343b', outline: '#938f99',
     },
@@ -36,6 +37,10 @@ function rgb(css) {
   if (css.startsWith('color(srgb ') && parts?.length >= 3) return parts.slice(0, 3).map((c) => c * 255);
   if (css.startsWith('rgb') && parts?.length >= 3) return parts.slice(0, 3);
   throw new Error(`צבע מחושב לא מוכר: ${css}`);
+}
+
+function hexRgb(hex) {
+  return `rgb(${hex.slice(1).match(/../g).map((c) => parseInt(c, 16)).join(', ')})`;
 }
 
 function contrast(fg, bg, highlight = 0) {
@@ -89,9 +94,14 @@ try {
     await app.js(`window.__qaHost.emit('theme.changed', ${JSON.stringify(theme)})`);
     await sleep(100);
     const base = await measure();
+    const expectedDefault = hexRgb(
+      theme.colorScheme.surfaceContainerLowest ?? theme.colorScheme.surface,
+    );
     check(`${theme.mode} — הנושא הוחל דרך ה-SDK`, base.theme === theme.mode);
     check(`${theme.mode} — הבד וברירת המחדל בבורר זהים`,
-      base.canvas.background === DEFAULT_CANVAS && base.swatch === DEFAULT_CANVAS && base.canvas.image === 'none',
+      base.canvas.background === expectedDefault
+        && base.swatch === expectedDefault
+        && base.canvas.image !== 'none',
       `בד=${base.canvas.background}, פס=${base.swatch}, שכבה=${base.canvas.image}`);
 
     const pairs = [
@@ -116,7 +126,7 @@ try {
       })()`);
       await sleep(100);
       const state = await measure();
-      const expected = `rgb(${color.slice(1).match(/../g).map((c) => parseInt(c, 16)).join(', ')})`;
+      const expected = hexRgb(color);
       check(`${theme.mode} — ${color} צובע את הבד ומשתקף בבורר ובאחסון`,
         state.canvas.background === expected && state.swatch === expected && state.stored === color && state.canvas.image === 'none',
         `בד=${state.canvas.background}, פס=${state.swatch}, נשמר=${state.stored}`);
@@ -128,10 +138,13 @@ try {
     if (!await app.clickSel('.palette-clear-btn', 0, { after: 100 })) throw new Error('כפתור ברירת המחדל אינו נגיש');
     const reset = await measure();
     check(`${theme.mode} — איפוס מחזיר את הבד ואת הפס לברירת המחדל`,
-      reset.canvas.background === DEFAULT_CANVAS && reset.swatch === DEFAULT_CANVAS && reset.stored === null);
+      reset.canvas.background === expectedDefault
+        && reset.swatch === expectedDefault
+        && reset.canvas.image !== 'none'
+        && reset.stored === null);
     await palette();
-    const selected = await app.js(`getComputedStyle(document.querySelector('.color-swatch.selected')).backgroundColor`);
-    check(`${theme.mode} — המשבצת של ברירת המחדל מסומנת בפלטה`, selected === DEFAULT_CANVAS);
+    const selected = await app.js(`Boolean(document.querySelector('.color-swatch.selected'))`);
+    check(`${theme.mode} — ברירת המחדל הדינמית אינה בחירת פלטה`, selected === false);
     await app.escape();
 
     // שינוי בנושא מבלי לפתוח מחדש את המסמך חייב לצבוע גם פופאובר אמיתי.
@@ -158,10 +171,19 @@ try {
   await app.cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: hostRect.x, y: hostRect.y });
   await sleep(150);
   const visible = await scrollbar();
+  const canvasBackground = await app.js(
+    `getComputedStyle(document.querySelector('.editor-stack')).backgroundColor`,
+  );
   await app.cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 600, y: 15 });
   await sleep(150);
   const hidden = await scrollbar();
   check('פס הגלילה נחשף רק בריחוף על אזור המסמך', visible !== hidden && hidden.includes('rgba(0, 0, 0, 0)'), `${visible} → ${hidden}`);
+  const railTrack = hexRgb(THEMES[1].colorScheme.surfaceContainerHigh);
+  check(
+    'מסילת הגלילה נשארת בגוון נפרד מהקנבס',
+    visible.includes(railTrack) && railTrack !== canvasBackground,
+    `מסילה=${visible}, קנבס=${canvasBackground}`,
+  );
 
   if (!await app.clickSel('.word-doctabs-new')) throw new Error('כפתור מסמך חדש אינו נגיש');
   await sleep(1500);

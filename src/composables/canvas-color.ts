@@ -10,10 +10,11 @@
  * (styles/tokens.css) יושב בין השניים, והצרכן היחיד שלו הוא `.editor-stack` —
  * הבד עצמו.
  *
- * ## ברירת המחדל: חום בהיר, לא צבע ערכת הנושא
+ * ## ברירת המחדל: המשטח הנמוך ביותר של ערכת הנושא
  *
- * בלי העדפה הבד נצבע ב-`DEFAULT_CANVAS_COLOR`, ולא בצבע המשטח של אוצריא. זו
- * בחירה של מראה, ולכן היא קבועה גם במצב כהה — בדיוק כמו הדף הלבן שבמרכז.
+ * בלי העדפה הבד עוקב אחרי `--color-surface-container-lowest`, עם נפילה
+ * ל-`--color-surface`. שכבת הכהיה נפרדת מוחלת רק במצב הזה; בחירת משתמש
+ * דורסת את הטוקן inline ואינה מוחשכת.
  *
  * ## למה סגנון inline על שורש המסמך
  *
@@ -36,13 +37,18 @@ import { saveCanvasColor } from '../host/settings';
 export const CANVAS_COLOR_VAR = '--word-canvas-bg';
 
 /**
- * הצבע שהבד נצבע בו בלי העדפה — „חום בהיר”, הגוון הבסיסי של העמודה הזאת
- * בפלטה של `ColorPickerPopover`, ולכן „ברירת מחדל” והמשבצת הם אותו צבע.
- *
- * כתוב פעמיים — כאן בשביל הפס שבבורר, וב-tokens.css בשביל הבד — והקשר בין
- * השניים אינו נראה בקוד, ולכן הוא נמדד ב-tests/unit/canvas-color.test.ts.
+ * צבע fallback לפיתוח ולפני קבלת ערכת נושא. בזמן ריצה
+ * `canvasDefaultColor` מתעדכן מערך הנושא ומשמש גם את פס הצבע בבורר.
  */
-export const DEFAULT_CANVAS_COLOR = '#eeece1';
+export const DEFAULT_CANVAS_COLOR = '#f8f9fa';
+
+/** ברירת המחדל הנוכחית, מסונכרנת עם ערכת הנושא להצגה בבורר. */
+export const canvasDefaultColor = ref(DEFAULT_CANVAS_COLOR);
+
+/** מעדכנת את ברירת המחדל המוצגת בבורר לאחר החלת ערכת נושא. */
+export function setCanvasDefaultColor(raw: unknown): void {
+  canvasDefaultColor.value = normalizeCanvasColor(raw) ?? DEFAULT_CANVAS_COLOR;
+}
 
 /**
  * `#rrggbb` באותיות קטנות, או `null` על כל דבר אחר.

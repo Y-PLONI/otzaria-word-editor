@@ -154,7 +154,7 @@ button:disabled {
   background-repeat: no-repeat;
   background-size: var(--editor-scrollbar-w) 100%;
   background-position: right top;
-  scrollbar-color: var(--color-outline) var(--word-canvas-bg);
+  scrollbar-color: var(--color-outline) var(--color-surface-container-high);
   scrollbar-width: auto;
 }
 

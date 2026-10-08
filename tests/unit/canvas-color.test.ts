@@ -20,7 +20,9 @@ import {
   DEFAULT_CANVAS_COLOR,
   applyCanvasColor,
   canvasColor,
+  canvasDefaultColor,
   normalizeCanvasColor,
+  setCanvasDefaultColor,
 } from '../../src/composables/canvas-color';
 
 function source(...parts: string[]): string {
@@ -34,6 +36,7 @@ function declared(): string {
 
 beforeEach(() => {
   applyCanvasColor(null);
+  setCanvasDefaultColor(DEFAULT_CANVAS_COLOR);
 });
 
 describe('normalizeCanvasColor', () => {
@@ -85,6 +88,28 @@ describe('applyCanvasColor', () => {
     expect(canvasColor.value).toBe('#123456');
   });
 
+  describe('ברירת המחדל של הבד', () => {
+    it('מתעדכנת מערך הנושא ומנרמלת את הצבע', () => {
+      setCanvasDefaultColor('#AABBCC');
+
+      expect(canvasDefaultColor.value).toBe('#aabbcc');
+    });
+
+    it('חוזרת לצבע ה-fallback כשערכת הנושא אינה מספקת hex תקין', () => {
+      setCanvasDefaultColor('var(--color-surface)');
+
+      expect(canvasDefaultColor.value).toBe(DEFAULT_CANVAS_COLOR);
+    });
+
+    it('מכהה את ברירת המחדל בלבד ומשאירה בחירה מותאמת ללא שכבה', () => {
+      const app = source('App.vue');
+
+      expect(app).toContain("'canvas-default': canvasColor === null");
+      expect(app).toContain('.editor-stack.canvas-default');
+      expect(app).toContain('background-image: linear-gradient(var(--color-shell-dim)');
+    });
+  });
+
   it('`null` מסיר את ההצהרה ואינו כותב צבע אחר', () => {
     // הלב של „ברירת מחדל”: הבד חוזר לערך שב-tokens.css, ולכן אסור שיישאר
     // כאן ערך כלשהו — גם לא הצבע שהיה שם רגע קודם.
@@ -119,19 +144,15 @@ describe('הטוקן שב-TypeScript הוא הטוקן שב-CSS', () => {
     );
   });
 
-  it('ברירת המחדל של הטוקן היא `DEFAULT_CANVAS_COLOR` שהבורר מראה', () => {
-    // זה מה שמחזיק את „ברירת מחדל”: הפס בבורר מראה את `DEFAULT_CANVAS_COLOR`,
-    // והבד — בלי העדפה — נצבע מ-tokens.css. שני ערכים שונים כאן פירושם פס
-    // שמבטיח צבע אחד ובד שמצויר באחר.
+  it('ברירת המחדל של הטוקן עוקבת אחרי ערכת הנושא', () => {
     expect(source('styles', 'tokens.css')).toContain(
-      `${CANVAS_COLOR_VAR}: ${DEFAULT_CANVAS_COLOR};`,
+      `${CANVAS_COLOR_VAR}: var(--color-surface-container-lowest);`,
     );
   });
 
-  it('ברירת המחדל היא „חום בהיר” מהפלטה — המשבצת מסומנת כשאין העדפה', () => {
-    // הגוון הבסיסי של העמודה „חום בהיר” ב-ColorPickerPopover.vue.
-    expect(source('ui', 'ribbon', 'common', 'ColorPickerPopover.vue')).toContain(
-      `{ family: 'חום בהיר', shades: ['${DEFAULT_CANVAS_COLOR}',`,
+  it('המסילה משתמשת בצבע משטח נפרד מצבע הקנבס', () => {
+    expect(source('styles', 'shell.css')).toContain(
+      'scrollbar-color: var(--color-outline) var(--color-surface-container-high);',
     );
   });
 });
