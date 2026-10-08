@@ -10,14 +10,15 @@
   z-index: 10;
 }
 
-/* סרגל לשוניות (Tabs Bar) — מקבל את צבע הנושא של השורה העליונה */
+
+/* סרגל לשוניות (Tabs Bar) — שקוף, יורש את צבע הסביבה. הרקע, הגבול
+   והעיגול נקבעים ע"י הקונטקסט (App.vue) ולא פה. */
 .word-tab-bar {
   display: flex;
   align-items: flex-end;
   padding-inline: 8px;
-  background: var(--color-surface-container-high);
+  background: transparent;
   height: var(--tabbar-height);
-  border-block-end: 1px solid var(--color-outline-variant);
 }
 
 /* ה-tablist עצמו (ראו Ribbon.vue). הגלילה יושבת כאן ולא על הסרגל, כדי שכפתור
@@ -40,26 +41,30 @@
   background: transparent;
   border: 1px solid transparent;
   border-bottom: none;
-  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  border-radius: 0;
   color: var(--color-on-surface);
   font-family: var(--font-main);
-  font-size: var(--font-size-tab);
+  /* slightly larger tab text */
+  font-size: calc(var(--font-size-tab) * 1.05);
   line-height: 1.25;
   padding: 2px 10px 3px;
   cursor: pointer;
   position: relative;
   transition: background 0.1s ease, color 0.1s ease;
   white-space: nowrap;
-  margin-bottom: -1px;
+  margin-bottom: 0;
 }
 
 .word-tab-btn:hover:not(.active) {
   background: var(--word-btn-hover);
 }
 
-/* אין כאן `font-weight` בכוונה, וזו הסרה ולא השמטה: `600` על הלשונית הפעילה
+/* הלשונית הפעילה מסומנת רק בקו תחתון בצבע primary — ללא רקע, ללא גבול,
+   ללא פינות מעוגלות. כך הלשוניות נראות "מרחפות" מעל הרצועה ולא שקועות בתוכה.
+
+   אין כאן `font-weight` בכוונה, וזו הסרה ולא השמטה: `600` על הלשונית הפעילה
    הרחיב אותה ברוחב ההדגשה, וכל שאר הלשוניות זזו הצידה — **בכל החלפה**. זו
-   הייתה החצי השני של „הקפיצות”, לצד גובה הרצועה (tokens.css).
+   הייתה החצי השני של „הקפיצות", לצד גובה הרצועה (tokens.css).
 
    הראיה שזה מה שקרה יושבת כמה שורות מכאן: `.otzaria-tab` מודגשת תמידית, ולכן
    היא הלשונית היחידה שרוחבה לא השתנה מעולם.
@@ -67,26 +72,37 @@
    ההדגשה גם אינה חסרה: ב-Word הלשונית הפעילה אינה מודגשת, והיא מסומנת בארבעה
    סימנים אחרים שכולם כאן — הכרטיס הלבן, הגבול, צבע ה-primary, והפס התחתון. */
 .word-tab-btn.active {
-  background: var(--color-surface);
-  border-color: var(--color-outline-variant);
-  border-bottom-color: var(--color-surface);
-  color: var(--color-primary);
-  z-index: 2;
+  /* Active ribbon tab: only marked with a bottom underline. No raised
+     background or shadow so it looks minimal and does not change layout. */
+  background: transparent;
+  border-color: transparent;
+  /* keep the tab color unchanged when active */
+  color: inherit;
+  box-shadow: none;
+  border-radius: 0;
+  margin-bottom: 0;
+  /* ensure the active underline floats above neighboring raised tabs */
+  position: relative;
+  z-index: 3;
 }
 
-/* פס ההדגשה של הלשונית הפעילה — **מתחת** ללשונית, כמו ב-Word, ולא מעליה.
-   `bottom: 0` נופל בדיוק על קו ההפרדה של סרגל הלשוניות: ל-`.word-tab-btn` יש
-   `margin-bottom: -1px`, ולכן הקצה התחתון של הלשונית יושב על ה-border של
-   `.word-tab-bar`. הפס מחליף שם את הקו האפור בקו הצבע. */
+/* Non-active ribbon tabs appear as raised buttons with a soft shadow,
+   similar to the document tab visual, so the active underline floats above
+   them visually. */
+
+
+/* פס ההדגשה — מתחת ללשונית הפעילה בלבד. */
 .word-tab-btn.active::after {
   content: '';
   position: absolute;
-  bottom: 0;
+  /* leave a 1px gap between the underline and the ribbon body */
+  bottom: 1px;
   left: 0;
   right: 0;
+  /* slightly thinner by 1px */
   height: 2px;
   background: var(--color-primary);
-  border-radius: 0 0 2px 2px;
+  z-index: 4;
 }
 
 .word-tab-btn.otzaria-tab {
@@ -121,9 +137,10 @@
   background: var(--word-btn-hover);
 }
 
-/* תוכן ה-Ribbon — שורת הלחצנים מקבלת רקע surface נקי ונפרד משורות הנושא העליונות */
-/* `height` ולא `min-height`, וזה העיקר: `min-height` נתן לכל לשונית את הגובה
-   של הקבוצה הגבוהה **שלה**, והמסמך קפץ 30px במעבר מ„הפניות” ל„סקירה”. הגובה
+/* תוכן ה-Ribbon — שורת הלחצנים מקבלת רקע onPrimary: הצבע היחיד ב-M3 שמובטח
+   להיות לבן ממש במצב בהיר וכהה מתאים במצב כהה — בלי שינוי בשאר הצבעים.
+   `height` ולא `min-height`, וזה העיקר: `min-height` נתן לכל לשונית את הגובה
+   של הקבוצה הגבוהה **שלה**, והמסמך קפץ 30px במעבר מ„הפניות" ל„סקירה". הגובה
    כאן נגזר מטוקן אחד (tokens.css) ולכן זהה בכל שמונה הלשוניות, תמיד.
 
    `scrollbar-width` הוסר מכאן: ב-Chromium הוא **מבטל** את ההתאמה של
@@ -135,12 +152,18 @@
   align-items: stretch;
   padding: var(--ribbon-body-pad) 8px;
   height: var(--ribbon-height);
-  background: var(--color-surface);
+  background: var(--color-on-primary);
   border-block-end: var(--ribbon-body-border) solid var(--color-outline-variant);
   overflow-x: auto;
   overflow-y: hidden;
   gap: 0;
   width: 100%;
+}
+
+/* הצל יופעל רק על גוף הרצועה הלבנה, לא על פס הטאבים */
+.word-ribbon-body {
+  box-shadow: var(--ribbon-shadow-top), var(--ribbon-shadow-bottom);
+  z-index: 1;
 }
 
 .word-ribbon-body::-webkit-scrollbar {
@@ -190,7 +213,7 @@
   display: block;
   z-index: 1000;
   padding: var(--ribbon-body-pad) 8px;
-  background: var(--color-surface);
+  background: var(--color-on-primary);
   border: 1px solid var(--color-outline);
   border-radius: var(--radius-sm);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
@@ -247,7 +270,7 @@
 }
 
 /* עד שתי שורות, ואז חיתוך — ולא שורה אחת עם שלוש נקודות: „כותרת עליונה
-   ות…” לא אמר למשתמש מה יש בפנים. שתי שורות נכנסות בגובה הקבוצה (אייקון 32
+   ות…" לא אמר למשתמש מה יש בפנים. שתי שורות נכנסות בגובה הקבוצה (אייקון 32
    ועוד 2×13 בתוך 85), וזה מה שמאפשר גם צ'יפ צר מ-84px. `balance` מחלק שם
    ארוך לשתי שורות דומות, כמו ב-Word, ולא למילה אחת יתומה בשנייה. */
 .word-group-chip__label {
@@ -268,7 +291,7 @@
   color: var(--color-on-surface-variant);
 }
 
-/* קבוצה שנצמדת לקצה הרצועה (בעברית — שמאל), כמו „עזרה” ב-Word. `auto` על
+/* קבוצה שנצמדת לקצה הרצועה (בעברית — שמאל), כמו „עזרה" ב-Word. `auto` על
    פריט flex בולע את כל המרווח הפנוי, ולכן הוא דורש שיהיה מרווח פנוי: לשונית
    שמשתמשת בזה חייבת `width: 100%` על `.ribbon-tab-pane` שלה, אחרת הפאנל
    מתכווץ לרוחב תוכנו והמרווח הוא אפס. */
@@ -282,7 +305,7 @@
   border-inline-end: none;
 }
 
-/* אין כאן כלל רוחב לקבוצת „סגנונות” (.styles-group), בכוונה: המתיחה שהייתה
+/* אין כאן כלל רוחב לקבוצת „סגנונות" (.styles-group), בכוונה: המתיחה שהייתה
    כאן (flex: 1 1 300px עם max-width: 750px) פרסה אותה על חצי הרצועה והשאירה
    בתוכה משבצת כרטיס ריקה. כל קבוצה מחבקת את תוכנה. רצועה שנשארת ריקה מצד אחד
    בלשונית עם מעט קבוצות היא ההתנהגות של Word עצמו — לא חור שצריך למלא. */
@@ -393,7 +416,7 @@
 
 /* 22px הוא מידה מדויקת ולא מרווחת: גבול 1 + ריפוד 2 + אייקון 16 + ריפוד 2 +
    גבול 1. זה מכוון — זה גם הגובה של `RibbonSelect`, ולכן בורר ולחצן באותה
-   שורה („גופן” ב„בית”) מתיישרים סוף-סוף. אייקון גדול מ-16 בכפתור קטן יגלוש,
+   שורה („גופן" ב„בית") מתיישרים סוף-סוף. אייקון גדול מ-16 בכפתור קטן יגלוש,
    וזה התנאי שמחזיק את `--ribbon-content-h`. */
 .word-btn.btn-small {
   flex-direction: row;
@@ -412,7 +435,7 @@
 }
 
 /* כפתור מפוצל: פעולה בלחיצה על הגוף, תפריט בלחיצה על החץ — התבנית של
-   „תבליטים” ו„מספור” ב-Word, ואותה תבנית שבורר הצבע כאן כבר משתמש בה
+   „תבליטים" ו„מספור" ב-Word, ואותה תבנית שבורר הצבע כאן כבר משתמש בה
    (ColorPickerPopover.vue). הכללים כאן ולא ב-`scoped` של RibbonMenuButton
    מפני שהם צובעים את `.word-btn` שהקומפוננטה מקננת בתוכה, ו-`:deep` על
    מחלקה גלובלית הוא רק דרך ארוכה יותר לומר את אותו דבר.
@@ -463,7 +486,7 @@
   cursor: pointer;
 }
 
-/* מצב מפוצל בגודל „ענק” (כמו „הדבק” ב-Word): החץ לצד האייקון והתווית דוחס
+/* מצב מפוצל בגודל „ענק" (כמו „הדבק" ב-Word): החץ לצד האייקון והתווית דוחס
    הכול לשורה אחת וחותך את האייקון — ב-Word הוא יושב ברצועה נפרדת במלוא
    הרוחב, מתחת לאייקון ולתווית, לא לצידם. `flex-direction: column` הופך את
    המעטפת לעמודה: כפתור הפעולה למעלה (תופס את שארית הגובה), רצועת החץ למטה.
@@ -501,16 +524,16 @@
    **בינוני** — מה ש-Word עושה: הכפתורים הגדולים נעשים קטנים, בטורים של
    שלושה. רשת של שלוש שורות מפורשות: שלוש שורות של `--ribbon-row-h` עם שני
    רווחים הן בדיוק `--ribbon-content-h`, ולכן הגובה של הקבוצה אינו זז באף
-   שלב, ו-`span 3` אומר במפורש „טור שלם” על מה שאינו כפתור בודד.
+   שלב, ו-`span 3` אומר במפורש „טור שלם" על מה שאינו כפתור בודד.
 
    מה שאינו כפתור גדול בודד — מחסנית, גלריה, בורר, כפתור מפוצל גדול — תופס
    טור שלם ונשאר כמו שהוא: הוא כבר בנוי לגובה הקבוצה.
 
    גם הגדול הראשון בקבוצה אינו מוקטן באף שלב (`:nth-child(1 of …)` בכל
-   הכללים למטה): הוא הפעולה הראשית שלה — „הדבק”, „תוכן עניינים”, „אודות” —
+   הכללים למטה): הוא הפעולה הראשית שלה — „הדבק", „תוכן עניינים", „אודות" —
    ו-Word משאיר אותו גדול עד שהקבוצה כולה מתקפלת. הגדול הראשון ולא הילד
-   הראשון: ב„מידע” המחסנית קודמת ל„אודות”, ו-`:first-child` הקטין את „אודות”
-   לאייקון בודד שצף בראש הטור. קבוצה של כפתור גדול אחד („טבלה”) אינה
+   הראשון: ב„מידע" המחסנית קודמת ל„אודות", ו-`:first-child` הקטין את „אודות"
+   לאייקון בודד שצף בראש הטור. קבוצה של כפתור גדול אחד („טבלה") אינה
    מתכווצת בשלבים כלל, רק לצ'יפ. */
 .word-ribbon-group[data-scale] .word-group-content:not(.column-flow) {
   display: grid;
@@ -559,8 +582,8 @@
    בכפתור עם תווית גלויה אין `aria-label` (RibbonButton.vue), והתווית היא
    השם הנגיש שלו. הטולטיפ נושא את השם גם הוא (`data-tip-title`).
 
-   רק בכפתור שיש לו אייקון (`.word-btn--icon`, RibbonButton.vue): ב„שולחן העורך” יש כפתורים
-   של תווית בלבד („גודל עמוד ושוליים”, „סמן עמודים”), והסתרת התווית השאירה
+   רק בכפתור שיש לו אייקון (`.word-btn--icon`, RibbonButton.vue): ב„שולחן העורך" יש כפתורים
+   של תווית בלבד („גודל עמוד ושוליים", „סמן עמודים"), והסתרת התווית השאירה
    שם קבוצה ריקה. */
 .word-ribbon-group[data-scale='2'] .word-btn--icon.btn-small > .btn-label,
 .word-ribbon-group[data-scale='2'] .word-group-content > .word-btn--icon.btn-large:not(:nth-child(1 of .word-btn.btn-large, .ribbon-menu--large, .color-picker-container--large)) > .btn-label,

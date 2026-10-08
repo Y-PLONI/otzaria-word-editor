@@ -620,6 +620,10 @@ function round2(value: number): number {
   height: 22px;
   overflow: hidden;
   background: var(--color-surface-container-highest);
+  background-image: linear-gradient(
+    var(--color-shell-dim),
+    var(--color-shell-dim)
+  );
   border-block-end: 1px solid var(--color-outline-variant);
   user-select: none;
   touch-action: none;

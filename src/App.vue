@@ -19,6 +19,15 @@
       `.shell-top` ב-`<style>`.
     -->
     <div class="shell-top">
+      <!-- רצועת טאבים — העליונה ביותר, מעל הכותרת. אחד ל-`DocumentSession` פתוח. ראו „ריבוי מסמכים” ליד `sessions` בסקריפט. -->
+      <DocumentTabsBar
+        :tabs="documentTabs"
+        :active-id="documentIdView"
+        @select-tab="onDocumentTabSelect"
+        @close-tab="onDocumentTabClose"
+        @new-tab="onDocumentTabNew"
+      />
+
       <!-- פס עליון -->
       <TitleBar
         ref="titleBarRef"
@@ -40,15 +49,6 @@
         @open-ribbon-tab="openRibbonTab"
         @toggle-autosave="toggleAutosave"
         @update-title="onTitleUpdate"
-      />
-
-      <!-- רצועת טאבים — אחד ל-`DocumentSession` פתוח. ראו „ריבוי מסמכים” ליד `sessions` בסקריפט. -->
-      <DocumentTabsBar
-        :tabs="documentTabs"
-        :active-id="documentIdView"
-        @select-tab="onDocumentTabSelect"
-        @close-tab="onDocumentTabClose"
-        @new-tab="onDocumentTabNew"
       />
 
       <!-- רצועת הכלים (Ribbon) -->
@@ -6033,6 +6033,80 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
   flex-shrink: 0;
 }
 
+/* הפסים העליונים — רקע הנושא עם שכבת הכהייה עדינה (5% שחור) כדי לייצר
+   ניגוד קל מול הרצועה הלבנה, בלי לנגוע בצבע הנושא עצמו.
+   `background-image` לא מחליף את `background-color` שנגזר מהנושא — הוא יושב
+   מעליו כשכבה שקופה. כך הכלל עובד עם כל ערכת צבעים, בהירה או כהה. */
+.shell-top > :not(.ruler-row):not(:first-child),
+.shell-top .ruler-corner,
+.topbar {
+  background-image: linear-gradient(
+    var(--color-shell-dim),
+    var(--color-shell-dim)
+  ) !important;
+}
+
+/* רצועת הכלים: מרווח של 6px מקצוות המסך, ובלי הקו המפריד מתחת לשורת הכותרת.
+   הטאבים יושבים על רקע הסביבה (שקוף), וגוף הרצועה הוא הכרטיס הלבן עם הפינות
+   המעוגלות — כמו ב-Word. `overflow: hidden` על העטיפה הושמט בכוונה: הוא היה
+   חותך תפריטים צפים שנפתחים מתוך הרצועה. */
+.shell-top :deep(.word-ribbon-container) {
+  margin-inline: 6px;
+  border-radius: 0;
+  background: transparent !important;
+}
+
+/* הצללה של ששת הפיקסלים שבין הרצועה לקצה המסך. היא נצבעת באותו גוון כמו
+   שכבת הרקע, בלי להכהות את שורת הטאבים השקופה שמעל הרצועה. */
+.shell-top :deep(.word-ribbon-container)::before,
+.shell-top :deep(.word-ribbon-container)::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  width: 6px;
+  background: var(--color-shell-dim);
+  pointer-events: none;
+}
+
+.shell-top :deep(.word-ribbon-container)::before {
+  inset-inline-start: -6px;
+}
+
+.shell-top :deep(.word-ribbon-container)::after {
+  inset-inline-end: -6px;
+}
+
+/* שורת הטאבים — שקופה לחלוטין, יורשת את צבע הסביבה.
+   ללא עיגול, ללא border, ללא רקע משלה. */
+.shell-top :deep(.word-tab-bar) {
+  background: transparent !important;
+  border-block-start: 0 !important;
+  border-block-end: 0 !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+}
+
+/* גוף הרצועה — הכרטיס הלבן. פינות מעוגלות בכל הצדדים כי הטאבים יושבים
+   מחוצה לו, מעל הסביבה. */
+.shell-top :deep(.word-ribbon-body) {
+  background-color: var(
+    --color-surface-container-lowest,
+    var(--color-on-primary)
+  ) !important;
+  border-radius: 12px;
+}
+
+/* הקו המפריד בין שורת הכותרת לשורת הלשוניות */
+.shell-top :deep(.word-titlebar) {
+  border-block-end: 0 !important;
+  box-shadow: none !important;
+}
+
+/* רצועה מכווצת: הגוף מוסתר (`v-show`) — אין כרטיס לבן, אין צורך בשינוי נוסף. */
+.shell-top :deep(.word-ribbon-container:has(> .word-ribbon-body[style*='display: none']) .word-tab-bar) {
+  border-radius: 12px;
+}
+
 /* אזור המסמך: שורה של הסרגל האנכי וה-stack. `min-width: 0` על ה-stack הוא מה
    שמאפשר לו להצטמצם — פריט flex אינו יורד מתחת לרוחב התוכן שלו בלעדיו, ומיכל
    הגלילה של המנוע היה דוחף את הסרגל האנכי אל מחוץ למסך. */
@@ -6056,15 +6130,30 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
   inset: 0;
 }
 
+/* ברירת המחדל של הבד נשארת צבע המשטח של ערכת הנושא. הספציפיות של
+   `html:root` גוברת על :root ב-tokens.css, אבל בחירה inline של המשתמש
+   ב-applyCanvasColor ממשיכה לגבור גם עליה. */
+:global(html:root) {
+  --word-canvas-bg: var(
+    --color-surface-container-lowest,
+    var(--color-surface)
+  );
+}
+
 /* הרקע הוא `--word-canvas-bg` ולא טוקן ערכת הנושא ישירות: זהו הבד, והוא
    האלמנט היחיד שהמשתמש יכול לצבוע (composables/canvas-color.ts). ברירת
-   המחדל של הטוקן היא אותו צבע ערכת נושא בדיוק — ראו styles/tokens.css. */
+   המחדל נגזרת מערך הנושא — ראו styles/tokens.css.
+   שכבת ה-dim מכהה את הקנבס קלות מול הרצועה, בלי לנגוע בצבע שהמשתמש בחר. */
 .editor-stack {
   position: relative;
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
   background: var(--word-canvas-bg);
+  background-image: linear-gradient(
+    var(--color-shell-dim),
+    var(--color-shell-dim)
+  );
   overflow: hidden;
 }
 
@@ -6081,6 +6170,10 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
   width: 22px;
   height: 22px;
   background: var(--color-surface-container-highest);
+  background-image: linear-gradient(
+    var(--color-shell-dim),
+    var(--color-shell-dim)
+  );
   border-block-end: 1px solid var(--color-outline-variant);
   border-inline-end: 1px solid var(--color-outline-variant);
 }

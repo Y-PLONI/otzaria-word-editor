@@ -18,6 +18,10 @@
   --color-outline: #cbd5e1;
   --color-outline-variant: #e1dfdd;
   --color-scrim: rgba(0, 0, 0, 0.32);
+  --color-surface-highlight: rgba(255, 255, 255, 0.04);
+  /* שכבת הכהייה הניטרלית של הרקע העליון והבד. מוגדרת כטוקן כדי ש-CSS צרכני
+     ישתמש בתפקיד צבע במקום להטמיע rgba ישירות. */
+  --color-shell-dim: rgba(0, 0, 0, 0.07);
 
   /* סולם הדרגות שנגזרות מ-primary. שלוש דרגות שקופות ולא אחת: פקד שהעכבר
      עובר מעליו ופקד דלוק שנראים זהים מוחקים את ההבחנה המרכזית ברצועה של Word.
@@ -59,10 +63,12 @@
      המשתמש היה נצבע גם עליהם.
 
      הדריסה היא סגנון inline על שורש המסמך, כמו כל צבעי אוצריא — ולכן היעדר
-     העדפה הוא היעדר ההצהרה, והבד חוזר לערך שכאן. הערך עצמו כתוב גם
-     ב-TypeScript (`DEFAULT_CANVAS_COLOR`, composables/canvas-color.ts), ושער
-     ב-tests/unit/canvas-color.test.ts מחזיק את השניים זהים. */
+     העדפה הוא היעדר ההצהרה והבד מקבל את ברירת המחדל הקבועה הזאת. ראו
+     composables/canvas-color.ts. */
   --word-canvas-bg: #eeece1;
+  --word-canvas-bg-active: color-mix(in srgb, var(--word-canvas-bg) 93%, black);
+  /* background used by the bottom status bar and (when hovered) the editor gutter */
+  --statusbar-bg: linear-gradient(to top, rgba(255,255,255,0.04) 0, rgba(255,255,255,0) calc(var(--statusbar-height))), var(--word-canvas-bg);
 
   /* גופנים.
 
@@ -91,7 +97,10 @@
 
   /* גבהים */
   --topbar-height: 48px;
-  --tabbar-height: 24px;
+  --tabbar-height: 28px;
+  /* צל בולט לרצועת ה-Ribbon (מעל ומתחת) */
+  --ribbon-shadow-top: 0 -4px 10px rgba(0, 0, 0, 0.06);
+  --ribbon-shadow-bottom: 0 6px 18px rgba(0, 0, 0, 0.07);
   --statusbar-height: 24px;
 
   /* גאומטריית הרצועה — נגזרת משורה אחת, ולא ארבעה מספרים שנקבעו בנפרד.

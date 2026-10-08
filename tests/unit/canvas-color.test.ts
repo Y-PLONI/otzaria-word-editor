@@ -112,9 +112,11 @@ describe('applyCanvasColor', () => {
  */
 describe('הטוקן שב-TypeScript הוא הטוקן שב-CSS', () => {
   it('הכלל של הבד צורך בדיוק את `CANVAS_COLOR_VAR`', () => {
-    // שני הכללים: ה-`scoped` ב-App.vue (המנצח) והגלובלי ב-shell.css.
+    // שני הכללים: ה-`scoped` ב-App.vue והגלובלי ב-shell.css.
     expect(source('App.vue')).toContain(`background: var(${CANVAS_COLOR_VAR});`);
-    expect(source('styles', 'shell.css')).toContain(`background: var(${CANVAS_COLOR_VAR});`);
+    expect(source('styles', 'shell.css')).toContain(
+      `background-color: var(${CANVAS_COLOR_VAR});`,
+    );
   });
 
   it('ברירת המחדל של הטוקן היא `DEFAULT_CANVAS_COLOR` שהבורר מראה', () => {

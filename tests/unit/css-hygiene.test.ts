@@ -159,8 +159,16 @@ describe(':has() בסלקטורים', () => {
    * ברצועה, מחוץ ל-`.editor-stack`, ולכן שינוי DOM במסמך אינו עובר דרכו.
    * נמדד באותו ניסוי: מחיקת הכלל הזה בזמן ריצה לא שינתה את מספר החישובים
    * המלאים (44 מול 42 בבסיס), בעוד מחיקת כלל הבאנר הורידה אותם ל-0.
+   *
+   * `.shell-top :deep(.word-ribbon-container:has(> .word-ribbon-body[style*='display: none']) .word-tab-bar)`
+   * — העוגן הוא `.word-ribbon-container` שנמצא ב-`.shell-top`, מחוץ לחלוטין
+   * ל-`.editor-stack`. הכלל בודק אם גוף הרצועה מוסתר (v-show), ומעגל את פינות
+   * שורת הלשוניות בהתאם — שינוי DOM בתוך המסמך אינו עובר דרכו.
    */
-  const ALLOWED = new Set(['.word-ribbon-group:has(+ .word-ribbon-group--end)']);
+  const ALLOWED = new Set([
+    '.word-ribbon-group:has(+ .word-ribbon-group--end)',
+    ".shell-top :deep(.word-ribbon-container:has(> .word-ribbon-body[style*='display: none']) .word-tab-bar)",
+  ]);
 
   /** פיצול רשימת סלקטורים בפסיקים שמחוץ לסוגריים — `:has(a, b)` נשאר שלם. */
   function splitSelectorList(selector: string): string[] {
