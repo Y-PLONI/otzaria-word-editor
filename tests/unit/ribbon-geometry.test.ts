@@ -172,8 +172,10 @@ describe('גאומטריה נגזרת', () => {
     expect(block(RIBBON_CSS, '\\.word-ribbon-body')).not.toMatch(/scrollbar-width/);
   });
 
-  it('הלשונית הפעילה אינה מודגשת — ההדגשה הרחיבה אותה והזיזה את הסרגל', () => {
-    expect(block(RIBBON_CSS, '\\.word-tab-btn\\.active')).not.toMatch(/font-weight/);
+  it('הלשונית הפעילה מודגשת בלי לשנות את רוחבה ולהזיז את הסרגל', () => {
+    const activeTab = block(RIBBON_CSS, '\\.word-tab-btn\\.active');
+    expect(activeTab).toMatch(/-webkit-text-stroke:\s*0\.35px\s+currentColor/);
+    expect(activeTab).not.toMatch(/font-weight/);
   });
 });
 

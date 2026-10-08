@@ -77,6 +77,8 @@
   border-color: transparent;
   /* keep the tab color unchanged when active */
   color: inherit;
+  /* Thicken glyphs without changing text metrics or shifting neighboring tabs. */
+  -webkit-text-stroke: 0.35px currentColor;
   box-shadow: none;
   border-radius: 0;
   margin-bottom: 0;
