@@ -177,6 +177,10 @@ describe('גאומטריה נגזרת', () => {
     expect(activeTab).toMatch(/-webkit-text-stroke:\s*0\.35px\s+currentColor/);
     expect(activeTab).not.toMatch(/font-weight/);
   });
+
+  it('נשאר מרווח של 2px מתחת לקו ההדגשה של הלשונית הפעילה', () => {
+    expect(block(RIBBON_CSS, '\\.word-tab-btn\\.active::after')).toMatch(/bottom:\s*3px/);
+  });
 });
 
 /* ------------------------------------------------------------------ */
