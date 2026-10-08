@@ -53,7 +53,7 @@
   --word-btn-active-border: var(--color-primary);
   --word-group-label-color: var(--color-on-surface-variant);
   --word-group-border: var(--color-outline-variant);
-  /* Separate ribbon from canvas and rulers; dark themes use the themed surface. */
+  /* מפריד בין הרצועה לקנבס ולסרגלים; בערכות כהות משתמש במשטח של ערכת הנושא. */
   --word-ribbon-bg: var(--color-surface-container-high);
 
   /* צבע הבד כברירת מחדל עוקב אחרי ערכת הנושא. בחירת משתמש דורסת אותו inline;
@@ -136,7 +136,7 @@
 }
 
 :root[data-theme='light'] {
-  /* Fixed white in light mode creates the intended contrast against canvas and rulers. */
+  /* לבן קבוע במצב בהיר יוצר את הניגודיות הרצויה מול הקנבס והסרגלים. */
   --word-ribbon-bg: #ffffff;
 }
 
