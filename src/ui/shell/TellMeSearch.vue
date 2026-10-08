@@ -342,7 +342,7 @@ defineExpose({
   gap: 8px;
   background: var(--color-surface);
   border: 1px solid var(--color-outline-variant);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   padding: 3px 10px;
   width: 100%;
   cursor: text;

@@ -6087,9 +6087,9 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
 }
 
 /* גוף הרצועה מקבל את צבע המשטח מ-ribbon.css, לצד טקסט on-surface.
-   פינות מעוגלות בכל הצדדים כי הטאבים יושבים מחוצה לו, מעל הסביבה. */
+   פינות מעוגלות בעדינות כי הטאבים יושבים מחוצה לו, מעל הסביבה. */
 .shell-top :deep(.word-ribbon-body) {
-  border-radius: 12px;
+  border-radius: 8px;
 }
 
 /* הקו המפריד בין שורת הכותרת לשורת הלשוניות */
