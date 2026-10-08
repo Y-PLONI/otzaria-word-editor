@@ -17,9 +17,11 @@
  * ## מה נקרא
  *
  * ארבעה זוגות בלבד — הדגשה, נטייה, גודל וגופן — בכל רמה: `docDefaults`
- * ו-`rPr` שהוא בן ישיר של `w:style`. ‏`rPrChange`, ‏`tblStylePr` ו-`rPr` של
- * סימן הפסקה (`pPr/rPr`) אינם נקראים: הראשון הוא היסטוריה, השני עיצוב מותנה
- * של טבלה, והשלישי אינו של טקסט. ובנוסף `w:bidi` של הפסקה, לכיוון הבסיס.
+ * ו-`rPr` שהוא בן ישיר של `w:style`, כולל סגנון טבלה. ‏`rPrChange` הוא
+ * היסטוריה, ו-`pPr/rPr` שייך לסימן הפסקה, ולכן שניהם אינם נקראים. ‏`tblStylePr`
+ * דורש הקשר שורה/תא: ההצהרות שלו נקראות כדי למנוע יישור של עברית קיימת,
+ * והפסקאות בטבלה עם עיצוב מותנה אינן מומרות. ובנוסף `w:bidi` של הפסקה,
+ * לכיוון הבסיס.
  */
 import { SKIPPED_SPANS, TOKEN_SOURCE, attribute, isOn, valueOf, wordPrefix } from './docx-parts';
 
@@ -52,6 +54,9 @@ interface StyleRecord {
   basedOn: string | null;
   run: LevelProps;
   bidi?: boolean;
+  /** Conditional table formatting requires row/cell context; preserve it during export. */
+  conditional: boolean;
+  conditionalRuns: LevelProps[];
 }
 
 export interface StyleSheet {
@@ -60,13 +65,14 @@ export interface StyleSheet {
   styles: Map<string, StyleRecord>;
   /** סגנון הפסקה שחל על פסקה בלי `pStyle` (`w:default="1"`). */
   defaultParagraph: string | null;
-  /** זיכרון של `resolveRun`, לפי זוג הסגנונות. */
+  defaultTable: string | null;
+  /** זיכרון של `resolveRun`, לפי סגנונות הפסקה, התו והטבלה. */
   cache: Map<string, ResolvedRun>;
 }
 
 /** גיליון ריק: מסמך בלי `styles.xml`, או כזה שלא נקרא. */
 export function emptyStyleSheet(): StyleSheet {
-  return { defaults: {}, styles: new Map(), defaultParagraph: null, cache: new Map() };
+  return { defaults: {}, styles: new Map(), defaultParagraph: null, defaultTable: null, cache: new Map() };
 }
 
 /** מה שאיבר אחד בתוך `rPr` תורם לרמה. איבר שאינו מארבעת הזוגות — כלום. */
@@ -123,6 +129,7 @@ export function readStyleSheet(xml: string | null): StyleSheet {
   /** שמות האיברים הפתוחים, מהשורש. */
   const stack: string[] = [];
   let style: StyleRecord | null = null;
+  let conditionalRun: LevelProps | null = null;
 
   const token = new RegExp(TOKEN_SOURCE.source, 'g');
   for (let match = token.exec(xml); match; match = token.exec(xml)) {
@@ -142,6 +149,7 @@ export function readStyleSheet(xml: string | null): StyleSheet {
       const at = stack.lastIndexOf(name);
       if (at >= 0) stack.length = at;
       if (name === 'style') style = null;
+      if (name === 'rPr') conditionalRun = null;
       continue;
     }
 
@@ -153,17 +161,28 @@ export function readStyleSheet(xml: string | null): StyleSheet {
     } else if (path === 'styles' && name === 'style') {
       const id = attribute(attributes, 'styleId');
       if (id !== null) {
-        style = { id, type: attribute(attributes, 'type') ?? 'paragraph', basedOn: null, run: {} };
+        style = { id, type: attribute(attributes, 'type') ?? 'paragraph', basedOn: null, run: {}, conditional: false, conditionalRuns: [] };
         sheet.styles.set(id, style);
         const isDefault = attribute(attributes, 'default');
         if (style.type === 'paragraph' && isDefault !== null && isOn(` val="${isDefault}"`)) {
           sheet.defaultParagraph = id;
+        }
+        if (style.type === 'table' && isDefault !== null && isOn(` val="${isDefault}"`)) {
+          sheet.defaultTable = id;
         }
       }
     } else if (style && path === 'styles/style') {
       if (name === 'basedOn') style.basedOn = valueOf(attributes);
     } else if (style && path === 'styles/style/rPr') {
       readRunChild(style.run, name, attributes);
+    } else if (style && path === 'styles/style/tblStylePr' && (name === 'rPr' || name === 'pPr')) {
+      style.conditional = true;
+      if (name === 'rPr' && !selfClosing) {
+        conditionalRun = {};
+        style.conditionalRuns.push(conditionalRun);
+      }
+    } else if (conditionalRun && path === 'styles/style/tblStylePr/rPr') {
+      readRunChild(conditionalRun, name, attributes);
     } else if (style && path === 'styles/style/pPr' && name === 'bidi') {
       style.bidi = isOn(attributes);
     }
@@ -202,6 +221,8 @@ export interface ResolvedRun {
    * קיים — מסמכים שנוצרו בכלי אחר נושאים `<w:rtl/>` ב-`docDefaults`.
    */
   complex: boolean;
+  /** Row/cell-dependent formatting has not been resolved, so do not convert this paragraph. */
+  conditionalTable: boolean;
   /** האם רמה כלשהי בשרשרת מצהירה את התאום המורכב. */
   csDeclared: { bold: boolean; italic: boolean; size: boolean; font: boolean };
 }
@@ -213,20 +234,32 @@ function pickStyle(sheet: StyleSheet, id: string | null, type: string): string |
 }
 
 /**
- * פותר את השרשרת של ריצה: `docDefaults` ← סגנון הפסקה ← סגנון התו.
+ * פותר את השרשרת של ריצה: `docDefaults` ← סגנון הטבלה ← סגנון הפסקה ← סגנון התו.
  *
  * גודל וגופן: הרמה הספציפית ביותר שמצהירה גוברת. הדגשה ונטייה הן תכונות
  * **מתחלפות** (ECMA-376 §17.7.3): הערך משרשרת הפסקה ומשרשרת התו מצטרפים
  * ב-XOR, וכל שרשרת נותנת את ההצהרה הקרובה ביותר לעלה שלה.
  */
-export function resolveRun(sheet: StyleSheet, pStyle: string | null, rStyle: string | null): ResolvedRun {
-  const key = `${pStyle ?? ''}\u0000${rStyle ?? ''}`;
+export function resolveRun(
+  sheet: StyleSheet,
+  pStyle: string | null,
+  rStyle: string | null,
+  tableStyle?: string | null,
+): ResolvedRun {
+  // undefined = outside a table; null = inside a table with the default table style.
+  const key = JSON.stringify([pStyle, rStyle, tableStyle ?? null, tableStyle !== undefined]);
   const cached = sheet.cache.get(key);
   if (cached) return cached;
 
+  const table = tableStyle === undefined ? [] : chainOf(sheet, pickStyle(sheet, tableStyle, 'table') ?? sheet.defaultTable);
   const paragraph = chainOf(sheet, pickStyle(sheet, pStyle, 'paragraph') ?? sheet.defaultParagraph);
   const character = chainOf(sheet, pickStyle(sheet, rStyle, 'character'));
-  const levels: LevelProps[] = [sheet.defaults, ...paragraph.map((s) => s.run), ...character.map((s) => s.run)];
+  const levels: LevelProps[] = [
+    sheet.defaults,
+    ...table.map((s) => s.run),
+    ...paragraph.map((s) => s.run),
+    ...character.map((s) => s.run),
+  ];
 
   const last = <K extends keyof LevelProps>(key: K): LevelProps[K] | undefined => {
     for (let i = levels.length - 1; i >= 0; i -= 1) {
@@ -243,7 +276,7 @@ export function resolveRun(sheet: StyleSheet, pStyle: string | null, rStyle: str
     return undefined;
   };
   const toggle = (key: 'bold' | 'italic' | 'boldCs' | 'italicCs'): boolean =>
-    (nearest(paragraph, key) ?? sheet.defaults[key] ?? false) !== (nearest(character, key) ?? false);
+    (nearest(paragraph, key) ?? nearest(table, key) ?? sheet.defaults[key] ?? false) !== (nearest(character, key) ?? false);
   const declared = (key: keyof LevelProps): boolean => levels.some((level) => level[key] !== undefined);
 
   const resolved: ResolvedRun = {
@@ -260,6 +293,7 @@ export function resolveRun(sheet: StyleSheet, pStyle: string | null, rStyle: str
       font: last('fontCs') ?? null,
     },
     complex: last('complex') ?? false,
+    conditionalTable: table.some((style) => style.conditional),
     csDeclared: {
       bold: declared('boldCs'),
       italic: declared('italicCs'),
@@ -272,11 +306,17 @@ export function resolveRun(sheet: StyleSheet, pStyle: string | null, rStyle: str
 }
 
 /** כיוון הבסיס של פסקה בלי `w:bidi` ישיר: שרשרת הסגנון, ואז `docDefaults`. */
-export function inheritedBidi(sheet: StyleSheet, pStyle: string | null): boolean {
+export function inheritedBidi(sheet: StyleSheet, pStyle: string | null, tableStyle?: string | null): boolean {
   const chain = chainOf(sheet, pickStyle(sheet, pStyle, 'paragraph') ?? sheet.defaultParagraph);
   for (let i = chain.length - 1; i >= 0; i -= 1) {
     const value = chain[i]!.bidi;
     if (value !== undefined) return value;
+  }
+  if (tableStyle !== undefined) {
+    const table = chainOf(sheet, pickStyle(sheet, tableStyle, 'table') ?? sheet.defaultTable);
+    for (let i = table.length - 1; i >= 0; i -= 1) {
+      if (table[i]!.bidi !== undefined) return table[i]!.bidi!;
+    }
   }
   return sheet.defaultsBidi ?? false;
 }

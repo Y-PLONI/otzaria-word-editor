@@ -287,6 +287,7 @@ export function markNeutralParagraphEnds(xml: string): string | null {
   let runDepth = 0;
   /** מיקום פתיחת `<w:t>` שנפתחה ועדיין לא נסגרה. */
   let textFrom: number | null = null;
+  let textOpaque = false;
 
   const token = new RegExp(TOKEN_SOURCE.source, 'g');
   for (let match = token.exec(xml); match; match = token.exec(xml)) {
@@ -296,6 +297,7 @@ export function markNeutralParagraphEnds(xml: string): string | null {
       // הערה שאינה נסגרת: אין יותר תגים שאפשר לסמוך עליהם. מה שנאסף עד כאן
       // שייך לפסקאות שכבר נסגרו, ולכן תקף.
       if (end < 0) break;
+      if (textFrom !== null) textOpaque = true;
       token.lastIndex = end + closer.length;
       continue;
     }
@@ -334,11 +336,19 @@ export function markNeutralParagraphEnds(xml: string): string | null {
       const paragraph = paragraphs[paragraphs.length - 1];
       if (closing) {
         if (textFrom !== null && paragraph) {
-          readTextTail(paragraph, xml.slice(textFrom, match.index), textFrom, match.index);
+          if (textOpaque) {
+            // CDATA/comment delimiters are not visible punctuation. Without
+            // parsing them, neither this tail nor the earlier tail is known.
+            paragraph.tail = null;
+            paragraph.lastDirectional = null;
+          } else {
+            readTextTail(paragraph, xml.slice(textFrom, match.index), textFrom, match.index);
+          }
         }
         textFrom = null;
       } else {
         textFrom = token.lastIndex;
+        textOpaque = false;
       }
     }
   }

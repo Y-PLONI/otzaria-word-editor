@@ -21,7 +21,7 @@ import { CONTENT_PARTS, rewriteDocxXmlParts, type Bytes } from './docx-parts';
 import { uniqueNumberingIds } from './docx-numbering-ids';
 import { markNeutralParagraphEnds } from './docx-neutral-mark';
 import { mirrorComplexScript } from './docx-cs-mirror';
-import { alignComplexScriptStyles, hasEngineTemplateSignature } from './docx-cs-align';
+import { alignComplexScriptStyles, ENGINE_TEMPLATE_CS_FONT } from './docx-cs-align';
 import { hasDeclaredRtlRuns, markRtlRuns } from './docx-run-direction';
 import { readStyleSheet, type StyleSheet } from './docx-style-sheet';
 
@@ -47,11 +47,12 @@ interface Context {
 async function prepare(read: (name: string) => Promise<string | null>, names: readonly string[]): Promise<Context> {
   const styles = await read(STYLES_PART);
   let alignedStyles: string | null = null;
-  if (hasEngineTemplateSignature(styles)) {
+  const original = readStyleSheet(styles);
+  if (original.defaults.fontCs?.name === ENGINE_TEMPLATE_CS_FONT) {
     // ‏`w:rtl` בסגנון כלשהו — עברית שיורשת אותו כבר נקראת מהצד המורכב.
-    const original = readStyleSheet(styles);
-    let declared = [original.defaults, ...[...original.styles.values()].map((s) => s.run)].some((l) => l.complex);
-    for (const name of names) {
+    let declared = [original.defaults, ...[...original.styles.values()].flatMap((s) => [s.run, ...s.conditionalRuns])]
+      .some((level) => level.complex);
+    for (const name of declared ? [] : names) {
       if (!PARAGRAPH_PARTS.test(name)) continue;
       const xml = await read(name);
       if (xml && hasDeclaredRtlRuns(xml)) {
@@ -61,7 +62,7 @@ async function prepare(read: (name: string) => Promise<string | null>, names: re
     }
     if (!declared && styles) alignedStyles = alignComplexScriptStyles(styles);
   }
-  return { sheet: readStyleSheet(alignedStyles ?? styles), alignedStyles };
+  return { sheet: alignedStyles ? readStyleSheet(alignedStyles) : original, alignedStyles };
 }
 
 /** הבייטים המתוקנים, או `null` כשאין מה לתקן. */

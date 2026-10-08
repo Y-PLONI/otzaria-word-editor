@@ -76,7 +76,7 @@ const NUMBERING = numberingXml().replace(
 const TYPED = 'טקסט חדש מהתוסף';
 
 const report = createReport('עברית מהתוסף יוצאת מוצהרת', { strict: true });
-const app = await openApp({ name: 'rtl-run-export', port: Number(process.env.QA_PORT ?? 9387) });
+let app = await openApp({ name: 'rtl-run-export', port: Number(process.env.QA_PORT ?? 9387) });
 
 async function captureUpload() {
   await app.js(
@@ -267,6 +267,73 @@ try {
       else if (new Set(nsids).size === nsids.length) report.pass('nsid ייחודי לכל הגדרת מספור', nsids.join(','));
       else report.fail('nsid ייחודי לכל הגדרת מספור', `כפולים: ${nsids.join(',')}`);
     }
+  }
+
+  /* ── Regression fixtures: preserve Word's structure through the actual save path. ── */
+  const edgeStyles = `<w:styles ${W}><w:docDefaults><w:rPrDefault><w:rPr>` +
+    '<w:rFonts w:ascii="Arial"/><w:sz w:val="20"/></w:rPr></w:rPrDefault></w:docDefaults>' +
+    '<w:style w:type="table" w:styleId="Big"><w:name w:val="Big"/><w:rPr>' +
+    '<w:rFonts w:ascii="Courier New" w:cs="David"/><w:sz w:val="32"/><w:szCs w:val="36"/>' +
+    '</w:rPr></w:style><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style></w:styles>';
+  const alternate = '<mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" ' +
+    'xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml"><mc:Choice Requires="w14">' +
+    '<w:t>שלום abc</w:t></mc:Choice><mc:Fallback><w:t>שלום abc</w:t></mc:Fallback></mc:AlternateContent>';
+  const edgeBody = '<w:p><w:r><w:t>תחילת בדיקת קצה</w:t></w:r></w:p>' +
+    '<w:tbl><w:tblPr><w:tblStyle w:val="Big"/><w:tblW w:w="5000" w:type="dxa"/></w:tblPr>' +
+    '<w:tblGrid><w:gridCol w:w="5000"/></w:tblGrid><w:tr><w:tc><w:tcPr><w:tcW w:w="5000" w:type="dxa"/></w:tcPr>' +
+    '<w:p><w:r><w:t>שלוםטבלה</w:t></w:r></w:p></w:tc></w:tr></w:tbl>' +
+    `<w:p><w:r>${alternate}</w:r></w:p>` +
+    '<w:p><w:r><w:t><![CDATA[עולם xyz]]></w:t></w:r></w:p>' +
+    '<w:p><w:r><w:t><![CDATA[עברית]]></w:t></w:r></w:p>';
+  // Fresh contexts prevent the QA paragraph lookup from deduplicating source
+  // IDs shared with hidden documents from earlier scenarios.
+  await app.close();
+  app = await openApp({ name: 'rtl-export-edge', port: Number(process.env.QA_PORT ?? 9387) });
+  await captureUpload();
+  const edgeOpened = await openDocx(buildDocx({ body: edgeBody, styles: edgeStyles }), 'rtl-export-edge');
+  if (edgeOpened !== 'rtl-export-edge') report.fail('פתיחת פיקסטורת הרגרסיות', `שם=${edgeOpened}`);
+  else {
+    await app.caretPara('תחילת בדיקת קצה');
+    await app.type('א', 30);
+    const engineEdge = (await app.docx())['word/document.xml'] ?? '';
+    if (engineEdge.includes(alternate) && engineEdge.includes('<![CDATA[עולם xyz]]>'))
+      report.pass('בקרת הרגרסיות — המנוע משמר את המבנים', 'AlternateContent ו-CDATA קיימים בפלט המנוע');
+    else report.fail('בקרת הרגרסיות — המנוע משמר את המבנים', engineEdge);
+    const edgeParts = await save('edge-structures');
+    const savedEdge = edgeParts?.['word/document.xml'] ?? '';
+    if (savedEdge.includes(alternate)) report.pass('שמירה משמרת Choice/Fallback בלי הכפלת טקסט', 'המבנה החלופי נשאר בשלמותו');
+    else report.fail('שמירה משמרת Choice/Fallback בלי הכפלת טקסט', savedEdge);
+    if (savedEdge.includes('<w:t><![CDATA[עולם xyz]]></w:t>') && savedEdge.includes('<w:t><![CDATA[עברית]]></w:t>'))
+      report.pass('שמירה משמרת CDATA כטקסט, גם בעברית בלבד', 'אין המרה של הסימונים לטקסט גלוי ואין RLM על סוגר CDATA');
+    else report.fail('שמירה משמרת CDATA כטקסט, גם בעברית בלבד', savedEdge);
+    const savedTableRun = paragraphsOf(savedEdge).find((para) => para.plain === 'שלוםטבלה')?.runs[0];
+    if (savedTableRun?.rtl && !/w:cs=|<w:szCs/.test(savedTableRun.rPr))
+      report.pass('שמירה משמרת ירושת גופן וגודל מסגנון הטבלה', 'הריצה מוצהרת בלי לכפות Arial 10');
+    else report.fail('שמירה משמרת ירושת גופן וגודל מסגנון הטבלה', JSON.stringify(savedTableRun));
+  }
+
+  const history = '<w:rPrChange w:id="1" w:author="qa"><w:rPr><w:rtl/></w:rPr></w:rPrChange>';
+  const historyStyles = `<w:styles ${W}><w:docDefaults><w:rPrDefault><w:rPr>` +
+    '<w:rFonts w:ascii="Arial" w:cs="Times New Roman (Body CS)"/><w:sz w:val="24"/><w:szCs w:val="24"/>' +
+    '</w:rPr></w:rPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style></w:styles>';
+  const historyBody = `<w:p><w:r><w:rPr>${history}</w:rPr><w:t>עברית עם היסטוריה</w:t></w:r></w:p>` +
+    '<w:p><w:r><w:t>עריכת בקרה</w:t></w:r></w:p>';
+  await app.close();
+  app = await openApp({ name: 'rtl-export-history', port: Number(process.env.QA_PORT ?? 9387) });
+  await captureUpload();
+  const historyOpened = await openDocx(buildDocx({ body: historyBody, styles: historyStyles }), 'rtl-export-history');
+  if (historyOpened !== 'rtl-export-history') report.fail('פתיחת פיקסטורת היסטוריה', `שם=${historyOpened}`);
+  else {
+    await app.caretPara('עריכת בקרה');
+    await app.type('א', 30);
+    const engineHistory = (await app.docx())['word/document.xml'] ?? '';
+    if (engineHistory.includes(history)) report.pass('בקרת ההיסטוריה — נשמרת בפלט המנוע', 'rPrChange קיים לפני postflight');
+    else report.fail('בקרת ההיסטוריה — נשמרת בפלט המנוע', engineHistory);
+    const historyParts = await save('history-declaration');
+    const savedHistory = historyParts?.['word/document.xml'] ?? '';
+    if ((historyParts?.['word/styles.xml'] ?? '').includes('w:cs="Arial"') && savedHistory.includes(history))
+      report.pass('הצהרה היסטורית אינה חוסמת יישור גופן', 'Arial עברי והיסטוריית העיצוב נשמרים');
+    else report.fail('הצהרה היסטורית אינה חוסמת יישור גופן', JSON.stringify(historyParts));
   }
 } finally {
   report.print();

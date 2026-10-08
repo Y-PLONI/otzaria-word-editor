@@ -153,6 +153,8 @@ interface RunRecord {
   childDepth: number;
   /** רק `rPr` וטקסט — ריצה שמותר לפצל. */
   simple: boolean;
+  /** Foreign run content is preserved without marking or splitting. */
+  opaque: boolean;
 }
 
 interface ParagraphRecord {
@@ -160,6 +162,8 @@ interface ParagraphRecord {
   /** ‏`w:bidi` ישיר, או `null` — ואז הוא יורש מהסגנון. */
   bidi: boolean | null;
   pStyle: string | null;
+  /** undefined outside a table, null for the default table style. */
+  tableStyle: string | null | undefined;
 }
 
 const NAMED_ENTITIES: Readonly<Record<string, string>> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
@@ -197,7 +201,19 @@ export function kindOf(ch: string): CharKind {
 /** הטקסט של הריצה כפי שהוא נקרא. קוד שדה — ריק: אינו טקסט ואינו נותן כיוון. */
 function textOf(run: RunRecord): string {
   if (run.fieldCode) return '';
-  if (run.decoded === null) run.decoded = run.raw.includes('&') ? decodeText(run.raw) : run.raw;
+  if (run.decoded === null) {
+    if (!run.raw.includes('<')) run.decoded = run.raw.includes('&') ? decodeText(run.raw) : run.raw;
+    else {
+      // CDATA is literal text; comments and processing instructions are not text.
+      const parts: string[] = [];
+      const chunks = /<!\[CDATA\[([\s\S]*?)\]\]>|<!--[\s\S]*?-->|<\?[\s\S]*?\?>|([^<]+)/g;
+      for (let match = chunks.exec(run.raw); match; match = chunks.exec(run.raw)) {
+        if (match[1] !== undefined) parts.push(match[1]);
+        else if (match[2] !== undefined) parts.push(decodeText(match[2]));
+      }
+      run.decoded = parts.join('');
+    }
+  }
   return run.decoded;
 }
 
@@ -277,8 +293,9 @@ function fallbackTwins(
   sheet: StyleSheet,
   pStyle: string | null,
   rStyle: string | null,
+  tableStyle: string | null | undefined,
 ): { elements: { name: string; text: (p: string) => string }[]; font: string | null } {
-  const { latin, csDeclared } = resolveRun(sheet, pStyle, rStyle);
+  const { latin, csDeclared } = resolveRun(sheet, pStyle, rStyle, tableStyle);
   // הדגשה ונטייה: „לא מוצהר” הוא „כבוי”, ערך של ממש ולא נפילה לברירת מחדל
   // שרירותית. לכן הן נכתבות רק בשרשרת שאינה מצהירה **שום** תאום מורכב — מסמך
   // שאינו מכיר את הצד המורכב. בשרשרת שמכירה אותו, תאום אחד כן ואחד לא היה
@@ -311,10 +328,10 @@ function markEdits(run: RunRecord, paragraph: ParagraphRecord, sheet: StyleSheet
   const p = prefix;
 
   // עברית בירושה — Word כבר קורא אותה מהצד המורכב, ואין מה לשנות.
-  if (resolveRun(sheet, paragraph.pStyle, props?.rStyle ?? null).complex) return [];
+  if (resolveRun(sheet, paragraph.pStyle, props?.rStyle ?? null, paragraph.tableStyle).complex) return [];
 
   if (!props || props.empty) {
-    const { elements, font } = fallbackTwins({}, sheet, paragraph.pStyle, null);
+    const { elements, font } = fallbackTwins({}, sheet, paragraph.pStyle, null, paragraph.tableStyle);
     const fonts = font ? `<${p}:rFonts ${p}:${font}/>` : '';
     const text = `<${p}:rPr>${fonts}${elements.map((e) => e.text(p)).join('')}<${p}:rtl/></${p}:rPr>`;
     return props
@@ -325,7 +342,7 @@ function markEdits(run: RunRecord, paragraph: ParagraphRecord, sheet: StyleSheet
 
   const edits: XmlEdit[] = [];
   const insert = (at: number, text: string) => edits.push({ at, end: at, text, span });
-  const { elements, font } = fallbackTwins(levelOf(props), sheet, paragraph.pStyle, props.rStyle);
+  const { elements, font } = fallbackTwins(levelOf(props), sheet, paragraph.pStyle, props.rStyle, paragraph.tableStyle);
   if (font) {
     if (props.fontsAttrsEnd !== null) insert(props.fontsAttrsEnd, ` ${p}:${font}`);
     else insert(slotFor(props, 'rFonts'), `<${p}:rFonts ${p}:${font}/>`);
@@ -362,6 +379,7 @@ function canSplit(run: RunRecord): boolean {
   const props = run.props;
   if (!props) return true;
   if (props.closeEnd < 0 || props.hasChange) return false;
+  if (props.tags.some(([name, attrs]) => name === 'cs' && isOn(attrs))) return false;
   return props.declared === null || (props.declared === true && props.rtlTag !== null);
 }
 
@@ -419,6 +437,7 @@ function splitEdit(
  */
 function paragraphEdits(xml: string, paragraph: ParagraphRecord, sheet: StyleSheet, prefix: string): XmlEdit[] {
   const { runs } = paragraph;
+  if (resolveRun(sheet, paragraph.pStyle, null, paragraph.tableStyle).conditionalTable) return [];
   const kinds = runs.map(classify);
   if (!kinds.includes('rtl') && !kinds.includes('mixed')) return [];
   const texts = runs.map(textOf);
@@ -426,7 +445,7 @@ function paragraphEdits(xml: string, paragraph: ParagraphRecord, sheet: StyleShe
   let charDirs: boolean[][] = [];
   if (kinds.includes('mixed')) {
     const classes = texts.flatMap((text) => [...text].map(kindOf));
-    const paragraphRtl = paragraph.bidi ?? inheritedBidi(sheet, paragraph.pStyle);
+    const paragraphRtl = paragraph.bidi ?? inheritedBidi(sheet, paragraph.pStyle, paragraph.tableStyle);
     const resolved = resolveChars(classes, paragraphRtl);
     let cursor = 0;
     charDirs = texts.map((text) => {
@@ -446,17 +465,35 @@ function paragraphEdits(xml: string, paragraph: ParagraphRecord, sheet: StyleShe
   const donor = (index: number, fromEnd: boolean): boolean | null => {
     const kind = kinds[index];
     if (kind === 'neutral') return null;
+    if (runs[index]!.opaque) return false;
     const props = runs[index]!.props;
-    if (props?.declared != null || resolveRun(sheet, paragraph.pStyle, props?.rStyle ?? null).complex) return false;
+    if (props?.declared != null || resolveRun(sheet, paragraph.pStyle, props?.rStyle ?? null, paragraph.tableStyle).complex) return false;
     if (kind !== 'mixed') return kind === 'rtl';
     const dirs = charDirs[index] ?? [];
     return dirs.length ? dirs[fromEnd ? dirs.length - 1 : 0]! : null;
   };
 
+  // Cache the nearest non-neutral donor on both sides in two linear passes.
+  const before: (boolean | null)[] = [];
+  const after: (boolean | null)[] = new Array(runs.length);
+  let nearest: boolean | null = null;
+  for (let i = 0; i < runs.length; i += 1) {
+    before.push(nearest);
+    const value = donor(i, true);
+    if (value !== null) nearest = value;
+  }
+  nearest = null;
+  for (let i = runs.length - 1; i >= 0; i -= 1) {
+    after[i] = nearest;
+    const value = donor(i, false);
+    if (value !== null) nearest = value;
+  }
+
   const edits: XmlEdit[] = [];
   runs.forEach((run, index) => {
     const kind = kinds[index];
-    if (run.end < 0) return;
+    if (run.end < 0 || run.opaque) return;
+    if (resolveRun(sheet, paragraph.pStyle, run.props?.rStyle ?? null, paragraph.tableStyle).complex) return;
     if (kind === 'mixed') {
       const split = splitEdit(xml, run, texts[index]!, charDirs[index] ?? [], paragraph, sheet, prefix);
       if (split) edits.push(split);
@@ -464,12 +501,7 @@ function paragraphEdits(xml: string, paragraph: ParagraphRecord, sheet: StyleShe
     }
     let rtl = kind === 'rtl';
     if (kind === 'neutral' && texts[index] !== '') {
-      let inherited: boolean | null = null;
-      for (let back = index - 1; back >= 0 && inherited === null; back -= 1) inherited = donor(back, true);
-      for (let ahead = index + 1; ahead < runs.length && inherited === null; ahead += 1) {
-        inherited = donor(ahead, false);
-      }
-      rtl = inherited === true;
+      rtl = (before[index] ?? after[index]) === true;
     }
     if (rtl) edits.push(...markEdits(run, paragraph, sheet, prefix));
   });
@@ -489,6 +521,7 @@ function newRun(start: number, afterOpen: number): RunRecord {
     textFrom: null,
     childDepth: 0,
     simple: true,
+    opaque: false,
   };
 }
 
@@ -509,24 +542,11 @@ function newProps(openAt: number): RunProps {
   };
 }
 
-/**
- * מסמנת ריצות עבריות בחלק אחד של המסמך. ‏`null` = אין מה לשנות.
- *
- * ‏`sheet` הוא גיליון הסגנונות של אותו מסמך, **אחרי** היישור של
- * `docx-cs-align.ts` — רשת הביטחון נשענת על מה שהוא מצהיר.
- *
- * סורק ולא רגקס, משלוש סיבות שכל אחת מספיקה: `rPr` מקננת (`rPrChange`), ריצות
- * מקננות (תיבת טקסט היא פסקה בתוך ריצה), ו-`rPr` של סימן הפסקה שאינה של
- * שום ריצה. הערות, CDATA והוראות עיבוד נבלעות שלמות.
- */
-export function markRtlRuns(xml: string, sheet: StyleSheet = emptyStyleSheet()): string | null {
-  if (!ANY_RTL.test(xml)) return null;
-  const prefix = wordPrefix(xml);
-  if (prefix === null) return null;
-
-  const edits: XmlEdit[] = [];
+/** Shared streaming reader for run marking and live RTL detection. */
+function scanParagraphs(xml: string, prefix: string, visit: (paragraph: ParagraphRecord) => boolean): void {
   const paragraphs: ParagraphRecord[] = [];
   const runs: RunRecord[] = [];
+  const tables: { style: string | null; propsDepth: number; innerDepth: number }[] = [];
   let paraPropsDepth = 0;
   /** עומק האיברים בתוך `pPr` — `bidi` ו-`pStyle` נקראים רק כבנים ישירים. */
   let paraPropsInner = 0;
@@ -537,6 +557,9 @@ export function markRtlRuns(xml: string, sheet: StyleSheet = emptyStyleSheet()):
     if (closer !== undefined) {
       const end = xml.indexOf(closer, token.lastIndex);
       if (end < 0) break;
+      // Keep opaque markup inside w:t intact; it is not a simple text run.
+      const textRun = runs[runs.length - 1];
+      if (textRun && textRun.textFrom !== null) textRun.simple = false;
       token.lastIndex = end + closer.length;
       continue;
     }
@@ -552,10 +575,35 @@ export function markRtlRuns(xml: string, sheet: StyleSheet = emptyStyleSheet()):
     if (tagPrefix !== prefix) {
       if (run && run.propsDepth === 1 && run.props && !closing && paraPropsDepth === 0) {
         run.props.children.push({ order: FOREIGN_ORDER, at: match.index });
+      } else if (run && run.propsDepth === 0 && paraPropsDepth === 0) {
+        // A foreign wrapper may contain Choice/Fallback or other non-text data.
+        // Do not flatten its descendants or treat it as a directional donor.
+        run.simple = false;
+        run.opaque = true;
+        if (!selfClosing) run.childDepth = Math.max(0, run.childDepth + (closing ? -1 : 1));
       }
       continue;
     }
     const paragraph = paragraphs[paragraphs.length - 1];
+
+    if (name === 'tbl' && !selfClosing) {
+      if (closing) tables.pop();
+      else tables.push({ style: null, propsDepth: 0, innerDepth: 0 });
+      continue;
+    }
+    const table = tables[tables.length - 1];
+    if (table && name === 'tblPr') {
+      if (!selfClosing) table.propsDepth = Math.max(0, table.propsDepth + (closing ? -1 : 1));
+      if (!closing) table.innerDepth = 0;
+      continue;
+    }
+    if (table && table.propsDepth > 0) {
+      if (!closing && table.propsDepth === 1 && table.innerDepth === 0 && name === 'tblStyle') {
+        table.style = valueOf(attributes);
+      }
+      if (!selfClosing) table.innerDepth = Math.max(0, table.innerDepth + (closing ? -1 : 1));
+      continue;
+    }
 
     if (name === 'pPr') {
       if (!selfClosing) paraPropsDepth += closing ? -1 : 1;
@@ -575,9 +623,9 @@ export function markRtlRuns(xml: string, sheet: StyleSheet = emptyStyleSheet()):
     if (name === 'p' && !selfClosing) {
       if (closing) {
         const record = paragraphs.pop();
-        if (record) edits.push(...paragraphEdits(xml, record, sheet, prefix));
+        if (record && visit(record)) return;
       } else {
-        paragraphs.push({ runs: [], bidi: null, pStyle: null });
+        paragraphs.push({ runs: [], bidi: null, pStyle: null, tableStyle: table?.style });
       }
       continue;
     }
@@ -596,14 +644,14 @@ export function markRtlRuns(xml: string, sheet: StyleSheet = emptyStyleSheet()):
 
     if (!run) continue;
 
-    if (name === 'rPr' && selfClosing && run.propsDepth === 0 && !run.props) {
+    if (name === 'rPr' && selfClosing && run.propsDepth === 0 && run.childDepth === 0 && !run.props) {
       run.props = newProps(match.index);
       run.props.closeAt = match.index;
       run.props.closeEnd = token.lastIndex;
       run.props.empty = true;
       continue;
     }
-    if (name === 'rPr' && !selfClosing) {
+    if (name === 'rPr' && !selfClosing && (run.propsDepth > 0 || run.childDepth === 0)) {
       if (closing) {
         if (run.propsDepth === 0) continue;
         run.propsDepth -= 1;
@@ -664,21 +712,42 @@ export function markRtlRuns(xml: string, sheet: StyleSheet = emptyStyleSheet()):
 
   while (paragraphs.length > 0) {
     const record = paragraphs.pop();
-    if (record) edits.push(...paragraphEdits(xml, record, sheet, prefix));
+    if (record && visit(record)) return;
   }
-
-  if (edits.length === 0) return null;
-  return applyXmlEdits(xml, edits);
 }
 
-/** ריצה עברית שכבר מוצהרת — `w:rtl` או `w:cs` דלוקים, ואות ימנית בטקסט. */
-export function hasDeclaredRtlRuns(xml: string): boolean {
-  if (!ANY_RTL.test(xml)) return false;
-  const runs = xml.match(/<([\w.-]+):r[\s>][\s\S]*?<\/\1:r>/g) ?? [];
-  return runs.some((run) => {
-    const declared = /<[\w.-]+:(?:rtl|cs)((?:[^>"']|"[^"]*"|'[^']*')*)\/?>/.exec(run);
-    if (!declared || !isOn(declared[1] ?? '')) return false;
-    const text = (run.match(/<[\w.-]+:t(?:\s[^>]*)?>([^<]*)</g) ?? []).join('');
-    return ANY_RTL.test(decodeText(text));
+/** Literal RTL characters or numeric XML character references may carry RTL text. */
+function mayHaveRtlText(xml: string): boolean {
+  return ANY_RTL.test(xml) || xml.includes('&#');
+}
+
+/**
+ * מסמנת ריצות עבריות בחלק אחד של המסמך, לפי גיליון הסגנונות אחרי היישור.
+ * null = אין שינוי. מבני ריצה זרים וטקסט עם XML אטום אינם מפוצלים; עיצוב
+ * טבלה מותנה נשמר עד שניתן לפתור את הקשר השורה והתא. הסריקה תומכת בפסקאות
+ * ובריצות מקוננות, ואותו קורא מזהה את ההצהרות החיות לפני יישור הסגנונות.
+ */
+export function markRtlRuns(xml: string, sheet: StyleSheet = emptyStyleSheet()): string | null {
+  if (!mayHaveRtlText(xml)) return null;
+  const prefix = wordPrefix(xml);
+  if (prefix === null) return null;
+  const edits: XmlEdit[] = [];
+  scanParagraphs(xml, prefix, (paragraph) => {
+    for (const edit of paragraphEdits(xml, paragraph, sheet, prefix)) edits.push(edit);
+    return false;
   });
+  return edits.length ? applyXmlEdits(xml, edits) : null;
+}
+
+/** Live run declarations only: paragraph marks, historical rPr and foreign namespaces do not count. */
+export function hasDeclaredRtlRuns(xml: string): boolean {
+  if (!mayHaveRtlText(xml)) return false;
+  const prefix = wordPrefix(xml);
+  if (prefix === null) return false;
+  let found = false;
+  scanParagraphs(xml, prefix, (paragraph) => {
+    found = paragraph.runs.some((run) => run.props?.declared === true && ANY_RTL.test(textOf(run)));
+    return found;
+  });
+  return found;
 }
