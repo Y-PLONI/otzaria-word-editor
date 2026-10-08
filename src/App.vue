@@ -6094,8 +6094,21 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
 
 /* הקו המפריד בין שורת הכותרת לשורת הלשוניות */
 .shell-top :deep(.word-titlebar) {
+  position: relative;
   border-block-end: 0 !important;
   box-shadow: none !important;
+}
+
+/* מפריד בין הכותרת לטאבי הרצועה, באותו צבע של קו סרגל השמירה המהירה.
+   השוליים משאירים 20px מכל קצה של הסרגל. */
+.shell-top :deep(.word-titlebar)::after {
+  content: '';
+  position: absolute;
+  inset-inline: 20px;
+  inset-block-end: 0;
+  height: 1px;
+  background: var(--color-outline-variant);
+  pointer-events: none;
 }
 
 /* אזור המסמך: שורה של הסרגל האנכי וה-stack. `min-width: 0` על ה-stack הוא מה
