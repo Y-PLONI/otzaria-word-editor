@@ -47,7 +47,7 @@
   /* slightly larger tab text */
   font-size: calc(var(--font-size-tab) * 1.05);
   line-height: 1.25;
-  padding: 2px 10px 3px;
+  padding: 2px 10px 6px;
   cursor: pointer;
   position: relative;
   transition: background 0.1s ease, color 0.1s ease;

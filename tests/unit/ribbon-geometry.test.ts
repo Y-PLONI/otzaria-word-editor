@@ -181,6 +181,10 @@ describe('גאומטריה נגזרת', () => {
   it('נשאר מרווח של 2px מתחת לקו ההדגשה של הלשונית הפעילה', () => {
     expect(block(RIBBON_CSS, '\\.word-tab-btn\\.active::after')).toMatch(/bottom:\s*3px/);
   });
+
+  it('נשאר מרווח של 3px בין כיתוב הלשונית לקו שמתחתיו', () => {
+    expect(block(RIBBON_CSS, '\\.word-tab-btn')).toMatch(/padding:\s*2px\s+10px\s+6px/);
+  });
 });
 
 /* ------------------------------------------------------------------ */
