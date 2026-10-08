@@ -53,6 +53,8 @@
   --word-btn-active-border: var(--color-primary);
   --word-group-label-color: var(--color-on-surface-variant);
   --word-group-border: var(--color-outline-variant);
+  /* Separate ribbon from canvas and rulers; dark themes use the themed surface. */
+  --word-ribbon-bg: var(--color-surface-container-high);
 
   /* צבע הבד כברירת מחדל עוקב אחרי ערכת הנושא. בחירת משתמש דורסת אותו inline;
      שכבת ההכהיה מוחלת בנפרד ורק כשאין בחירה (App.vue). */
@@ -131,6 +133,11 @@
       var(--ribbon-scrollbar-h) + 2 * var(--ribbon-body-pad) +
       var(--ribbon-body-border)
   );
+}
+
+:root[data-theme='light'] {
+  /* Fixed white in light mode creates the intended contrast against canvas and rulers. */
+  --word-ribbon-bg: #ffffff;
 }
 
 /* אין כאן `--ribbon-height: auto`, וזו הסרה: הכלל נשאר מהשלד הראשון, מלפני

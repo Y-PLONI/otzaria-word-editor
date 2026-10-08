@@ -133,7 +133,7 @@
   background: var(--word-btn-hover);
 }
 
-/* תוכן ה-Ribbon — רקע surface מתאים לטקסט on-surface בשני מצבי הנושא.
+/* תוכן ה-Ribbon — הרקע משתנה לפי ערכת הנושא דרך --word-ribbon-bg.
    `height` ולא `min-height`, וזה העיקר: `min-height` נתן לכל לשונית את הגובה
    של הקבוצה הגבוהה **שלה**, והמסמך קפץ 30px במעבר מ„הפניות" ל„סקירה". הגובה
    כאן נגזר מטוקן אחד (tokens.css) ולכן זהה בכל שמונה הלשוניות, תמיד.
@@ -147,7 +147,7 @@
   align-items: stretch;
   padding: var(--ribbon-body-pad) 8px;
   height: var(--ribbon-height);
-  background: var(--color-surface);
+  background: var(--word-ribbon-bg);
   border-block-end: var(--ribbon-body-border) solid var(--color-outline-variant);
   overflow-x: auto;
   overflow-y: hidden;

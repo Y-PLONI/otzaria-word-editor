@@ -130,7 +130,15 @@ try {
     const expectedDefault = hexRgb(
       theme.colorScheme.surfaceContainerLowest ?? theme.colorScheme.surface,
     );
+    const expectedRibbonBg = theme.mode === 'light'
+      ? 'rgb(255, 255, 255)'
+      : hexRgb(theme.colorScheme.surfaceContainerHigh);
     check(`${theme.mode} — הנושא הוחל דרך ה-SDK`, base.theme === theme.mode);
+    check(
+      `${theme.mode} — רקע רצועת הכלים`,
+      base.chrome.ribbon.background === expectedRibbonBg,
+      `רצועה=${base.chrome.ribbon.background}, צפוי=${expectedRibbonBg}`,
+    );
     check(`${theme.mode} — הבד וברירת המחדל בבורר זהים`,
       base.canvas.background === expectedDefault
         && base.swatch === expectedDefault
