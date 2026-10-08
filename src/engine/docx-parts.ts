@@ -172,6 +172,50 @@ export function applyXmlInserts(xml: string, inserts: readonly XmlInsert[]): str
 }
 
 /**
+ * עריכה אחת: החלפת `[at, end)` ב-`text` — הכנסה כש-`end === at`. כמו
+ * `XmlInsert`, היא נושאת את הטווח שהיא חייבת ליפול בתוכו.
+ */
+export interface XmlEdit {
+  at: number;
+  end: number;
+  text: string;
+  span: { from: number; to: number };
+}
+
+/**
+ * מחילה עריכות על XML, או `null` כשהן מפרות את האינווריאנטה.
+ *
+ * אותה אכיפה כמו ב-`applyXmlInserts`, מורחבת להחלפה: כל עריכה חייבת להיות
+ * שלמה, בתוך גבולות המחרוזת ובתוך הטווח שהצהירה עליו, והעריכות אינן חופפות.
+ * מה שאינו מוחלף מועתק ברצף, ואורכו ועוד אורך מה שהוחלף חייב להיות אורך הקלט.
+ *
+ * כמה עריכות באותו היסט נכתבות בסדר שבו נמסרו (מיון יציב). עריכה שמתחילה
+ * לפני סוף ההחלפה שלפניה — חפיפה — מחזירה `null`.
+ */
+export function applyXmlEdits(xml: string, edits: readonly XmlEdit[]): string | null {
+  const sorted = [...edits].sort((first, second) => first.at - second.at);
+  const parts: string[] = [];
+  let at = 0;
+  let kept = 0;
+  let replaced = 0;
+  for (const { at: from, end, text, span } of sorted) {
+    if (!Number.isInteger(from) || !Number.isInteger(end)) return null;
+    if (from < at || end < from || end > xml.length) return null;
+    if (from < span.from || end > span.to) return null;
+    const slice = xml.slice(at, from);
+    kept += slice.length;
+    replaced += end - from;
+    parts.push(slice, text);
+    at = end;
+  }
+  const rest = xml.slice(at);
+  kept += rest.length;
+  if (kept + replaced !== xml.length) return null;
+  parts.push(rest);
+  return parts.join('');
+}
+
+/**
  * ערכי `ST_OnOff` שמשמעותם „כבוי”. כל ערך אחר — ובכלל זה היעדר `w:val` — דולק,
  * וזה מה שהתקן אומר: `<w:bCs/>` בלי מאפיין היא הדגשה פעילה.
  */
@@ -247,6 +291,80 @@ export const SKIPPED_SPANS = new Map([
 ]);
 
 /**
+ * הסוגר של מה שהסורק חייב לבלוע שלם — או `undefined` לתג רגיל.
+ *
+ * זהה ל-`SKIPPED_SPANS.get(token)`, בלי לחשב hash של מחרוזת התג המלאה על כל
+ * תג במסמך: הערה, CDATA והוראת עיבוד הן היחידות שהתו השני שלהן `!` או `?`.
+ * נמדד כחלק ניכר מזמן הסריקה של מסמך גדול.
+ */
+export function skippedCloser(token: string): string | undefined {
+  const second = token.charCodeAt(1);
+  return second === 0x21 || second === 0x3f ? SKIPPED_SPANS.get(token) : undefined;
+}
+
+/** מרחב השמות של WordprocessingML. הקידומת נגזרת ממנו ואינה מונחת. */
+const WORDPROCESSING_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+
+/**
+ * הקידומת שקשורה למרחב השמות של WordprocessingML, או `null` כשאין הצהרה.
+ *
+ * הקידומת ולא השם המקומי לבדו: ‏`<m:r>` של נוסחה ו-`<a:r>` של DrawingML נושאים
+ * בדיוק את אותם שמות מקומיים ואינם ריצות Word. סורק שמתאים לפי השם בלבד היה
+ * נוגע בהם; ול-`m:rPr` אין `m:bCs` בסכמה בכלל.
+ *
+ * ההצהרה נקראת מ**תג השורש בלבד**, ולא מהמחרוזת כולה. נמדד שהחיפוש החופשי
+ * נשבר: הערה שיושבת לפני השורש וכתוב בה `xmlns:m="…/main"` גרמה לסורק לקרוא
+ * את כל הנוסחאות שבמסמך כפסקאות Word ולהכניס RLM לתוכן, בעוד הפסקאות
+ * האמיתיות לא נגעו. זה גם המקום הנכון: בחבילת OOXML ההצהרה יושבת על השורש.
+ * הצהרה שיושבת עמוק יותר מחזירה `null`, כלומר אי-פעולה.
+ */
+export function wordPrefix(xml: string): string | null {
+  const declaration = new RegExp(
+    `\\sxmlns:([\\w.-]+)\\s*=\\s*"${WORDPROCESSING_NS}"|\\sxmlns:([\\w.-]+)\\s*=\\s*'${WORDPROCESSING_NS}'`,
+  );
+  const token = new RegExp(TOKEN_SOURCE.source, 'g');
+  for (let match = token.exec(xml); match; match = token.exec(xml)) {
+    const closer = SKIPPED_SPANS.get(match[0]);
+    if (closer !== undefined) {
+      const end = xml.indexOf(closer, token.lastIndex);
+      if (end < 0) return null;
+      token.lastIndex = end + closer.length;
+      continue;
+    }
+    // התג האמיתי הראשון הוא השורש. תג סוגר במקום הזה הוא XML פגום.
+    if (match[1]) return null;
+    const found = declaration.exec(match[4] ?? '');
+    return found ? (found[1] ?? found[2] ?? null) : null;
+  }
+  return null;
+}
+
+/** הביטוי של כל שם מאפיין, נבנה פעם אחת: `rFonts` נקרא כמעט בכל ריצה במסמך. */
+const ATTRIBUTE_PATTERNS = new Map<string, RegExp>();
+
+/** מאפיין לפי שם, בלי להיות נעול על קידומת — כמו `valueOf`, ומאותו טעם. */
+export function attribute(attributes: string, name: string): string | null {
+  let pattern = ATTRIBUTE_PATTERNS.get(name);
+  if (!pattern) {
+    pattern = new RegExp(`\\s(?:[\\w.-]+:)?${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`);
+    ATTRIBUTE_PATTERNS.set(name, pattern);
+  }
+  const match = pattern.exec(attributes);
+  return match ? (match[1] ?? match[2]) : null;
+}
+
+/**
+ * ערך שנקרא ממאפיין וייכתב לתוך מאפיין חדש במרכאות כפולות.
+ *
+ * רק `"` מוחלף: מה שנקרא הוא הטקסט הגולמי שבין המרכאות, כלומר כבר מוגן —
+ * `&amp;` שנקרא כך וייכתב כך הוא אותו ערך בדיוק. גרש כפול יכול להופיע בו רק
+ * כשהמקור היה במרכאות בודדות, וזה המקרה היחיד שצריך הגנה.
+ */
+export function quoteAttribute(raw: string): string {
+  return raw.replace(/"/g, '&quot;');
+}
+
+/**
  * החלת שינוי על חלקי XML של DOCX, והחזרת הבייטים החדשים — או `null` כששום חלק
  * לא השתנה.
  *
@@ -258,23 +376,54 @@ export const SKIPPED_SPANS = new Map([
  * אותו כלל בדיוק: חלק שאינו נקרא מדולג ואינו מפיל את השאר, וכשלון מוחלט מחזיר
  * `null` — כלומר „אין לי מה לומר על המסמך הזה”, ולא מסמך פגום.
  */
-export async function rewriteDocxXmlParts(
+export async function rewriteDocxXmlParts<Context = undefined>(
   bytes: Bytes,
   matches: (name: string) => boolean,
-  transform: (xml: string, name: string) => string | null,
+  transform: (xml: string, name: string, context: Context) => string | null,
+  prepare?: (read: (name: string) => Promise<string | null>, names: readonly string[]) => Promise<Context>,
 ): Promise<Bytes | null> {
   const entries = readZip(bytes);
   if (!entries) return null;
 
+  // חלק שנקרא ב-`prepare` אינו נפרס פעמיים: הטקסט נשמר עד שהלולאה מגיעה אליו.
+  const texts = new Map<ZipEntry, Promise<string | null>>();
+  const textOf = (entry: ZipEntry): Promise<string | null> => {
+    let text = texts.get(entry);
+    if (!text) {
+      text = readEntryText(entry);
+      texts.set(entry, text);
+    }
+    return text;
+  };
+  const byName = new Map(entries.map((entry) => [entry.name, entry]));
+  // ‏`prepare` שנכשל — כמו `transform` שנכשל: הוא אינו מפיל את השמירה. מה שהוא
+  // היה מכין חסר, ולכן אין גם במה לתקן; הבייטים יוצאים כמות שהם.
+  let context: Context;
+  try {
+    context = prepare
+      ? await prepare(
+          (name) => {
+            const entry = byName.get(name);
+            return entry ? textOf(entry) : Promise.resolve(null);
+          },
+          entries.map((entry) => entry.name),
+        )
+      : (undefined as Context);
+  } catch (error) {
+    console.warn('[otzaria-word] ההכנה לתיקון החלקים זרקה, והמסמך נשאר כמות שהוא', error);
+    return null;
+  }
+
   const patched = new Map<ZipEntry, ZipEntry>();
   for (const entry of entries) {
     if (!matches(entry.name)) continue;
-    const original = await readEntryText(entry);
+    const original = await textOf(entry);
+    texts.delete(entry);
     if (original === null) continue;
 
     let next: string | null;
     try {
-      next = transform(original, entry.name);
+      next = transform(original, entry.name, context);
     } catch (error) {
       // ההבטחה בראש הקובץ היא `null` ולא זריקה, והיא לא הייתה נשמרת:
       // קריאה חוזרת שזורקת על חלק אחד הייתה דוחה את ההבטחה כולה, כלומר

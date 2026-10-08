@@ -42,6 +42,13 @@
  * זה שטח שאינו נגמר, ותיקון **חלקי** שלו גרוע מכלום: הוא מחליף באג שרואים
  * בנקודה אחת בבאג שמוחק הדגשה, גודל וגופן מכל כותרת עברית במסמך.
  *
+ * **עדכון (7.10.2026):** ‏`w:rtl` חזר, ב-`docx-run-direction.ts`, אחרי
+ * שהשטח נסגר במדידה ולא בהנחה: מה שיורש מהסגנונות **אמור** לעבור למחסנית
+ * המורכבת (זו ההגדרה העברית של המסמך, וזה מה שדווח שחסר), רשת ביטחון מכסה
+ * שרשרת שאינה מצהירה אותה כלל, ו-`docx-cs-align.ts` מיישר את המסמכים שבהם
+ * הצד המורכב הגיע שבור מתבנית המנוע. ה-RLM נשאר: הוא אינו נוגע בעיצוב, והוא
+ * מכסה ריצה שהסימון מדלג עליה (הצהרה כבויה, ריצה מורכבת שאינה מפוצלת).
+ *
  * ## מה שנעשה במקום, ולמה הוא חסום
  *
  * `RLM` ‏(U+200F, RIGHT-TO-LEFT MARK) הוא תו חזק ימין-לשמאל חסר רוחב. הוא פותר
@@ -109,7 +116,7 @@
  * שהמשתמש רואה ואינו מזיז לו את ה-undo. זו גם אותה נקודה שבה `docx-preflight.ts`
  * מתקן את הכיוון הנכנס, ואותו קורא zip משרת את שניהם.
  */
-import { SKIPPED_SPANS, TOKEN_SOURCE, applyXmlInserts, type XmlInsert } from './docx-parts';
+import { skippedCloser, TOKEN_SOURCE, applyXmlInserts, wordPrefix, type XmlInsert } from './docx-parts';
 
 /** ‏U+200F. חסר רוחב, ולכן אינו נראה לא בעורך ולא ב-Word. */
 const RLM = '‏';
@@ -144,9 +151,9 @@ const MARK = /[\p{Mn}\p{Me}]/u;
  * מיותר בתוך טקסט תורני. מבחן של `\p{Alphabetic}` לבדו היה מסווג אותם
  * כניטרליים ומסמן.
  */
-type CharClass = 'R' | 'L' | 'D' | 'M' | 'N';
+export type CharClass = 'R' | 'L' | 'D' | 'M' | 'N';
 
-function classOf(ch: string): CharClass {
+export function classOf(ch: string): CharClass {
   if (MARK.test(ch)) return 'M';
   if (DIGIT.test(ch)) return 'D';
   if (ch === '\u200e') return 'L';
@@ -155,9 +162,6 @@ function classOf(ch: string): CharClass {
   if (LETTER.test(ch)) return 'L';
   return 'N';
 }
-
-/** מרחב השמות של WordprocessingML. הקידומת נגזרת ממנו ואינה מונחת. */
-const WORDPROCESSING_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 
 /** תו אחד שנקרא מ-`<w:t>`, וההיסט ב-XML המקורי מיד אחרי הייצוג שלו. */
 interface DecodedChar {
@@ -262,38 +266,6 @@ function insertionFor(paragraph: ParagraphRecord): XmlInsert | null {
 }
 
 /**
- * הקידומת שקשורה למרחב השמות של WordprocessingML, או `null` כשאין הצהרה.
- *
- * הקידומת ולא השם המקומי לבדו: ‏`<m:r>` של נוסחה ו-`<a:r>` של DrawingML נושאים
- * בדיוק את אותם שמות מקומיים ואינם ריצות Word. סורק שמתאים לפי השם בלבד היה
- * נוגע בהם.
- *
- * ההצהרה נקראת מ**תג השורש בלבד**, ולא מהמחרוזת כולה. נמדד שהחיפוש החופשי
- * נשבר: הערה שיושבת לפני השורש וכתוב בה `xmlns:m="…/main"` גרמה לסורק לקרוא
- * את כל הנוסחאות שבמסמך כפסקאות Word ולהכניס RLM לתוכן, בעוד הפסקאות
- * האמיתיות לא נגעו. זה גם המקום הנכון: בחבילת OOXML ההצהרה יושבת על השורש.
- * הצהרה שיושבת עמוק יותר מחזירה `null`, כלומר אי-פעולה.
- */
-function wordPrefix(xml: string): string | null {
-  const declaration = new RegExp(`\\sxmlns:([\\w.-]+)\\s*=\\s*"${WORDPROCESSING_NS}"|\\sxmlns:([\\w.-]+)\\s*=\\s*'${WORDPROCESSING_NS}'`);
-  const token = new RegExp(TOKEN_SOURCE.source, 'g');
-  for (let match = token.exec(xml); match; match = token.exec(xml)) {
-    const closer = SKIPPED_SPANS.get(match[0]);
-    if (closer !== undefined) {
-      const end = xml.indexOf(closer, token.lastIndex);
-      if (end < 0) return null;
-      token.lastIndex = end + closer.length;
-      continue;
-    }
-    // התג האמיתי הראשון הוא השורש. תג סוגר במקום הזה הוא XML פגום.
-    if (match[1]) return null;
-    const found = declaration.exec(match[4] ?? '');
-    return found ? (found[1] ?? found[2] ?? null) : null;
-  }
-  return null;
-}
-
-/**
  * מוסיפה RLM אחרי תו ניטרלי שסוגר פסקה עברית. ‏`null` = אין מה לשנות, או שיש
  * סיבה לא לגעת.
  */
@@ -315,20 +287,25 @@ export function markNeutralParagraphEnds(xml: string): string | null {
   let runDepth = 0;
   /** מיקום פתיחת `<w:t>` שנפתחה ועדיין לא נסגרה. */
   let textFrom: number | null = null;
+  let textOpaque = false;
 
   const token = new RegExp(TOKEN_SOURCE.source, 'g');
   for (let match = token.exec(xml); match; match = token.exec(xml)) {
-    const closer = SKIPPED_SPANS.get(match[0]);
+    const closer = skippedCloser(match[0]);
     if (closer !== undefined) {
       const end = xml.indexOf(closer, token.lastIndex);
       // הערה שאינה נסגרת: אין יותר תגים שאפשר לסמוך עליהם. מה שנאסף עד כאן
       // שייך לפסקאות שכבר נסגרו, ולכן תקף.
       if (end < 0) break;
+      if (textFrom !== null) textOpaque = true;
       token.lastIndex = end + closer.length;
       continue;
     }
 
-    const [, closing, tagPrefix, name, attributes] = match;
+    const closing = match[1]!;
+    const tagPrefix = match[2]!;
+    const name = match[3]!;
+    const attributes = match[4]!;
     if (tagPrefix !== prefix) continue;
     const selfClosing = attributes.endsWith('/');
     if (selfClosing) continue;
@@ -359,11 +336,19 @@ export function markNeutralParagraphEnds(xml: string): string | null {
       const paragraph = paragraphs[paragraphs.length - 1];
       if (closing) {
         if (textFrom !== null && paragraph) {
-          readTextTail(paragraph, xml.slice(textFrom, match.index), textFrom, match.index);
+          if (textOpaque) {
+            // CDATA/comment delimiters are not visible punctuation. Without
+            // parsing them, neither this tail nor the earlier tail is known.
+            paragraph.tail = null;
+            paragraph.lastDirectional = null;
+          } else {
+            readTextTail(paragraph, xml.slice(textFrom, match.index), textFrom, match.index);
+          }
         }
         textFrom = null;
       } else {
         textFrom = token.lastIndex;
+        textOpaque = false;
       }
     }
   }

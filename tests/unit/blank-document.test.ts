@@ -67,6 +67,15 @@ describe('deriveHebrewBlankDocx — על המסמך הריק של המנוע ה�
     expect(part(derived, STYLES_PART)).toContain('<w:pPrDefault><w:pPr><w:bidi/></w:pPr></w:pPrDefault>');
   });
 
+  it('styles.xml: הגופן העברי של ברירות המחדל הוא הלטיני — Arial, ולא מחרוזת התפריט של Word ל-Mac', () => {
+    const xml = part(derived, STYLES_PART);
+    expect(part(original, STYLES_PART)).toContain('w:cs="Times New Roman (Body CS)"');
+    expect(xml).not.toContain('Body CS');
+    expect(xml).toMatch(/<w:rPrDefault><w:rPr><w:rFonts w:ascii="Arial"[^>]*w:cs="Arial"/);
+    // כותרת 1: ערכת הנושא העברית (Times New Roman ב-Word) הוחלפה בלטינית.
+    expect(xml).toMatch(/w:styleId="Heading1"[\s\S]*?w:cstheme="majorHAnsi"/);
+  });
+
   it('שאר החלקים זהים בייט-בבייט, ובאותו סדר', () => {
     expect(derived.map((entry) => entry.name)).toEqual(original.map((entry) => entry.name));
     for (const entry of original) {

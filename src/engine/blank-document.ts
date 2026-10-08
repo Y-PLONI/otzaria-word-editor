@@ -12,6 +12,7 @@
  */
 import { DOCX_MIME } from './export';
 import { PAPER_SIZES } from './page-setup';
+import { alignComplexScriptStyles, hasEngineTemplateSignature } from './docx-cs-align';
 
 /** `w:pgSz` של המסמך הריק של המנוע — Letter. */
 export const ENGINE_BLANK_PAGE_SIZE = '<w:pgSz w:w="12240" w:h="15840"/>';
@@ -42,15 +43,27 @@ export function patchBlankDocumentXml(xml: string): string {
     .replace(paragraph, `<w:p$1><w:pPr>${BIDI}</w:pPr></w:p>`);
 }
 
-/** `w:bidi` בברירת המחדל של הפסקאות, ושפת ה-bidi עברית. */
+/**
+ * `w:bidi` בברירת המחדל של הפסקאות, שפת ה-bidi עברית, והצד המורכב של כל
+ * הסגנונות מיושר לצד הלטיני.
+ *
+ * היישור הוא מה שהופך את העברית במסמך חדש לעברית גם ב-Word: הייצוא מצהיר כל
+ * ריצה עברית (`docx-run-direction.ts`), ו-Word קורא אותה מהצד המורכב — שבתבנית
+ * של המנוע מצהיר „Times New Roman (Body CS)”, מחרוזת תפריט של Word ל-Mac ולא
+ * שם של גופן. בלי היישור, מה שמוצג Arial בעורך היה יוצא Times New Roman
+ * ב-Word. ראו `docx-cs-align.ts`.
+ */
 export function patchBlankStylesXml(xml: string): string {
   require(xml.includes('<w:pPrDefault/>'), 'לא נמצא w:pPrDefault ריק');
   const lang = /(<w:lang\b[^>]*\bw:bidi=")ar-SA(")/;
   require(lang.test(xml), 'לא נמצא w:lang עם bidi=ar-SA');
 
-  return xml
+  const patched = xml
     .replace('<w:pPrDefault/>', `<w:pPrDefault><w:pPr>${BIDI}</w:pPr></w:pPrDefault>`)
     .replace(lang, '$1he-IL$2');
+  const aligned = alignComplexScriptStyles(patched) ?? patched;
+  require(!hasEngineTemplateSignature(aligned), 'הצד המורכב של הסגנונות לא יושר');
+  return aligned;
 }
 
 /** ה-Blob לפתיחה, מהמחרוזת שהבנייה הטמיעה. `undefined` כשאין תבנית (בדיקות). */

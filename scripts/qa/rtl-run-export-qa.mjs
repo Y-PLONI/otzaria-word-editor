@@ -1,95 +1,83 @@
 /**
- * שער: תו ניטרלי שסוגר פסקה עברית יוצא לקובץ עם RLM אחריו.
+ * שער: עברית שנכתבה בתוסף יוצאת לקובץ כעברית — `<w:rtl/>` — ומקבלת ב-Word את
+ * ההגדרות העבריות של המסמך.
  *
- * מה שדווח: „הנקודה שבסוף הפסקה מוצגת בתחילת השורה”. תו ניטרלי אינו נושא כיוון
- * משלו, ובריצה שהמנוע כתב Word פותר אותו כשמאל-לימין ומציב אותו בקצה ההתחלה
- * של הפסקה. ראו engine/docx-neutral-mark.ts — שם גם המדידה שפסלה את הגישה
- * הקודמת (`<w:rtl/>`), ו-issue 4011 למעלה.
+ * מה שדווח: „בפתיחת קובץ Word קיים דרך התוסף, הטקסט שנכתב בתוכנה מוגדר
+ * בהגדרות הגופן של Word כטקסט לטיני, ולכן אינו מושפע מהגדרת הגופן העברי.”
+ * ראו engine/docx-run-direction.ts — שם המדידה ב-Word — ו-issue 4011 למעלה.
  *
- * ## למה השער הזה אינו יכול להשתמש ב-`app.docx()`
+ * ## שני תרחישים
  *
- * `window.__qa.exportBase64` קורא ל-`superdoc.export` **ישירות**, ולכן הוא
- * מודד את פלט המנוע ולא את מה שנכתב לקובץ. התיקון יושב ב-`engine/export.ts`,
- * על המסלול שהשמירה עוברת בו. לכן השער כאן מיירט את ההעלאה עצמה
- * (`fetch(uploadUrl, {method:'PUT'})`) וקורא את הבייטים שנשלחו — אותם בייטים
- * בדיוק שהמשתמש מקבל בקובץ.
+ * 1. **מסמך חדש של התוסף** — ההקלדה יוצאת מוצהרת, וגיליון הסגנונות נושא גופן
+ *    עברי זהה ללטיני (Arial), ולא את „Times New Roman (Body CS)” של תבנית
+ *    המנוע. אחרת מה שמוצג Arial בעורך יוצא Times New Roman ב-Word (נמדד).
+ * 2. **מסמך Word קיים** שבו הלטיני Courier New 10 והעברי David 16, עם פסקה
+ *    שנכתבה ב-Word (מוצהרת). פסקה שמוקלדת בעורך חייבת לצאת מוצהרת **ובלי**
+ *    לכפות את הלטיני — כלומר לרשת את David 16 כמו הפסקה של Word.
  *
- * וזאת גם הבקרה: אותו מסמך דרך `app.docx()` חייב לצאת **בלי** אף RLM. שער
- * ששתי הקריאות בו נותנות אותו דבר אינו מודד את השלב שלנו אלא את המנוע.
+ * ## למה השער מיירט את ההעלאה ואינו משתמש ב-`app.docx()`
  *
- * ## ומה שנמדד כאן הוא גם מה ש**לא** קורה
+ * ‏`window.__qa.exportBase64` קורא ל-`superdoc.export` **ישירות**, ולכן מודד
+ * את פלט המנוע ולא את מה שנכתב לקובץ. התיקון יושב ב-`engine/export.ts`. לכן
+ * השער מיירט את `fetch(uploadUrl, {method:'PUT'})` וקורא את הבייטים שנשלחו —
+ * אותם בייטים בדיוק שהמשתמש מקבל. וזו גם הבקרה: אותו מסמך דרך `app.docx()`
+ * חייב לצאת **בלי** ההצהרה על הפסקה שהוקלדה. שער ששתי הקריאות בו נותנות אותו
+ * דבר אינו מודד את השלב שלנו אלא את המנוע.
  *
- * שתי שורות בשער אינן על התיקון אלא על גבולותיו, והן החשובות שבו: פסקה
- * מודגשת חייבת לצאת עם ה-`rPr` שלה **כפי שהייתה** — בלי `w:rtl`, בלי `w:bCs`
- * ובלי `w:szCs` — ופסקה שיש בה מילה לועזית חייבת לצאת באותו מספר ריצות. שתיהן
- * נכשלו בגישה הקודמת, ושתיהן הן מה שהפך אותה לאובדן עיצוב. ראו את הטבלה
- * ב-`docx-neutral-mark.ts`.
- *
- * ושורה שלישית מודדת את **מראת הכתב המורכב**: ריצה שכבר מצהירה `w:rtl` —
- * הצורה של כל קובץ שנוצר ב-Word — חייבת לצאת עם `bCs`/`szCs`/`rFonts@cs`,
- * אחרת Word מצייר אותה Arial 12 לא-מודגש. נמדד.
- *
- * ובאותה שמירה נבדק גם **nsid ייחודי**: רשימה עברית שנוצרה בהקלדה ירשה את
- * ה-nsid של ההגדרה העשרונית, ו-Word הציג אותה כ-„1. 2.”.
+ * ‏`QA_SAVE_DIR` — כששמור, שני הקבצים שנשמרו נכתבים לשם, לפתיחה ב-Word.
  *
  * הרצה:  node scripts/qa/rtl-run-export-qa.mjs   (QA_PORT דורס 9387)
  */
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { openApp, createReport, unzip } from './harness.mjs';
 import { buildDocx, numberingXml } from './docx-fixtures.mjs';
 
+const W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
 const RTL = '<w:bidi/>';
-
-/** ‏U+200F, חסר רוחב. */
 const RLM = '‏';
 
-/** פסקה עברית שהנקודה שלה היא ריצה בפני עצמה — הצורה שהמנוע כותב. */
-const HEBREW_PARA =
-  `<w:p><w:pPr>${RTL}</w:pPr>` +
-  `<w:r><w:t xml:space="preserve">שלום עולם</w:t></w:r>` +
-  `<w:r><w:t xml:space="preserve">.</w:t></w:r>` +
-  `</w:p>`;
+/** הגדרות Word עבריות: הלטיני Courier New 10, העברי David 16. */
+const WORD_STYLES =
+  `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles ${W}><w:docDefaults><w:rPrDefault><w:rPr>` +
+  `<w:rFonts w:ascii="Courier New" w:hAnsi="Courier New" w:cs="David"/><w:sz w:val="20"/><w:szCs w:val="32"/>` +
+  `<w:lang w:val="en-US" w:bidi="he-IL"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr>${RTL}</w:pPr></w:pPrDefault></w:docDefaults>` +
+  `<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style></w:styles>`;
 
-/** פסקה עברית מודגשת — כאן נמדד שה-`rPr` יוצאת כמות שהיא. */
+/** פסקה שנכתבה ב-Word: כל ריצה עברית מוצהרת, כולל הנקודה. */
+const WORD_PARA =
+  `<w:p><w:pPr>${RTL}</w:pPr><w:r><w:rPr><w:rtl/></w:rPr><w:t>נכתב בוורד</w:t></w:r>` +
+  `<w:r><w:rPr><w:rtl/></w:rPr><w:t>.</w:t></w:r></w:p>`;
+
+/** פסקה עברית שהנקודה שלה ריצה בפני עצמה — הצורה שהמנוע כותב. */
+const ENGINE_PARA =
+  `<w:p><w:pPr>${RTL}</w:pPr><w:r><w:t xml:space="preserve">שלום עולם</w:t></w:r>` +
+  `<w:r><w:t xml:space="preserve">.</w:t></w:r></w:p>`;
+
+/** הדגשה וגודל שהמנוע כותב בצד הלטיני בלבד. */
 const BOLD_PARA =
-  `<w:p><w:pPr>${RTL}</w:pPr>` +
-  `<w:r><w:rPr><w:b/><w:sz w:val="36"/></w:rPr><w:t xml:space="preserve">כותרת מודגשת.</w:t></w:r>` +
-  `</w:p>`;
-
-/**
- * ריצה שכבר **מצהירה** `w:rtl`, כמו בכל קובץ שנוצר ב-Word, עם הצד הלטיני
- * בלבד — בדיוק מה שנמדד יוצא מהמנוע ב-Ctrl+B. כאן נמדדת המראה.
- */
-const DECLARED_PARA =
-  `<w:p><w:pPr>${RTL}</w:pPr>` +
-  `<w:r><w:rPr><w:rFonts w:ascii="David" w:hAnsi="David"/><w:b/><w:sz w:val="36"/><w:rtl/></w:rPr>` +
-  `<w:t xml:space="preserve">כותרת מוצהרת</w:t></w:r></w:p>`;
+  `<w:p><w:pPr>${RTL}</w:pPr><w:r><w:rPr><w:b/><w:sz w:val="36"/></w:rPr>` +
+  `<w:t xml:space="preserve">כותרת מודגשת.</w:t></w:r></w:p>`;
 
 /** משפט עברי עם מילה לועזית, כריצה אחת — כמו שהעורך כותב אותו. */
 const MIXED_PARA =
-  `<w:p><w:pPr>${RTL}</w:pPr>` +
-  `<w:r><w:t xml:space="preserve">מילה Word בעברית.</w:t></w:r>` +
-  `</w:p>`;
+  `<w:p><w:pPr>${RTL}</w:pPr><w:r><w:t xml:space="preserve">מילה Word בעברית.</w:t></w:r></w:p>`;
 
-/**
- * הגדרת המספור של הפיקסטורה, עם `w:nsid` — כמו בתבנית של המנוע. בלעדיו אין מה
- * לשכפל, ובדיקת הייחודיות עוברת על כלום (נמדד: `nsids: []`).
- */
+const LATIN_PARA =
+  `<w:p><w:pPr><w:bidi w:val="0"/></w:pPr><w:r><w:t xml:space="preserve">hello world</w:t></w:r>` +
+  `<w:r><w:t xml:space="preserve">.</w:t></w:r></w:p>`;
+
+/** הגדרת מספור עם `w:nsid`, כמו בתבנית של המנוע — בשביל בדיקת הייחודיות. */
 const NUMBERING = numberingXml().replace(
   '<w:multiLevelType w:val="hybridMultilevel"/>',
   '<w:nsid w:val="587013BA"/><w:multiLevelType w:val="hybridMultilevel"/>',
 );
 
-/** פסקה לטינית — מה שאסור לגעת בו. */
-const LATIN_PARA =
-  `<w:p>` +
-  `<w:r><w:t xml:space="preserve">hello world</w:t></w:r>` +
-  `<w:r><w:t xml:space="preserve">.</w:t></w:r>` +
-  `</w:p>`;
+const TYPED = 'טקסט חדש מהתוסף';
 
-const report = createReport('תו ניטרלי סוגר יוצא עם RLM', { strict: true });
-const app = await openApp({ name: 'rtl-run-export', port: Number(process.env.QA_PORT ?? 9387) });
+const report = createReport('עברית מהתוסף יוצאת מוצהרת', { strict: true });
+let app = await openApp({ name: 'rtl-run-export', port: Number(process.env.QA_PORT ?? 9387) });
 
-/** מיירט את ההעלאה ושומר את הבייטים שנשלחו. */
 async function captureUpload() {
   await app.js(
     `(function(){if(window.__origFetch)return;window.__origFetch=window.fetch.bind(window);` +
@@ -113,6 +101,22 @@ async function captureUpload() {
   );
 }
 
+/** Ctrl+S, וההעלאה שנתפסה — או `null`. */
+async function save(label) {
+  await app.js('window.__savedDocx = ""');
+  await app.press('s', 'KeyS', 83, 2, 's');
+  for (let i = 0; i < 20; i += 1) {
+    await app.sleep(500);
+    const saved = await app.js('window.__savedDocx || ""');
+    if (saved) {
+      const bytes = Buffer.from(saved, 'base64');
+      if (process.env.QA_SAVE_DIR) writeFileSync(join(process.env.QA_SAVE_DIR, `${label}.docx`), bytes);
+      return unzip(bytes);
+    }
+  }
+  return null;
+}
+
 async function openDocx(buffer, name) {
   const dataUrl =
     'data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,' +
@@ -133,147 +137,203 @@ function paragraphsOf(xml) {
   const body = xml.slice(xml.indexOf('<w:body'));
   return (body.match(/<w:p[ >][\s\S]*?<\/w:p>/g) ?? []).map((para) => {
     const pPr = (para.match(/<w:pPr>[\s\S]*?<\/w:pPr>/) ?? [''])[0];
-    const runs = para.replace(pPr, '').match(/<w:r[ >][\s\S]*?<\/w:r>/g) ?? [];
-    const text = (para.match(/<w:t[^>]*>[\s\S]*?<\/w:t>/g) ?? [])
-      .map((t) => t.replace(/<[^>]+>/g, ''))
-      .join('');
-    return {
-      text,
-      plain: text.split(RLM).join(''),
-      marks: (text.match(new RegExp(RLM, 'g')) ?? []).length,
-      endsMarked: text.replace(/\s+$/u, '').endsWith(RLM),
-      runs: runs.length,
-      // מה שהגישה הקודמת הוסיפה, וכאן חייב להישאר אפס.
-      rtl: runs.filter((run) => /<w:rtl\s*\/?>/.test(run)).length,
-      cs: /<w:bCs\s*\/?>|<w:szCs\b|<w:iCs\s*\/?>|\sw:cs=/.test(para),
-    };
+    const runs = (para.replace(pPr, '').match(/<w:r[ >][\s\S]*?<\/w:r>/g) ?? []).map((run) => ({
+      text: (run.match(/<w:t[^>]*>[\s\S]*?<\/w:t>/g) ?? []).map((t) => t.replace(/<[^>]+>/g, '')).join(''),
+      rtl: /<w:rtl\s*\/>/.test(run),
+      rPr: (run.match(/<w:rPr>[\s\S]*?<\/w:rPr>/) ?? [''])[0],
+    }));
+    const text = runs.map((run) => run.text).join('');
+    return { text, plain: text.split(RLM).join(''), runs };
   });
 }
 
+/** ריצות שיש בהן עברית ואינן מוצהרות. */
+const undeclaredHebrew = (para) => para.runs.filter((run) => /[֐-׿]/.test(run.text) && !run.rtl);
+
 try {
   await captureUpload();
+
+  /* ── תרחיש 1: מסמך חדש של התוסף ── */
+  await app.caretPara(0);
+  await app.type('מסמך חדש', 90);
+  await app.sleep(1200);
+  const fresh = await save('new-document');
+  if (!fresh) {
+    report.fail('מסמך חדש — שמירה', 'לא נתפסה שום העלאה');
+  } else {
+    const styles = fresh['word/styles.xml'] ?? '';
+    const defaults = (styles.match(/<w:rPrDefault>[\s\S]*?<\/w:rPrDefault>/) ?? [''])[0];
+    const csFont = /w:cs="([^"]*)"/.exec(defaults)?.[1];
+    const latinFont = /w:ascii="([^"]*)"/.exec(defaults)?.[1];
+    if (csFont && csFont === latinFont) report.pass('מסמך חדש — הגופן העברי זהה ללטיני', `${latinFont}`);
+    else report.fail('מסמך חדש — הגופן העברי זהה ללטיני', `לטיני=${latinFont}, עברי=${csFont}`);
+
+    const typed = paragraphsOf(fresh['word/document.xml'] ?? '').find((para) => para.plain.includes('מסמך חדש'));
+    const engineTyped = paragraphsOf((await app.docx())['word/document.xml'] ?? '').find((para) => para.plain.includes('מסמך חדש'));
+    if (engineTyped && undeclaredHebrew(engineTyped).length > 0) report.pass('מסמך חדש — בקרה: המנוע עצמו אינו מצהיר', 'הריצה יוצאת מהמנוע בלי w:rtl');
+    else report.fail('מסמך חדש — בקרה: המנוע עצמו אינו מצהיר', 'כבר מוצהרת בפלט המנוע — השער אינו מודד את השלב שלנו');
+    if (!typed) report.fail('מסמך חדש — ההקלדה מוצהרת', 'הפסקה שהוקלדה לא נמצאה');
+    else if (undeclaredHebrew(typed).length === 0) report.pass('מסמך חדש — ההקלדה מוצהרת', `${typed.runs.length} ריצות`);
+    else report.fail('מסמך חדש — ההקלדה מוצהרת', JSON.stringify(typed.runs));
+  }
+
+  /* ── תרחיש 2: מסמך Word קיים ── */
   const opened = await openDocx(
-    buildDocx({ body: HEBREW_PARA + BOLD_PARA + DECLARED_PARA + MIXED_PARA + LATIN_PARA, numbering: NUMBERING }),
+    buildDocx({
+      body: WORD_PARA + ENGINE_PARA + BOLD_PARA + MIXED_PARA + LATIN_PARA,
+      numbering: NUMBERING,
+      styles: WORD_STYLES,
+    }),
     'rtl-run-export',
   );
   if (opened !== 'rtl-run-export') {
     report.fail('פתיחת המסמך', `שם המסמך אחרי הפתיחה: ${opened}`);
   } else {
+    await app.caretPara('שלום עולם');
+    await app.press('End', 'End', 35);
+    await app.sleep(200);
+    // סוף הפסקה שהמנוע כתב ← Enter ← פסקה חדשה. נמדד שכאן ההקלדה יוצאת
+    // מהמנוע **בלי** הצהרה: היא יורשת מהשכנה, ולשכנה אין. אחרי פסקה ש-Word
+    // כתב המנוע מעביר את `w:rtl` בעצמו — ולכן הבקרה נבנית כאן ולא שם. וזה
+    // גם המקור של הדיווח: מסמך מ-15.9 שנכתב בתוסף ונערך ב-Word נושא 1,680
+    // ריצות עבריות לא מוצהרות לצד 31 ש-Word כתב.
+    await app.press('Enter', 'Enter', 13, 0, '\r');
+    await app.sleep(400);
+    await app.type(TYPED, 90);
+    await app.sleep(600);
+    // ורשימה עברית מזיהוי ההקלדה — בשביל בדיקת ה-nsid.
+    await app.press('Enter', 'Enter', 13, 0, '\r');
+    await app.sleep(400);
+    await app.type('א) פריט', 90);
+    await app.sleep(1500);
+
     /* בקרה: פלט המנוע עצמו, לפני השלב שלנו. */
     const engine = paragraphsOf((await app.docx())['word/document.xml'] ?? '');
-    const engineMarks = engine.reduce((sum, para) => sum + para.marks, 0);
-    if (engineMarks === 0) {
-      report.pass('בקרה — המנוע עצמו אינו כותב RLM', `${engine.length} פסקאות, 0 סימנים`);
+    const engineTyped = engine.find((para) => para.plain.includes(TYPED));
+    if (engineTyped && undeclaredHebrew(engineTyped).length > 0) {
+      report.pass('בקרה — המנוע עצמו אינו מצהיר', `${undeclaredHebrew(engineTyped).length} ריצות לא מוצהרות`);
     } else {
-      report.fail(
-        'בקרה — המנוע עצמו אינו כותב RLM',
-        `${engineMarks} סימנים כבר בפלט המנוע — השער אינו מודד את השלב שלנו`,
-      );
+      report.fail('בקרה — המנוע עצמו אינו מצהיר', 'הפסקה שהוקלדה כבר מוצהרת בפלט המנוע — השער אינו מודד את השלב שלנו');
     }
 
-    /* שמירה אמיתית: הקלדה שמלכלכת את המסמך, ואז Ctrl+S. */
-    const line = await app.js(
-      `(function(){
-        var f=document.querySelector('[data-source-node-id][data-pm-start]');
-        var l=f&&f.children[0];
-        if(!l) return '';
-        var r=l.getBoundingClientRect();
-        return JSON.stringify({x:Math.round((r.left+r.right)/2),y:Math.round((r.top+r.bottom)/2)});
-      })()`,
-    );
-    if (!line) {
-      report.fail('שמירה', 'לא נמצאה שורה מצוירת להניח בה את הסמן');
+    const parts = await save('word-document');
+    if (!parts) {
+      report.fail('שמירה', 'לא נתפסה שום העלאה — המסמך לא נשמר');
     } else {
-      const { x, y } = JSON.parse(line);
-      await app.clickAt(x, y);
-      await app.sleep(500);
-      // ‏Home לפני ההקלדה, ובכוונה: הלחיצה נופלת במרכז **תיבת השורה**, ובפסקה
-      // עברית קצרה המרכז הזה יושב בשטח הריק שמשמאל לטקסט — כלומר בקצה הלוגי,
-      // אחרי הנקודה. תו שנכנס שם הופך את התו המכריע האחרון לאות, והפסקה יוצאת
-      // מהכלל שהשער בא למדוד: הוא היה נכשל על מיקום הסמן ולא על התיקון.
-      await app.press('Home', 'Home', 36);
-      await app.sleep(200);
-      await app.type('א');
-      await app.sleep(900);
-      // רשימה עברית מזיהוי ההקלדה, בפסקה חדשה — בשביל בדיקת ה-nsid.
-      await app.press('End', 'End', 35);
-      await app.press('Enter', 'Enter', 13, 0, '\r');
-      await app.sleep(400);
-      await app.type('א) פריט', 90);
-      await app.sleep(1500);
-      await app.press('s', 'KeyS', 83, 2, 's');
-      await app.sleep(6000);
+      const paragraphs = paragraphsOf(parts['word/document.xml'] ?? '');
+      const find = (needle) => paragraphs.find((para) => para.plain.includes(needle));
 
-      const saved = await app.js('window.__savedDocx || ""');
-      if (!saved) {
-        report.fail('שמירה', 'לא נתפסה שום העלאה — המסמך לא נשמר');
-      } else {
-        const parts = unzip(Buffer.from(saved, 'base64'));
-        const paragraphs = paragraphsOf(parts['word/document.xml'] ?? '');
-        const hebrew = paragraphs.find((para) => para.plain.includes('שלום עולם'));
-        const bold = paragraphs.find((para) => para.plain.startsWith('כותרת'));
-        const mixed = paragraphs.find((para) => para.plain.includes('Word'));
-        const latin = paragraphs.find((para) => para.plain.startsWith('hello'));
-        const declared = paragraphs.find((para) => para.plain.includes('כותרת מוצהרת'));
+      /* הדיווח עצמו. */
+      const typed = find(TYPED);
+      if (!typed) report.fail('הפסקה שהוקלדה מוצהרת עברית', 'לא נמצאה בקובץ');
+      else if (undeclaredHebrew(typed).length === 0) report.pass('הפסקה שהוקלדה מוצהרת עברית', `${typed.runs.length} ריצות`);
+      else report.fail('הפסקה שהוקלדה מוצהרת עברית', JSON.stringify(undeclaredHebrew(typed)));
 
-        /* התיקון עצמו — הבאג שדווח. */
-        if (!hebrew) report.fail('הנקודה הסוגרת', 'הפסקה העברית לא נמצאה בקובץ שנשמר');
-        else if (hebrew.endsMarked && hebrew.marks === 1)
-          report.pass('הנקודה הסוגרת קיבלה RLM', JSON.stringify(hebrew.text));
-        else
-          report.fail(
-            'הנקודה הסוגרת קיבלה RLM',
-            `סימנים=${hebrew.marks}, בסוף=${hebrew.endsMarked} — ${JSON.stringify(hebrew.text)}`,
-          );
+      // ולא כופה את הלטיני: בלי `cs`/`szCs` ברמת הריצה היא יורשת David 16.
+      if (typed && typed.runs.every((run) => !/w:cs=|<w:szCs/.test(run.rPr)))
+        report.pass('הפסקה שהוקלדה יורשת את הגופן העברי של המסמך', 'אין cs/szCs ברמת הריצה');
+      else if (typed) report.fail('הפסקה שהוקלדה יורשת את הגופן העברי של המסמך', JSON.stringify(typed.runs.map((r) => r.rPr)));
 
-        /* הגבול: העיצוב יוצא כמות שהוא. זו השורה שהגישה הקודמת נכשלה בה. */
-        if (!bold) report.fail('העיצוב אינו נגע', 'הפסקה המודגשת לא נמצאה');
-        else if (bold.endsMarked && bold.rtl === 0 && !bold.cs)
-          report.pass('העיצוב אינו נגע', 'ריצה מודגשת קיבלה RLM, וה-rPr שלה כמות שהיא');
-        else
-          report.fail(
-            'העיצוב אינו נגע',
-            `בסוף=${bold.endsMarked}, rtl=${bold.rtl}, כתב-מורכב=${bold.cs} — סימון w:rtl או מראה מוחקים עיצוב ב-Word`,
-          );
+      const styles = parts['word/styles.xml'] ?? '';
+      if (styles.includes('w:cs="David"') && styles.includes('<w:szCs w:val="32"/>'))
+        report.pass('גיליון הסגנונות של Word לא נגע', 'David 16 נשאר');
+      else report.fail('גיליון הסגנונות של Word לא נגע', 'ההגדרה העברית השתנתה');
 
-        /* הגבול השני: מבנה הריצות אינו משתנה. */
-        if (!mixed) report.fail('הריצה אינה מפוצלת', 'הפסקה המעורבת לא נמצאה');
-        else if (mixed.runs === 1 && mixed.endsMarked && mixed.rtl === 0)
-          report.pass('הריצה אינה מפוצלת', `ריצה אחת, RLM בסופה: ${JSON.stringify(mixed.text)}`);
-        else
-          report.fail(
-            'הריצה אינה מפוצלת',
-            `ריצות=${mixed.runs}, בסוף=${mixed.endsMarked}, rtl=${mixed.rtl}`,
-          );
+      const engineDot = find('שלום עולם');
+      if (engineDot && undeclaredHebrew(engineDot).length === 0 && engineDot.runs.every((run) => run.rtl))
+        report.pass('ריצה ניטרלית יורשת — הנקודה מוצהרת', JSON.stringify(engineDot.text));
+      else report.fail('ריצה ניטרלית יורשת — הנקודה מוצהרת', JSON.stringify(engineDot?.runs));
 
-        /* המראה: ריצה שכבר מצהירה rtl מקבלת את מחסנית הכתב המורכב. */
-        if (!declared) report.fail('מראת הכתב המורכב', 'הפסקה המוצהרת לא נמצאה');
-        else if (declared.cs) report.pass('מראת הכתב המורכב', 'ריצה מוצהרת קיבלה את התאומים');
-        else
-          report.fail(
-            'מראת הכתב המורכב',
-            'ריצה שמצהירה w:rtl יצאה בלי bCs/szCs/cs — ‏Word יצייר אותה Arial 12 לא-מודגש',
-          );
+      const bold = find('כותרת מודגשת');
+      const boldPr = bold?.runs[0]?.rPr ?? '';
+      if (bold && /<w:bCs\s*\/>/.test(boldPr) && /<w:szCs w:val="36"\/>/.test(boldPr) && bold.runs[0].rtl)
+        report.pass('עיצוב ישיר נוסע עם ההצהרה', 'bCs, szCs 36');
+      else report.fail('עיצוב ישיר נוסע עם ההצהרה', boldPr);
 
-        const numbering = parts['word/numbering.xml'] ?? '';
-        const nsids = [...numbering.matchAll(/<w:abstractNum\b[\s\S]*?<w:nsid w:val="([^"]+)"/g)].map((m) =>
-          m[1].toUpperCase(),
-        );
-        const hebrewList = /<w:numFmt w:val="hebrew1"/.test(numbering);
-        console.log('nsid:', JSON.stringify(nsids), 'hebrew1:', hebrewList);
-        if (!hebrewList) report.fail('nsid ייחודי', 'הרשימה העברית לא נכתבה — אין מה לבדוק');
-        else if (nsids.length < 2)
-          report.fail('nsid ייחודי', `פחות משתי הגדרות עם nsid (${nsids.length}) — הבדיקה אינה מודדת דבר`);
-        else if (new Set(nsids).size === nsids.length)
-          report.pass('nsid ייחודי לכל הגדרת מספור', nsids.join(','));
-        else report.fail('nsid ייחודי לכל הגדרת מספור', `כפולים: ${nsids.join(',')}`);
+      const mixed = find('Word');
+      const latinRun = mixed?.runs.find((run) => run.text === 'Word');
+      if (mixed && mixed.runs.length === 3 && latinRun && !latinRun.rtl && undeclaredHebrew(mixed).length === 0)
+        report.pass('ריצה מעורבת מפוצלת — הלועזית נשארת לטינית', mixed.runs.map((r) => `${r.rtl ? 'R' : 'L'}:${r.text}`).join(' | '));
+      else report.fail('ריצה מעורבת מפוצלת — הלועזית נשארת לטינית', JSON.stringify(mixed?.runs));
 
-        if (!latin) report.fail('הפסקה הלטינית לא נגעה', 'לא נמצאה בקובץ שנשמר');
-        else if (latin.marks === 0 && latin.rtl === 0)
-          report.pass('הפסקה הלטינית לא נגעה', `${latin.runs} ריצות, 0 סימנים`);
-        else report.fail('הפסקה הלטינית לא נגעה', `סימנים=${latin.marks}, rtl=${latin.rtl}`);
-      }
+      const latin = find('hello');
+      if (latin && latin.runs.every((run) => !run.rtl) && !latin.text.includes(RLM))
+        report.pass('הפסקה הלטינית לא נגעה', `${latin.runs.length} ריצות`);
+      else report.fail('הפסקה הלטינית לא נגעה', JSON.stringify(latin?.runs));
+
+      const numbering = parts['word/numbering.xml'] ?? '';
+      const nsids = [...numbering.matchAll(/<w:abstractNum\b[\s\S]*?<w:nsid w:val="([^"]+)"/g)].map((m) => m[1].toUpperCase());
+      if (nsids.length < 2) report.fail('nsid ייחודי', `פחות משתי הגדרות עם nsid (${nsids.length})`);
+      else if (new Set(nsids).size === nsids.length) report.pass('nsid ייחודי לכל הגדרת מספור', nsids.join(','));
+      else report.fail('nsid ייחודי לכל הגדרת מספור', `כפולים: ${nsids.join(',')}`);
     }
+  }
+
+  /* ── Regression fixtures: preserve Word's structure through the actual save path. ── */
+  const edgeStyles = `<w:styles ${W}><w:docDefaults><w:rPrDefault><w:rPr>` +
+    '<w:rFonts w:ascii="Arial"/><w:sz w:val="20"/></w:rPr></w:rPrDefault></w:docDefaults>' +
+    '<w:style w:type="table" w:styleId="Big"><w:name w:val="Big"/><w:rPr>' +
+    '<w:rFonts w:ascii="Courier New" w:cs="David"/><w:sz w:val="32"/><w:szCs w:val="36"/>' +
+    '</w:rPr></w:style><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style></w:styles>';
+  const alternate = '<mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" ' +
+    'xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml"><mc:Choice Requires="w14">' +
+    '<w:t>שלום abc</w:t></mc:Choice><mc:Fallback><w:t>שלום abc</w:t></mc:Fallback></mc:AlternateContent>';
+  const edgeBody = '<w:p><w:r><w:t>תחילת בדיקת קצה</w:t></w:r></w:p>' +
+    '<w:tbl><w:tblPr><w:tblStyle w:val="Big"/><w:tblW w:w="5000" w:type="dxa"/></w:tblPr>' +
+    '<w:tblGrid><w:gridCol w:w="5000"/></w:tblGrid><w:tr><w:tc><w:tcPr><w:tcW w:w="5000" w:type="dxa"/></w:tcPr>' +
+    '<w:p><w:r><w:t>שלוםטבלה</w:t></w:r></w:p></w:tc></w:tr></w:tbl>' +
+    `<w:p><w:r>${alternate}</w:r></w:p>` +
+    '<w:p><w:r><w:t><![CDATA[עולם xyz]]></w:t></w:r></w:p>' +
+    '<w:p><w:r><w:t><![CDATA[עברית]]></w:t></w:r></w:p>';
+  // Fresh contexts prevent the QA paragraph lookup from deduplicating source
+  // IDs shared with hidden documents from earlier scenarios.
+  await app.close();
+  app = await openApp({ name: 'rtl-export-edge', port: Number(process.env.QA_PORT ?? 9387) });
+  await captureUpload();
+  const edgeOpened = await openDocx(buildDocx({ body: edgeBody, styles: edgeStyles }), 'rtl-export-edge');
+  if (edgeOpened !== 'rtl-export-edge') report.fail('פתיחת פיקסטורת הרגרסיות', `שם=${edgeOpened}`);
+  else {
+    await app.caretPara('תחילת בדיקת קצה');
+    await app.type('א', 30);
+    const engineEdge = (await app.docx())['word/document.xml'] ?? '';
+    if (engineEdge.includes(alternate) && engineEdge.includes('<![CDATA[עולם xyz]]>'))
+      report.pass('בקרת הרגרסיות — המנוע משמר את המבנים', 'AlternateContent ו-CDATA קיימים בפלט המנוע');
+    else report.fail('בקרת הרגרסיות — המנוע משמר את המבנים', engineEdge);
+    const edgeParts = await save('edge-structures');
+    const savedEdge = edgeParts?.['word/document.xml'] ?? '';
+    if (savedEdge.includes(alternate)) report.pass('שמירה משמרת Choice/Fallback בלי הכפלת טקסט', 'המבנה החלופי נשאר בשלמותו');
+    else report.fail('שמירה משמרת Choice/Fallback בלי הכפלת טקסט', savedEdge);
+    if (savedEdge.includes('<w:t><![CDATA[עולם xyz]]></w:t>') && savedEdge.includes('<w:t><![CDATA[עברית]]></w:t>'))
+      report.pass('שמירה משמרת CDATA כטקסט, גם בעברית בלבד', 'אין המרה של הסימונים לטקסט גלוי ואין RLM על סוגר CDATA');
+    else report.fail('שמירה משמרת CDATA כטקסט, גם בעברית בלבד', savedEdge);
+    const savedTableRun = paragraphsOf(savedEdge).find((para) => para.plain === 'שלוםטבלה')?.runs[0];
+    if (savedTableRun?.rtl && !/w:cs=|<w:szCs/.test(savedTableRun.rPr))
+      report.pass('שמירה משמרת ירושת גופן וגודל מסגנון הטבלה', 'הריצה מוצהרת בלי לכפות Arial 10');
+    else report.fail('שמירה משמרת ירושת גופן וגודל מסגנון הטבלה', JSON.stringify(savedTableRun));
+  }
+
+  const history = '<w:rPrChange w:id="1" w:author="qa"><w:rPr><w:rtl/></w:rPr></w:rPrChange>';
+  const historyStyles = `<w:styles ${W}><w:docDefaults><w:rPrDefault><w:rPr>` +
+    '<w:rFonts w:ascii="Arial" w:cs="Times New Roman (Body CS)"/><w:sz w:val="24"/><w:szCs w:val="24"/>' +
+    '</w:rPr></w:rPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style></w:styles>';
+  const historyBody = `<w:p><w:r><w:rPr>${history}</w:rPr><w:t>עברית עם היסטוריה</w:t></w:r></w:p>` +
+    '<w:p><w:r><w:t>עריכת בקרה</w:t></w:r></w:p>';
+  await app.close();
+  app = await openApp({ name: 'rtl-export-history', port: Number(process.env.QA_PORT ?? 9387) });
+  await captureUpload();
+  const historyOpened = await openDocx(buildDocx({ body: historyBody, styles: historyStyles }), 'rtl-export-history');
+  if (historyOpened !== 'rtl-export-history') report.fail('פתיחת פיקסטורת היסטוריה', `שם=${historyOpened}`);
+  else {
+    await app.caretPara('עריכת בקרה');
+    await app.type('א', 30);
+    const engineHistory = (await app.docx())['word/document.xml'] ?? '';
+    if (engineHistory.includes(history)) report.pass('בקרת ההיסטוריה — נשמרת בפלט המנוע', 'rPrChange קיים לפני postflight');
+    else report.fail('בקרת ההיסטוריה — נשמרת בפלט המנוע', engineHistory);
+    const historyParts = await save('history-declaration');
+    const savedHistory = historyParts?.['word/document.xml'] ?? '';
+    if ((historyParts?.['word/styles.xml'] ?? '').includes('w:cs="Arial"') && savedHistory.includes(history))
+      report.pass('הצהרה היסטורית אינה חוסמת יישור גופן', 'Arial עברי והיסטוריית העיצוב נשמרים');
+    else report.fail('הצהרה היסטורית אינה חוסמת יישור גופן', JSON.stringify(historyParts));
   }
 } finally {
   report.print();
