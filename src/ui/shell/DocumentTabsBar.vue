@@ -105,9 +105,10 @@ function onTabKeydown(event: KeyboardEvent): void {
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
-  height: 36px;
+  height: 34px;
   padding-inline: 8px;
   background: var(--color-surface-container-high);
+  border-bottom: 2px solid var(--color-outline-variant);
   user-select: none;
 }
 
@@ -116,7 +117,8 @@ function onTabKeydown(event: KeyboardEvent): void {
   align-items: stretch;
   gap: 2px;
   min-width: 0;
-  height: 100%;
+  height: calc(100% + 2px);
+  margin-bottom: -2px;
   overflow-x: auto;
   padding-inline: 10px;
   scrollbar-width: none;
@@ -136,7 +138,7 @@ function onTabKeydown(event: KeyboardEvent): void {
   color: var(--color-on-surface);
   font-family: var(--font-main);
   font-size: var(--font-size-tab);
-  padding: 2px 8px;
+  padding: 2px 10px;
   cursor: pointer;
   white-space: nowrap;
   max-width: 220px;
@@ -148,7 +150,7 @@ function onTabKeydown(event: KeyboardEvent): void {
 
 .word-doctab.active {
   background: var(--word-canvas-bg-active);
-  border: 1px solid var(--color-outline-variant);
+  border: 2px solid var(--color-outline-variant);
   border-bottom-color: transparent;
   color: var(--color-on-surface);
   box-shadow: none;
@@ -156,7 +158,8 @@ function onTabKeydown(event: KeyboardEvent): void {
   border-top-right-radius: var(--radius-md);
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
-  margin-bottom: -1px;
+  margin-top: 2px;
+  margin-bottom: -2px;
   position: relative;
   z-index: 6;
 }
@@ -173,14 +176,18 @@ function onTabKeydown(event: KeyboardEvent): void {
 }
 
 .word-doctab.active::before {
-  left: -10px;
+  left: -12px;
   border-bottom-right-radius: 10px;
+  border-right: 2px solid var(--color-outline-variant);
+  border-bottom: 2px solid var(--color-outline-variant);
   box-shadow: 5px 5px 0 5px var(--word-canvas-bg-active);
 }
 
 .word-doctab.active::after {
-  right: -10px;
+  right: -12px;
   border-bottom-left-radius: 10px;
+  border-bottom: 2px solid var(--color-outline-variant);
+  border-left: 2px solid var(--color-outline-variant);
   box-shadow: -5px 5px 0 5px var(--word-canvas-bg-active);
 }
 

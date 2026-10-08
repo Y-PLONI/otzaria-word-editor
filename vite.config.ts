@@ -401,7 +401,13 @@ export default defineConfig({
   // PORT מכובד כשהוא מוגדר: כלי תצוגה (וכל סביבת עבודה עם כמה שרתי פיתוח
   // במקביל) מקצים פורט דרך משתנה הסביבה, ו-Vite מעצמו קורא רק --port.
   // בלי זה שרת שני נופל ל-5174 בעוד הכלי מצביע על הפורט שהקצה — דף ריק.
-  server: process.env.PORT ? { port: Number(process.env.PORT), strictPort: true } : undefined,
+  // .vs/ is a Visual Studio index directory that locks files on Windows; exclude it from watching.
+  server: {
+    ...(process.env.PORT ? { port: Number(process.env.PORT), strictPort: true } : {}),
+    watch: {
+      ignored: ['**/.vs/**'],
+    },
+  },
 
   build: {
     target: 'es2020',
