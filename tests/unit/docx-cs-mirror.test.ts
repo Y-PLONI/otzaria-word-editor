@@ -242,3 +242,19 @@ describe('mirrorComplexScript — הערובות', () => {
     if (out !== null) expect(out.replace('<w:bCs/>', '')).toBe(broken);
   });
 });
+
+describe('mirrorComplexScript — גופן ערכת נושא', () => {
+  it('asciiTheme ישיר עובר כ-cstheme באותה ערכה (נמצא ב-QA)', () => {
+    expect(propsOf(doc(run(`<w:rFonts w:asciiTheme="majorHAnsi" w:hAnsiTheme="majorHAnsi"/>${RTL}`)))).toBe(
+      `<w:rPr><w:rFonts w:asciiTheme="majorHAnsi" w:hAnsiTheme="majorHAnsi" w:cstheme="majorHAnsi"/>${RTL}</w:rPr>`,
+    );
+  });
+
+  it('ערכת נושא גוברת על שם באותו תג', () => {
+    expect(propsOf(doc(run(`<w:rFonts w:ascii="Arial" w:asciiTheme="minorHAnsi"/>${RTL}`)))).toContain('w:cstheme="minorHAnsi"');
+  });
+
+  it('cstheme קיים — אין תאום נוסף', () => {
+    expect(mirrorComplexScript(doc(run(`<w:rFonts w:ascii="Arial" w:cstheme="minorBidi"/>${RTL}`)))).toBeNull();
+  });
+});

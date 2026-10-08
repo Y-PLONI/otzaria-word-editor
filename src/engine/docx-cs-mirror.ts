@@ -28,6 +28,13 @@
  * לפי כתב ומסמן כל ריצה עברית. נמדד על משפט שהוקלד ב-Word עצמו — שש ריצות,
  * ו-`<w:rtl/>` על כולן פרט למילה הלטינית, כולל על שני הרווחים ועל הנקודה.
  *
+ * ## ומאז: גם על ריצות שזה עתה סומנו
+ *
+ * ‏`docx-run-direction.ts` מסמן היום כל ריצה עברית, ורץ **לפני** המודול הזה
+ * (`docx-postflight.ts`). לכן הדגשה שהמנוע כתב בצד הלטיני על ריצה שנכתבה
+ * בתוסף מקבלת את התאום כאן, בדיוק כמו על ריצה ש-Word סימן. מה שנכתב למטה על
+ * „הוספת `w:rtl` נפסלה” מתאר את ההחלטה של אז; היא נסגרה שם.
+ *
  * ## למה זה חסום, בשונה מסימון `w:rtl` שנפסל
  *
  * זו ההבחנה שכל המודול הזה תלוי בה. `docx-neutral-mark.ts` מתעד למה **הוספת**
@@ -105,30 +112,16 @@
  * כמות שהם.
  */
 import {
-  SKIPPED_SPANS,
+  skippedCloser,
   TOKEN_SOURCE,
   applyXmlInserts,
+  attribute,
   isOn,
+  quoteAttribute,
   valueOf,
+  wordPrefix,
   type XmlInsert,
 } from './docx-parts';
-
-/** מאפיין לפי שם, בלי להיות נעול על קידומת — כמו `valueOf`, ומאותו טעם. */
-function attribute(attributes: string, name: string): string | null {
-  const match = new RegExp(`\\s(?:[\\w.-]+:)?${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`).exec(attributes);
-  return match ? (match[1] ?? match[2]) : null;
-}
-
-/**
- * ערך שנקרא ממאפיין וייכתב לתוך מאפיין חדש במרכאות כפולות.
- *
- * רק `"` מוחלף: מה שנקרא הוא הטקסט הגולמי שבין המרכאות, כלומר כבר מוגן —
- * `&amp;` שנקרא כך וייכתב כך הוא אותו ערך בדיוק. גרש כפול יכול להופיע בו רק
- * כשהמקור היה במרכאות בודדות, וזה המקרה היחיד שצריך הגנה.
- */
-function quoteAttribute(raw: string): string {
-  return raw.replace(/"/g, '&quot;');
-}
 
 /** מה שנאסף על ה-`rPr` החיה של ריצה אחת. מיקומים הם היסטים ב-XML המקורי. */
 interface RunProps {
@@ -152,6 +145,9 @@ interface RunProps {
   /** המקום שלפני סוגר התג של `rFonts` — לשם נכנס המאפיין `w:cs`. */
   fontsAttrsEnd: number | null;
   fontsAscii: string | null;
+  /** ‏`asciiTheme`/`hAnsiTheme` — גובר על השם, כמו ב-Word. */
+  fontsTheme: string | null;
+  /** יש `cs` או `cstheme` — אחד מהם מספיק כדי שהתאום כבר יהיה שם. */
   hasFontCs: boolean;
 }
 
@@ -171,6 +167,7 @@ function newProps(from: number): RunProps {
     hasSizeCs: false,
     fontsAttrsEnd: null,
     fontsAscii: null,
+    fontsTheme: null,
     hasFontCs: false,
   };
 }
@@ -203,41 +200,14 @@ function mirrorFor(props: RunProps, prefix: string): XmlInsert[] {
   if (props.sizeEnd !== null && props.sizeVal !== null && !props.hasSizeCs) {
     add(props.sizeEnd, `<${prefix}:szCs ${prefix}:val="${quoteAttribute(props.sizeVal)}"/>`);
   }
-  if (props.fontsAttrsEnd !== null && props.fontsAscii !== null && !props.hasFontCs) {
-    add(props.fontsAttrsEnd, ` ${prefix}:cs="${quoteAttribute(props.fontsAscii)}"`);
+  // גופן ערכת נושא עובר כערכת נושא: נמדד ש-`cstheme="majorHAnsi"` מצייר בדיוק
+  // מה שהצד הלטיני צייר. (נמצא ב-QA: בלי זה `asciiTheme` ישיר נפל לגופן העברי
+  // של המסמך, בעוד `ascii` ישיר נשמר.)
+  if (props.fontsAttrsEnd !== null && !props.hasFontCs) {
+    if (props.fontsTheme !== null) add(props.fontsAttrsEnd, ` ${prefix}:cstheme="${quoteAttribute(props.fontsTheme)}"`);
+    else if (props.fontsAscii !== null) add(props.fontsAttrsEnd, ` ${prefix}:cs="${quoteAttribute(props.fontsAscii)}"`);
   }
   return out;
-}
-
-/** מרחב השמות של WordprocessingML. הקידומת נגזרת ממנו ואינה מונחת. */
-const WORDPROCESSING_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
-
-/**
- * הקידומת שקשורה למרחב השמות של WordprocessingML, מ**תג השורש בלבד**.
- *
- * ‏`<m:rPr>` של נוסחה ו-`<a:rPr>` של DrawingML נושאים את אותו שם מקומי ואינם
- * תכונות ריצה של Word; ל-`m:rPr` אין `m:bCs` בסכמה בכלל. וההצהרה נקראת
- * מהשורש ולא מהמחרוזת כולה, כי הערה שיושבת לפניו יכולה לקשור את אותו מרחב
- * שמות לקידומת אחרת — נמדד ב-`docx-neutral-mark.ts`.
- */
-function wordPrefix(xml: string): string | null {
-  const declaration = new RegExp(
-    `\\sxmlns:([\\w.-]+)\\s*=\\s*"${WORDPROCESSING_NS}"|\\sxmlns:([\\w.-]+)\\s*=\\s*'${WORDPROCESSING_NS}'`,
-  );
-  const token = new RegExp(TOKEN_SOURCE.source, 'g');
-  for (let match = token.exec(xml); match; match = token.exec(xml)) {
-    const closer = SKIPPED_SPANS.get(match[0]);
-    if (closer !== undefined) {
-      const end = xml.indexOf(closer, token.lastIndex);
-      if (end < 0) return null;
-      token.lastIndex = end + closer.length;
-      continue;
-    }
-    if (match[1]) return null;
-    const found = declaration.exec(match[4] ?? '');
-    return found ? (found[1] ?? found[2] ?? null) : null;
-  }
-  return null;
 }
 
 /**
@@ -271,7 +241,7 @@ export function mirrorComplexScript(xml: string): string | null {
 
   const token = new RegExp(TOKEN_SOURCE.source, 'g');
   for (let match = token.exec(xml); match; match = token.exec(xml)) {
-    const closer = SKIPPED_SPANS.get(match[0]);
+    const closer = skippedCloser(match[0]);
     if (closer !== undefined) {
       const end = xml.indexOf(closer, token.lastIndex);
       // הערה שאינה נסגרת: מה שנאסף עד כאן שייך ל-`rPr` שכבר נסגרו, ולכן תקף.
@@ -280,7 +250,10 @@ export function mirrorComplexScript(xml: string): string | null {
       continue;
     }
 
-    const [, closing, tagPrefix, name, attributes] = match;
+    const closing = match[1]!;
+    const tagPrefix = match[2]!;
+    const name = match[3]!;
+    const attributes = match[4]!;
     if (tagPrefix !== prefix) continue;
     const selfClosing = attributes.endsWith('/');
 
@@ -335,7 +308,8 @@ export function mirrorComplexScript(xml: string): string | null {
       // המקום שלפני סוגר התג: `/>` כשהוא סוגר את עצמו, ו-`>` כשלא.
       props.fontsAttrsEnd = tagEnd - (selfClosing ? 2 : 1);
       props.fontsAscii = attribute(attributes, 'ascii') ?? attribute(attributes, 'hAnsi');
-      props.hasFontCs = attribute(attributes, 'cs') !== null;
+      props.fontsTheme = attribute(attributes, 'asciiTheme') ?? attribute(attributes, 'hAnsiTheme');
+      props.hasFontCs = attribute(attributes, 'cs') !== null || attribute(attributes, 'cstheme') !== null;
     } else if (name === 'rtl') props.declaredRtl = isOn(attributes);
     else if (name === 'rPrChange') props.hasChange = true;
   }
