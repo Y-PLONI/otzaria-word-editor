@@ -239,8 +239,7 @@ function resetZoom(): void {
   justify-content: space-between;
   height: var(--statusbar-height);
   padding-inline: 10px;
-  /* Match the lighter area under the ribbon: subtle white overlay over the
-     canvas background for the height of the statusbar (alpha 0.04). */
+  /* שכבת הבהרה עדינה על משטח הנושא; צבע הבד אינו צובע פקדי ממשק. */
   background: var(--statusbar-bg);
   border-block-start: 1px solid var(--color-outline-variant);
   color: var(--color-on-surface-variant);

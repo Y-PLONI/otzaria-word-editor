@@ -6033,7 +6033,7 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
   flex-shrink: 0;
 }
 
-/* הפסים העליונים — רקע הנושא עם שכבת הכהייה עדינה (5% שחור) כדי לייצר
+/* הפסים העליונים — רקע הנושא עם שכבת הכהייה עדינה (7% שחור) כדי לייצר
    ניגוד קל מול הרצועה הלבנה, בלי לנגוע בצבע הנושא עצמו.
    `background-image` לא מחליף את `background-color` שנגזר מהנושא — הוא יושב
    מעליו כשכבה שקופה. כך הכלל עובד עם כל ערכת צבעים, בהירה או כהה. */
@@ -6086,13 +6086,9 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
   border-radius: 0 !important;
 }
 
-/* גוף הרצועה — הכרטיס הלבן. פינות מעוגלות בכל הצדדים כי הטאבים יושבים
-   מחוצה לו, מעל הסביבה. */
+/* גוף הרצועה מקבל את צבע המשטח מ-ribbon.css, לצד טקסט on-surface.
+   פינות מעוגלות בכל הצדדים כי הטאבים יושבים מחוצה לו, מעל הסביבה. */
 .shell-top :deep(.word-ribbon-body) {
-  background-color: var(
-    --color-surface-container-lowest,
-    var(--color-on-primary)
-  ) !important;
   border-radius: 12px;
 }
 
@@ -6100,11 +6096,6 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
 .shell-top :deep(.word-titlebar) {
   border-block-end: 0 !important;
   box-shadow: none !important;
-}
-
-/* רצועה מכווצת: הגוף מוסתר (`v-show`) — אין כרטיס לבן, אין צורך בשינוי נוסף. */
-.shell-top :deep(.word-ribbon-container:has(> .word-ribbon-body[style*='display: none']) .word-tab-bar) {
-  border-radius: 12px;
 }
 
 /* אזור המסמך: שורה של הסרגל האנכי וה-stack. `min-width: 0` על ה-stack הוא מה
@@ -6130,30 +6121,15 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
   inset: 0;
 }
 
-/* ברירת המחדל של הבד נשארת צבע המשטח של ערכת הנושא. הספציפיות של
-   `html:root` גוברת על :root ב-tokens.css, אבל בחירה inline של המשתמש
-   ב-applyCanvasColor ממשיכה לגבור גם עליה. */
-:global(html:root) {
-  --word-canvas-bg: var(
-    --color-surface-container-lowest,
-    var(--color-surface)
-  );
-}
-
 /* הרקע הוא `--word-canvas-bg` ולא טוקן ערכת הנושא ישירות: זהו הבד, והוא
    האלמנט היחיד שהמשתמש יכול לצבוע (composables/canvas-color.ts). ברירת
-   המחדל נגזרת מערך הנושא — ראו styles/tokens.css.
-   שכבת ה-dim מכהה את הקנבס קלות מול הרצועה, בלי לנגוע בצבע שהמשתמש בחר. */
+   המחדל ב-tokens.css זהה לצבע שהבורר מציג. אין שכבת הכהייה מעל צבע הבחירה. */
 .editor-stack {
   position: relative;
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
   background: var(--word-canvas-bg);
-  background-image: linear-gradient(
-    var(--color-shell-dim),
-    var(--color-shell-dim)
-  );
   overflow: hidden;
 }
 

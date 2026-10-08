@@ -235,7 +235,7 @@ function colorName(hex: string): string {
 }
 
 /**
- * `modelValue` הוא **צבע המסמך** — מה שהמנוע מדווח על הבחירה — ולא הצבע של
+ * כברירת מחדל `modelValue` הוא **צבע המסמך** — מה שהמנוע מדווח על הבחירה — ולא הצבע של
  * הפקד. הוא מסמן את המשבצת בפלטה („הטקסט המסומן כבר אדום כהה”), וזה כל
  * תפקידו. מה שהכפתור הראשי מחיל, ומה שהפס מתחת לאייקון מראה, הוא `activeColor`
  * שלמטה.
@@ -246,6 +246,9 @@ const props = withDefaults(
     icon: string;
     title: string;
     defaultColor?: string;
+    /** בבורר של משטח יחיד הפס עוקב אחרי המודל, כולל חזרה לברירת המחדל.
+     * בבוררי טקסט נשמרת הבחירה האחרונה בנפרד מצבע הטקסט שליד הסמן. */
+    followModelValue?: boolean;
     allowClear?: boolean;
     /**
      * מה שהפריט המנקה אומר, ומה שקורא מסך מכריז כשלא נבחר צבע.
@@ -288,6 +291,7 @@ const props = withDefaults(
   {
     modelValue: '',
     defaultColor: '#000000',
+    followModelValue: false,
     allowClear: true,
     clearLabel: 'ללא צבע',
     applyOnClick: true,
@@ -367,7 +371,9 @@ const chosen = ref<string | null | undefined>(undefined);
  * הבאה, וזה מה שקורה כאן.
  */
 const activeColor = computed<string | null>(() =>
-  chosen.value === undefined ? props.defaultColor : chosen.value,
+  props.followModelValue
+    ? props.modelValue || props.defaultColor
+    : chosen.value === undefined ? props.defaultColor : chosen.value,
 );
 
 /** אותו ערך במילים — לטולטיפ ולקורא מסך, שאינם רואים את הפס. */

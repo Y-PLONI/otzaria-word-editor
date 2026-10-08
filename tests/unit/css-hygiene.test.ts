@@ -159,15 +159,9 @@ describe(':has() בסלקטורים', () => {
    * ברצועה, מחוץ ל-`.editor-stack`, ולכן שינוי DOM במסמך אינו עובר דרכו.
    * נמדד באותו ניסוי: מחיקת הכלל הזה בזמן ריצה לא שינתה את מספר החישובים
    * המלאים (44 מול 42 בבסיס), בעוד מחיקת כלל הבאנר הורידה אותם ל-0.
-   *
-   * `.shell-top :deep(.word-ribbon-container:has(> .word-ribbon-body[style*='display: none']) .word-tab-bar)`
-   * — העוגן הוא `.word-ribbon-container` שנמצא ב-`.shell-top`, מחוץ לחלוטין
-   * ל-`.editor-stack`. הכלל בודק אם גוף הרצועה מוסתר (v-show), ומעגל את פינות
-   * שורת הלשוניות בהתאם — שינוי DOM בתוך המסמך אינו עובר דרכו.
    */
   const ALLOWED = new Set([
     '.word-ribbon-group:has(+ .word-ribbon-group--end)',
-    ".shell-top :deep(.word-ribbon-container:has(> .word-ribbon-body[style*='display: none']) .word-tab-bar)",
   ]);
 
   /** פיצול רשימת סלקטורים בפסיקים שמחוץ לסוגריים — `:has(a, b)` נשאר שלם. */
@@ -190,10 +184,10 @@ describe(':has() בסלקטורים', () => {
   }
 
   /** כל הסלקטורים עם `:has(` בגיליון או בבלוקי `<style>` של קומפוננטה. */
-  function hasSelectors(source: string): string[] {
+  function hasSelectors(source: string, isVue = false): string[] {
     // בקומפוננטה רק בלוקי <style> הם CSS; התבנית מכילה '{' של Vue ואינה נסרקת.
     const css = (
-      source.includes('<style')
+      isVue
         ? [...source.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)].map((m) => m[1]).join('\n')
         : source
     ).replace(/\/\*[\s\S]*?\*\//g, ' ');
@@ -213,10 +207,17 @@ describe(':has() בסלקטורים', () => {
     expect(hasSelectors('/* .x:has(.y) בהערה */ .z { }')).toEqual([]);
   });
 
+  it('אזכור <style> בהערת CSS אינו הופך גיליון לקומפוננטה', () => {
+    expect(hasSelectors('/* סריקת <style> ב-HTML */ .host:has(.page:hover) { color: red; }'))
+      .toEqual(['.host:has(.page:hover)']);
+    expect(hasSelectors('<template><div>{{ title }}</div></template><style>.host:has(.page) { color: red; }</style>', true))
+      .toEqual(['.host:has(.page)']);
+  });
+
   it('כל :has() בקוד מאושר במפורש', () => {
     const found: string[] = [];
     for (const file of [...STYLE_SHEETS, ...CODE_FILES.filter((f) => f.endsWith('.vue'))]) {
-      for (const selector of hasSelectors(CONTENT.get(file) ?? '')) {
+      for (const selector of hasSelectors(CONTENT.get(file) ?? '', file.endsWith('.vue'))) {
         if (!ALLOWED.has(selector)) found.push(`${selector} (${short(file)})`);
       }
     }
@@ -226,7 +227,7 @@ describe(':has() בסלקטורים', () => {
   it('הרשימה המאושרת אינה מתה — כל כלל בה עוד קיים', () => {
     const present = new Set<string>();
     for (const file of [...STYLE_SHEETS, ...CODE_FILES]) {
-      for (const selector of hasSelectors(CONTENT.get(file) ?? '')) present.add(selector);
+      for (const selector of hasSelectors(CONTENT.get(file) ?? '', file.endsWith('.vue'))) present.add(selector);
     }
     expect([...ALLOWED].filter((selector) => !present.has(selector))).toEqual([]);
   });

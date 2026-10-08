@@ -19,7 +19,7 @@
   --color-outline-variant: #e1dfdd;
   --color-scrim: rgba(0, 0, 0, 0.32);
   --color-surface-highlight: rgba(255, 255, 255, 0.04);
-  /* שכבת הכהייה הניטרלית של הרקע העליון והבד. מוגדרת כטוקן כדי ש-CSS צרכני
+  /* שכבת הכהייה הניטרלית של הרקע העליון. מוגדרת כטוקן כדי ש-CSS צרכני
      ישתמש בתפקיד צבע במקום להטמיע rgba ישירות. */
   --color-shell-dim: rgba(0, 0, 0, 0.07);
 
@@ -66,9 +66,9 @@
      העדפה הוא היעדר ההצהרה והבד מקבל את ברירת המחדל הקבועה הזאת. ראו
      composables/canvas-color.ts. */
   --word-canvas-bg: #eeece1;
-  --word-canvas-bg-active: color-mix(in srgb, var(--word-canvas-bg) 93%, black);
-  /* background used by the bottom status bar and (when hovered) the editor gutter */
-  --statusbar-bg: linear-gradient(to top, rgba(255,255,255,0.04) 0, rgba(255,255,255,0) calc(var(--statusbar-height))), var(--word-canvas-bg);
+  /* פקדי המעטפת נשארים בצבע הנושא גם כשהמשתמש משנה את הבד. */
+  --word-doctab-active-bg: color-mix(in srgb, var(--color-surface) 93%, black);
+  --statusbar-bg: linear-gradient(to top, var(--color-surface-highlight), transparent var(--statusbar-height)), var(--color-surface);
 
   /* גופנים.
 

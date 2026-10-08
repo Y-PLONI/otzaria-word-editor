@@ -9,16 +9,6 @@
   box-sizing: border-box;
 }
 
-/* Ensure UI chrome captures the pointer so hovering them does not count as
-   hovering the document canvas underneath (prevents accidental scrollbar reveal). */
-.word-ribbon-container,
-.topbar,
-.ruler-row,
-.ruler-corner,
-.word-tab-bar {
-  pointer-events: auto;
-}
-
 html,
 body,
 #app {
@@ -91,14 +81,7 @@ button:disabled {
   position: relative;
   flex: 1 1 auto;
   min-height: 0;
-  /* Lighten the area directly under the ribbon by overlaying a subtle white gradient
-     over the canvas background for the height of the ribbon. */
   background-color: var(--word-canvas-bg);
-  background-image: linear-gradient(
-    to bottom,
-    var(--color-surface-highlight) 0,
-    transparent calc(var(--ribbon-height))
-  );
 }
 
 /* כל מסמך מקבל host משלו, וכולם באותו מקום: מסמך שנטען יושב מעל הפעיל עד
@@ -161,9 +144,8 @@ button:disabled {
   border: 3px solid transparent;
 }
 
-.editor-stack__host:hover,
-.editor-stack__host:has(.superdoc:hover),
-.editor-stack__host:has(.superdoc .superdoc-page:hover) {
+/* :hover חל גם כשהעכבר מעל צאצא; אין צורך ב-:has() סביב עץ המסמך. */
+.editor-stack__host:hover {
   background-image: linear-gradient(
     to right,
     var(--color-surface-container-high),
@@ -176,18 +158,14 @@ button:disabled {
   scrollbar-width: auto;
 }
 
-.editor-stack__host:hover::-webkit-scrollbar-track,
-.editor-stack__host:has(.superdoc:hover)::-webkit-scrollbar-track,
-.editor-stack__host:has(.superdoc .superdoc-page:hover)::-webkit-scrollbar-track {
+.editor-stack__host:hover::-webkit-scrollbar-track {
   background: var(--statusbar-bg);
   border-block-start: 1px solid var(--color-outline-variant);
   box-shadow: var(--ribbon-shadow-top), var(--ribbon-shadow-bottom);
   outline: none;
 }
 
-.editor-stack__host:hover::-webkit-scrollbar-thumb,
-.editor-stack__host:has(.superdoc:hover)::-webkit-scrollbar-thumb,
-.editor-stack__host:has(.superdoc .superdoc-page:hover)::-webkit-scrollbar-thumb {
+.editor-stack__host:hover::-webkit-scrollbar-thumb {
   background: var(--color-outline);
   box-shadow: none;
 }

@@ -1,5 +1,5 @@
 <template>
-  <!-- רצועת טאבים אופקית מתחת לפס הכותרת — אחד לכל מסמך פתוח. -->
+  <!-- רצועת טאבים אופקית מעל פס הכותרת — אחד לכל מסמך פתוח. -->
   <div class="word-doctabs-bar">
     <div
       class="word-doctabs-strip"
@@ -133,7 +133,7 @@ function onTabKeydown(event: KeyboardEvent): void {
   align-items: center;
   gap: 6px;
   background: transparent;
-  border: 1px solid transparent;
+  border: 2px solid transparent;
   border-radius: var(--radius-sm);
   color: var(--color-on-surface);
   font-family: var(--font-main);
@@ -149,8 +149,8 @@ function onTabKeydown(event: KeyboardEvent): void {
 }
 
 .word-doctab.active {
-  background: var(--word-canvas-bg-active);
-  border: 2px solid var(--color-outline-variant);
+  background: var(--word-doctab-active-bg);
+  border-color: var(--color-outline-variant);
   border-bottom-color: transparent;
   color: var(--color-on-surface);
   box-shadow: none;
@@ -180,7 +180,7 @@ function onTabKeydown(event: KeyboardEvent): void {
   border-bottom-right-radius: 10px;
   border-right: 2px solid var(--color-outline-variant);
   border-bottom: 2px solid var(--color-outline-variant);
-  box-shadow: 5px 5px 0 5px var(--word-canvas-bg-active);
+  box-shadow: 5px 5px 0 5px var(--word-doctab-active-bg);
 }
 
 .word-doctab.active::after {
@@ -188,7 +188,7 @@ function onTabKeydown(event: KeyboardEvent): void {
   border-bottom-left-radius: 10px;
   border-bottom: 2px solid var(--color-outline-variant);
   border-left: 2px solid var(--color-outline-variant);
-  box-shadow: -5px 5px 0 5px var(--word-canvas-bg-active);
+  box-shadow: -5px 5px 0 5px var(--word-doctab-active-bg);
 }
 
 .word-doctab-title {

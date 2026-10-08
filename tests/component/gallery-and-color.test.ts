@@ -320,6 +320,27 @@ describe('ColorPickerPopover', () => {
     expect(harness.wrapper.find('.color-palette-popover').exists()).toBe(false);
   });
 
+  it('בורר משטח עוקב אחרי המודל וחוזר להציג את ברירת המחדל באיפוס', async () => {
+    const harness = mountUi(ColorPickerPopover, {
+      props: {
+        icon: 'shading', title: 'צבע רקע העורך', defaultColor: '#eeece1',
+        modelValue: '#ffffff', followModelValue: true, applyOnClick: false,
+      },
+    });
+    expect((bar(harness).element as HTMLElement).style.backgroundColor).toBe(asCss('#ffffff'));
+
+    await open(harness);
+    await harness.wrapper.find('.palette-clear-btn').trigger('click');
+    expect(harness.wrapper.emitted('change')).toEqual([[null]]);
+    await harness.wrapper.setProps({ modelValue: '' });
+    expect(bar(harness).classes()).not.toContain('is-none');
+    expect((bar(harness).element as HTMLElement).style.backgroundColor).toBe(asCss('#eeece1'));
+
+    // גם שינוי חיצוני של ההעדפה חייב לעדכן את הפס בלי להרכיב את הבורר מחדש.
+    await harness.wrapper.setProps({ modelValue: '#123456' });
+    expect((bar(harness).element as HTMLElement).style.backgroundColor).toBe(asCss('#123456'));
+  });
+
   it('„ללא צבע” נדבק אף הוא: הלחיצה הבאה מנקה ואינה מחילה את ברירת המחדל', async () => {
     const harness = mountUi(ColorPickerPopover, {
       props: { icon: 'highlight', title: 'צבע סימון', defaultColor: '#FFFF00' },

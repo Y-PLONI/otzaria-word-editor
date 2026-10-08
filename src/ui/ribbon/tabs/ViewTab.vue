@@ -101,7 +101,8 @@
         בעמודה, ורצועת חץ במלוא הרוחב מתחת.
       -->
       <ColorPickerPopover
-        :model-value="canvasColor ?? ''"
+        :model-value="canvasSwatch"
+        :follow-model-value="true"
         icon="shading"
         variant="large"
         label="צבע רקע"
