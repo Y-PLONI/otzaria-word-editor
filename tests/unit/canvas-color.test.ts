@@ -8,7 +8,7 @@
  *    הדפדפן פשוט מתעלם מההצהרה, והמשתמש מקבל בד בלי רקע כלל.
  *
  * 2. **„אין העדפה” הוא היעדר ההצהרה, ולא צבע שני.** `removeProperty` מחזיר
- *    את הבד לברירת המחדל שב-tokens.css (חום בהיר). אילו „ברירת מחדל” הייתה
+ *    את הבד לברירת המחדל שב-tokens.css. אילו „ברירת מחדל” הייתה
  *    נכתבת כצבע, היא הייתה נשמרת ב-`storage` כבחירה, ושינוי עתידי של ברירת
  *    המחדל לא היה מגיע למי שלחץ עליה.
  */
@@ -144,10 +144,17 @@ describe('הטוקן שב-TypeScript הוא הטוקן שב-CSS', () => {
     );
   });
 
-  it('ברירת המחדל של הטוקן עוקבת אחרי ערכת הנושא', () => {
-    expect(source('styles', 'tokens.css')).toContain(
-      `${CANVAS_COLOR_VAR}: var(--color-surface-container-lowest);`,
+  it('ברירת המחדל של הבד משתמשת במשתנה של סרגל הכותרת', () => {
+    expect(source('styles', 'shell.css')).toContain(
+      'background: var(--color-surface);',
     );
+    expect(source('styles', 'tokens.css')).toContain(
+      `${CANVAS_COLOR_VAR}: var(--color-surface);`,
+    );
+  });
+
+  it('הדוגמית בבורר צבע הבד עוקבת אחרי צבע סרגל הכותרת', () => {
+    expect(source('main.ts')).toContain('setCanvasDefaultColor(theme.colorScheme.surface);');
   });
 
   it('המסילה משתמשת בצבע משטח נפרד מצבע הקנבס', () => {

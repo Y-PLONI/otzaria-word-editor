@@ -27,9 +27,7 @@ function domReady(): Promise<void> {
 
 function applyOtzariaTheme(theme: ThemePayload): void {
   applyTheme(theme);
-  setCanvasDefaultColor(
-    theme.colorScheme.surfaceContainerLowest ?? theme.colorScheme.surface,
-  );
+  setCanvasDefaultColor(theme.colorScheme.surface);
 }
 
 async function main(): Promise<void> {

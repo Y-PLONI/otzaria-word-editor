@@ -56,9 +56,9 @@
   /* מפריד בין הרצועה לקנבס ולסרגלים; בערכות כהות משתמש במשטח של ערכת הנושא. */
   --word-ribbon-bg: var(--color-surface-container-high);
 
-  /* צבע הבד כברירת מחדל עוקב אחרי ערכת הנושא. בחירת משתמש דורסת אותו inline;
-     שכבת ההכהיה מוחלת בנפרד ורק כשאין בחירה (App.vue). */
-  --word-canvas-bg: var(--color-surface-container-lowest);
+  /* צבע הבד כברירת מחדל תואם לסרגל הכותרת ועוקב אחרי ערכת הנושא.
+     בחירת משתמש דורסת אותו inline; שכבת ההכהיה מוחלת בנפרד ורק כשאין בחירה (App.vue). */
+  --word-canvas-bg: var(--color-surface);
   /* פקדי המעטפת נשארים בצבע הנושא גם כשהמשתמש משנה את הבד. */
   --word-doctab-active-bg: color-mix(in srgb, var(--color-surface) 93%, black);
   --statusbar-bg: linear-gradient(to top, var(--color-surface-highlight), transparent var(--statusbar-height)), var(--color-surface);

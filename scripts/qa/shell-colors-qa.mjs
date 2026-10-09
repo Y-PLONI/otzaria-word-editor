@@ -43,6 +43,14 @@ function hexRgb(hex) {
   return `rgb(${hex.slice(1).match(/../g).map((c) => parseInt(c, 16)).join(', ')})`;
 }
 
+function compositeBlackOverlay(background, image) {
+  if (image === 'none') return background;
+  const match = image.match(/rgba\(0,\s*0,\s*0,\s*([\d.]+)\)/);
+  if (!match) throw new Error(`שכבת רקע לא מוכרת: ${image}`);
+  const alpha = Number(match[1]);
+  return `rgb(${rgb(background).map((channel) => Math.round(channel * (1 - alpha))).join(', ')})`;
+}
+
 function contrast(fg, bg, highlight = 0) {
   const luminance = (channels) => channels.map((c) => {
     const v = c / 255;
@@ -69,6 +77,7 @@ async function measure() {
     return {
       theme: document.documentElement.dataset.theme,
       canvas: style('.editor-stack'),
+      titlebar: style('.word-titlebar'),
       swatch: style('[data-tip-title="צבע רקע העורך"] .color-indicator-bar').background,
       stored: window.__qaHost.storage['canvas-color'] ?? null,
       chrome: {
@@ -127,9 +136,7 @@ try {
     await app.js(`window.__qaHost.emit('theme.changed', ${JSON.stringify(theme)})`);
     await sleep(100);
     const base = await measure();
-    const expectedDefault = hexRgb(
-      theme.colorScheme.surfaceContainerLowest ?? theme.colorScheme.surface,
-    );
+    const expectedDefault = hexRgb(theme.colorScheme.surface);
     const expectedRibbonBg = theme.mode === 'light'
       ? 'rgb(255, 255, 255)'
       : hexRgb(theme.colorScheme.surfaceContainerHigh);
@@ -139,11 +146,14 @@ try {
       base.chrome.ribbon.background === expectedRibbonBg,
       `רצועה=${base.chrome.ribbon.background}, צפוי=${expectedRibbonBg}`,
     );
-    check(`${theme.mode} — הבד וברירת המחדל בבורר זהים`,
+    check(`${theme.mode} — הקנבס תואם לסרגל הכותרת ולא לרצועה`,
       base.canvas.background === expectedDefault
+        && base.canvas.background === base.titlebar.background
+        && base.canvas.image === base.titlebar.image
+        && base.canvas.background !== base.chrome.ribbon.background
         && base.swatch === expectedDefault
         && base.canvas.image !== 'none',
-      `בד=${base.canvas.background}, פס=${base.swatch}, שכבה=${base.canvas.image}`);
+      `קנבס=${base.canvas.background} ${base.canvas.image}, כותרת=${base.titlebar.background} ${base.titlebar.image}, רצועה=${base.chrome.ribbon.background}, פס=${base.swatch}`);
 
     const pairs = [
       ['רצועה', base.chrome.ribbonButton.color, base.chrome.ribbon.background, 0],
@@ -172,7 +182,8 @@ try {
         state.canvas.background === expected && state.swatch === expected && state.stored === color && state.canvas.image === 'none',
         `בד=${state.canvas.background}, פס=${state.swatch}, נשמר=${state.stored}`);
       check(`${theme.mode} — ${color} אינו צובע את פקדי המעטפת והסרגלים`,
-        JSON.stringify(state.chrome) === JSON.stringify(base.chrome));
+        JSON.stringify(state.chrome) === JSON.stringify(base.chrome)
+          && JSON.stringify(state.titlebar) === JSON.stringify(base.titlebar));
     }
 
     await palette();
@@ -180,6 +191,8 @@ try {
     const reset = await measure();
     check(`${theme.mode} — איפוס מחזיר את הבד ואת הפס לברירת המחדל`,
       reset.canvas.background === expectedDefault
+        && reset.canvas.background === reset.titlebar.background
+        && reset.canvas.image === reset.titlebar.image
         && reset.swatch === expectedDefault
         && reset.canvas.image !== 'none'
         && reset.stored === null);
@@ -213,9 +226,11 @@ try {
   await app.cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: hostRect.x, y: hostRect.y });
   await sleep(150);
   const visible = await scrollbar();
-  const canvasBackground = await app.js(
-    `getComputedStyle(document.querySelector('.editor-stack')).backgroundColor`,
-  );
+  const canvasStyle = JSON.parse(await app.js(`JSON.stringify((() => {
+    const style = getComputedStyle(document.querySelector('.editor-stack'));
+    return { background: style.backgroundColor, image: style.backgroundImage };
+  })())`));
+  const effectiveCanvas = compositeBlackOverlay(canvasStyle.background, canvasStyle.image);
   await app.cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 600, y: 15 });
   await sleep(150);
   const hidden = await scrollbar();
@@ -223,8 +238,8 @@ try {
   const railTrack = hexRgb(THEMES[1].colorScheme.surface);
   check(
     'מסילת הגלילה נשארת בגוון נפרד מהקנבס',
-    visible.includes(railTrack) && railTrack !== canvasBackground,
-    `מסילה=${visible}, קנבס=${canvasBackground}`,
+    visible.includes(railTrack) && railTrack !== effectiveCanvas,
+    `מסילה=${visible}, קנבס=${effectiveCanvas}`,
   );
 
   if (!await app.clickSel('.word-doctabs-new')) throw new Error('כפתור מסמך חדש אינו נגיש');
