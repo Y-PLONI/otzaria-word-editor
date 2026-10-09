@@ -20,7 +20,9 @@ import {
   DEFAULT_CANVAS_COLOR,
   applyCanvasColor,
   canvasColor,
+  SHELL_DIM_ALPHA,
   canvasDefaultColor,
+  dimmedCanvasColor,
   normalizeCanvasColor,
   setCanvasDefaultColor,
 } from '../../src/composables/canvas-color';
@@ -89,16 +91,28 @@ describe('applyCanvasColor', () => {
   });
 
   describe('ברירת המחדל של הבד', () => {
-    it('מתעדכנת מערך הנושא ומנרמלת את הצבע', () => {
-      setCanvasDefaultColor('#AABBCC');
+    it('מתעדכנת מערך הנושא ומראה אותו עם שכבת ההכהיה', () => {
+      setCanvasDefaultColor('#FFFFFF');
+      // 255 × 0.93 = 237.15 — מה שהעין רואה על הבד, ולא המשטח עצמו.
+      expect(canvasDefaultColor.value).toBe('#ededed');
 
-      expect(canvasDefaultColor.value).toBe('#aabbcc');
+      setCanvasDefaultColor('#101014');
+      expect(canvasDefaultColor.value).toBe('#0f0f13');
     });
 
     it('חוזרת לצבע ה-fallback כשערכת הנושא אינה מספקת hex תקין', () => {
       setCanvasDefaultColor('var(--color-surface)');
 
-      expect(canvasDefaultColor.value).toBe(DEFAULT_CANVAS_COLOR);
+      expect(canvasDefaultColor.value).toBe(dimmedCanvasColor(DEFAULT_CANVAS_COLOR));
+    });
+
+    it('האלפא שב-TypeScript הוא האלפא של `--color-shell-dim`', () => {
+      expect(source('styles', 'tokens.css')).toContain(
+        `--color-shell-dim: rgba(0, 0, 0, ${SHELL_DIM_ALPHA});`,
+      );
+      expect(source('styles', 'tokens.css')).toContain(
+        `--color-surface: ${DEFAULT_CANVAS_COLOR};`,
+      );
     });
 
     it('מכהה את ברירת המחדל בלבד ומשאירה בחירה מותאמת ללא שכבה', () => {
@@ -161,8 +175,12 @@ describe('הטוקן שב-TypeScript הוא הטוקן שב-CSS', () => {
     expect(source('styles', 'shell.css')).toContain(
       'scrollbar-color: var(--color-outline) var(--color-surface);',
     );
-    expect(source('styles', 'shell.css')).toContain(
-      'background: var(--statusbar-bg);',
-    );
+  });
+
+  it('אין כללי `::-webkit-scrollbar` על מיכל הגלילה — `scrollbar-color` מבטל אותם', () => {
+    // נמדד ב-Chrome 154: כלל webkit של 40px נתן 40px, ועם `scrollbar-color`
+    // על אותו אלמנט — 15px, ברירת המחדל. כלל כזה כאן הוא קוד מת שנראה חי,
+    // ו-getComputedStyle על הפסאודו מחזיר אותו גם כשאינו מצויר.
+    expect(source('styles', 'shell.css')).not.toMatch(/\.editor-stack__host[^{]*::-webkit-scrollbar/);
   });
 });

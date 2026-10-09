@@ -105,7 +105,7 @@ function onTabKeydown(event: KeyboardEvent): void {
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
-  height: 34px;
+  height: var(--doctabs-height);
   padding-inline: 8px;
   background: var(--color-surface-container-high);
   border-bottom: 2px solid var(--color-outline-variant);

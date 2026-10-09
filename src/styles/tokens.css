@@ -11,7 +11,6 @@
   --color-surface: #f8f9fa;
   --color-on-surface: #1a1a2e;
   --color-on-surface-variant: #49454f;
-  --color-surface-container-lowest: var(--color-surface);
   --color-surface-container-high: #f3f2f1;
   --color-surface-container-highest: #edebe9;
   --color-error: #b00020;
@@ -91,6 +90,9 @@
   /* גבהים */
   --topbar-height: 48px;
   --tabbar-height: 28px;
+  /* שורת טאבי המסמכים, מעל פס הכותרת — גבוהה מ-`--tabbar-height` כדי שיהיה
+     מקום לקשתות של הטאב הפעיל (DocumentTabsBar.vue). */
+  --doctabs-height: 34px;
   /* צל בולט לרצועת ה-Ribbon (מעל ומתחת) */
   --ribbon-shadow-top: 0 -4px 10px rgba(0, 0, 0, 0.06);
   --ribbon-shadow-bottom: 0 6px 18px rgba(0, 0, 0, 0.07);

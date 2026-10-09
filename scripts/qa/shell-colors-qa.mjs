@@ -11,7 +11,6 @@ const THEMES = [
   {
     mode: 'light', colorScheme: {
       primary: '#1565c0', onPrimary: '#ffffff', surface: '#f8f9fa',
-      surfaceContainerLowest: '#f7f8fa',
       onSurface: '#1a1a2e', onSurfaceVariant: '#49454f',
       surfaceContainerHigh: '#f3f2f1', surfaceContainerHighest: '#edebe9', outline: '#cbd5e1',
     },
@@ -21,7 +20,6 @@ const THEMES = [
     // לפקדי onSurface היה הופך אותם לבהירים על לבן.
     mode: 'dark', colorScheme: {
       primary: '#1565c0', onPrimary: '#ffffff', surface: '#101014',
-      surfaceContainerLowest: '#09090c',
       onSurface: '#e6e6e6', onSurfaceVariant: '#c9c5d0',
       surfaceContainerHigh: '#2b2930', surfaceContainerHighest: '#36343b', outline: '#938f99',
     },
@@ -41,6 +39,13 @@ function rgb(css) {
 
 function hexRgb(hex) {
   return `rgb(${hex.slice(1).match(/../g).map((c) => parseInt(c, 16)).join(', ')})`;
+}
+
+// הפס בבורר הוא אלמנט אחר, בלי שכבת ההכהיה: הוא חייב להראות את הצבע שהעין
+// רואה על הבד. ±1 לערוץ — עיגול של TypeScript מול ערבוב של הדפדפן.
+function swatchMatchesCanvas(swatch, canvas) {
+  const seen = rgb(compositeBlackOverlay(canvas.background, canvas.image));
+  return rgb(swatch).every((c, i) => Math.abs(c - seen[i]) <= 1);
 }
 
 function compositeBlackOverlay(background, image) {
@@ -105,24 +110,19 @@ async function checkScrollbarMatchesStatusBar(theme) {
   });
   await sleep(150);
   const state = JSON.parse(await app.js(`JSON.stringify((() => {
+    // רק scrollbarColor: getComputedStyle על '::-webkit-scrollbar-track'
+    // מחזיר את הכלל גם כש-scrollbar-color מבטל אותו ושום דבר לא מצויר.
     const host = document.querySelector('.editor-stack__host');
-    const track = getComputedStyle(host, '::-webkit-scrollbar-track');
-    const status = getComputedStyle(document.querySelector('.word-statusbar'));
     return {
       standard: getComputedStyle(host).scrollbarColor,
-      trackColor: track.backgroundColor,
-      trackImage: track.backgroundImage,
-      statusColor: status.backgroundColor,
-      statusImage: status.backgroundImage,
+      statusColor: getComputedStyle(document.querySelector('.word-statusbar')).backgroundColor,
     };
   })())`));
   const expectedStandardTrack = hexRgb(theme.colorScheme.surface);
   check(
     `${theme.mode} — רקע פס הגלילה תואם למשטח שורת המצב`,
-    state.standard.endsWith(expectedStandardTrack)
-      && state.trackColor === state.statusColor
-      && state.trackImage === state.statusImage,
-    `תקני=${state.standard}, מסילה=${state.trackColor} ${state.trackImage}, שורת מצב=${state.statusColor} ${state.statusImage}`,
+    state.standard.endsWith(expectedStandardTrack) && state.statusColor === expectedStandardTrack,
+    `תקני=${state.standard}, שורת מצב=${state.statusColor}`,
   );
   await app.cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 600, y: 15 });
   await sleep(150);
@@ -151,7 +151,7 @@ try {
         && base.canvas.background === base.titlebar.background
         && base.canvas.image === base.titlebar.image
         && base.canvas.background !== base.chrome.ribbon.background
-        && base.swatch === expectedDefault
+        && swatchMatchesCanvas(base.swatch, base.canvas)
         && base.canvas.image !== 'none',
       `קנבס=${base.canvas.background} ${base.canvas.image}, כותרת=${base.titlebar.background} ${base.titlebar.image}, רצועה=${base.chrome.ribbon.background}, פס=${base.swatch}`);
 
@@ -193,7 +193,7 @@ try {
       reset.canvas.background === expectedDefault
         && reset.canvas.background === reset.titlebar.background
         && reset.canvas.image === reset.titlebar.image
-        && reset.swatch === expectedDefault
+        && swatchMatchesCanvas(reset.swatch, reset.canvas)
         && reset.canvas.image !== 'none'
         && reset.stored === null);
     await palette();

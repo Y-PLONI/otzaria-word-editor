@@ -37,17 +37,36 @@ import { saveCanvasColor } from '../host/settings';
 export const CANVAS_COLOR_VAR = '--word-canvas-bg';
 
 /**
- * צבע fallback לפיתוח ולפני קבלת ערכת נושא. בזמן ריצה
- * `canvasDefaultColor` מתעדכן מערך הנושא ומשמש גם את פס הצבע בבורר.
+ * משטח fallback לפיתוח ולפני קבלת ערכת נושא — `--color-surface` שב-tokens.css.
+ * בזמן ריצה `canvasDefaultColor` מתעדכן מערך הנושא ומשמש גם את פס הצבע בבורר.
  */
 export const DEFAULT_CANVAS_COLOR = '#f8f9fa';
 
-/** ברירת המחדל הנוכחית, מסונכרנת עם ערכת הנושא להצגה בבורר. */
-export const canvasDefaultColor = ref(DEFAULT_CANVAS_COLOR);
+/**
+ * האלפא של `--color-shell-dim` (tokens.css) — שכבת השחור שמונחת על הבד כשאין
+ * העדפה (App.vue). כתוב פעמיים, ו-tests/unit/canvas-color.test.ts מחזיק את
+ * השניים זהים.
+ */
+export const SHELL_DIM_ALPHA = 0.07;
+
+/**
+ * הצבע שהעין רואה כשהשכבה מונחת על `surface`. הפס בבורר הוא אלמנט אחר, בלי
+ * השכבה, ובלי החישוב הוא היה מראה משטח בהיר מהבד — ובחירה של אותו צבע
+ * מהפלטה הייתה משנה את הבד.
+ */
+export function dimmedCanvasColor(surface: string): string {
+  const channels = surface.slice(1).match(/../g)!.map((pair) => parseInt(pair, 16));
+  return `#${channels
+    .map((c) => Math.round(c * (1 - SHELL_DIM_ALPHA)).toString(16).padStart(2, '0'))
+    .join('')}`;
+}
+
+/** ברירת המחדל כפי שהיא נראית על הבד, מסונכרנת עם ערכת הנושא להצגה בבורר. */
+export const canvasDefaultColor = ref(dimmedCanvasColor(DEFAULT_CANVAS_COLOR));
 
 /** מעדכנת את ברירת המחדל המוצגת בבורר לאחר החלת ערכת נושא. */
 export function setCanvasDefaultColor(raw: unknown): void {
-  canvasDefaultColor.value = normalizeCanvasColor(raw) ?? DEFAULT_CANVAS_COLOR;
+  canvasDefaultColor.value = dimmedCanvasColor(normalizeCanvasColor(raw) ?? DEFAULT_CANVAS_COLOR);
 }
 
 /**
@@ -68,7 +87,7 @@ export function normalizeCanvasColor(raw: unknown): string | null {
 }
 
 /**
- * ההעדפה כפי שהיא כרגע. `null` = אין העדפה, והבד ב-`DEFAULT_CANVAS_COLOR`.
+ * ההעדפה כפי שהיא כרגע. `null` = אין העדפה, והבד במשטח של ערכת הנושא.
  *
  * מודול ולא `provide`: הבד נצבע בעלייה (App.vue), והפקד שמשנה אותו יושב
  * בלשונית „תצוגה” — שהיא `v-else-if` ב-Ribbon.vue, כלומר מורכבת רק כשהיא

@@ -42,7 +42,6 @@ body {
   padding-inline: 16px;
   background: var(--color-surface);
   color: var(--color-on-surface);
-  border-block-end: 1px solid var(--color-outline);
 }
 
 button {
@@ -121,60 +120,18 @@ button:disabled {
   inset: 0;
   overflow: auto;
   direction: ltr;
-  --editor-scrollbar-w: 16px;
   scrollbar-gutter: stable;
   scrollbar-width: auto;
   scrollbar-color: transparent transparent;
 }
 
-.editor-stack__host::-webkit-scrollbar {
-  width: var(--editor-scrollbar-w);
-  background: transparent;
-}
-.editor-stack__host::-webkit-scrollbar-track {
-  background: transparent;
-  transition: background 120ms ease;
-}
-.editor-stack__host::-webkit-scrollbar-thumb {
-  background: transparent;
-  border-radius: calc(var(--editor-scrollbar-w) / 2);
-  transition: background 120ms ease, box-shadow 120ms ease;
-  box-shadow: none;
-  background-clip: padding-box;
-  border: 3px solid transparent;
-}
-
 /* :hover חל גם כשהעכבר מעל צאצא; אין צורך ב-:has() סביב עץ המסמך. */
 .editor-stack__host:hover {
-  background-image: linear-gradient(
-    to right,
-    var(--color-surface),
-    var(--color-surface)
-  );
-  background-repeat: no-repeat;
-  background-size: var(--editor-scrollbar-w) 100%;
-  background-position: right top;
-  /* Standard scrollbars accept only solid colors; match the base layer of
-     --statusbar-bg. WebKit below uses the complete status-bar background. */
+  /* הסרגל התקני מקבל רק צבעים אחידים — כאן המשטח שמתחת ל-`--statusbar-bg`.
+     אין כאן `::-webkit-scrollbar`, בכוונה: ב-Chromium `scrollbar-color` מבטל
+     אותו (נמדד ב-Chrome 154 — 15px ברירת מחדל במקום הרוחב שהכלל ביקש). */
   scrollbar-color: var(--color-outline) var(--color-surface);
   scrollbar-width: auto;
-}
-
-.editor-stack__host:hover::-webkit-scrollbar-track {
-  background: var(--statusbar-bg);
-  border-block-start: 1px solid var(--color-outline-variant);
-  box-shadow: var(--ribbon-shadow-top), var(--ribbon-shadow-bottom);
-  outline: none;
-}
-
-.editor-stack__host:hover::-webkit-scrollbar-thumb {
-  background: var(--color-outline);
-  box-shadow: none;
-}
-
-.editor-stack__host::-webkit-scrollbar-thumb:hover {
-  background: var(--color-outline-variant, var(--color-outline));
-  box-shadow: inset 0 -3px 6px rgba(0, 0, 0, 0.08);
 }
 
 /* מרכוז העמוד.

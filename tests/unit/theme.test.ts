@@ -19,7 +19,6 @@ const FULL: ThemePayload = {
     secondary: '#6750A4',
     onSecondary: '#ffffff',
     surface: '#101014',
-    surfaceContainerLowest: '#07070a',
     onSurface: '#e6e6e6',
     onSurfaceVariant: '#c9c5d0',
     surfaceContainerHigh: '#2b2930',
@@ -49,7 +48,6 @@ describe('applyTheme', () => {
 
     expect(cssVar('--color-primary')).toBe('#1565C0');
     expect(cssVar('--color-surface-container-high')).toBe('#2b2930');
-    expect(cssVar('--color-surface-container-lowest')).toBe('#07070a');
     expect(cssVar('--color-surface-container-highest')).toBe('#36343b');
     expect(cssVar('--color-on-surface-variant')).toBe('#c9c5d0');
     expect(cssVar('--color-outline')).toBe('#938f99');
@@ -145,16 +143,6 @@ describe('applyTheme', () => {
     applyTheme({ ...FULL, colorScheme: rest } as ThemePayload);
 
     expect(cssVar('--color-surface-container-high')).toBe('#36343b');
-  });
-
-  it('מסיר ערך surfaceContainerLowest ישן כשערכת הנושא החדשה אינה מספקת אותו', () => {
-    applyTheme(FULL);
-    expect(cssVar('--color-surface-container-lowest')).toBe('#07070a');
-
-    const { surfaceContainerLowest: _omitted, ...rest } = FULL.colorScheme;
-    applyTheme({ ...FULL, colorScheme: rest } as ThemePayload);
-
-    expect(cssVar('--color-surface-container-lowest')).toBe('');
   });
 
   it('ערך חסר אינו מוחק את ברירת המחדל', () => {

@@ -16,6 +16,7 @@ import { ZOOM_PERCENT_MAX } from '../../src/engine/zoom';
 import {
   CANVAS_COLOR_VAR,
   applyCanvasColor,
+  setCanvasDefaultColor,
 } from '../../src/composables/canvas-color';
 import {
   autoUnmount,
@@ -246,6 +247,7 @@ describe('צבע רקע העורך', () => {
 
   afterEach(() => {
     applyCanvasColor(null);
+    setCanvasDefaultColor(null);
   });
 
   it('בחירת צבע צובעת את הבד ונזכרת', async () => {
@@ -306,14 +308,16 @@ describe('צבע רקע העורך', () => {
     expect(split.find('.btn-label').text()).toBe('צבע רקע');
   });
 
-  it('בלי העדפה הפס מראה חום בהיר — הצבע שהבד צבוע בו — ולא שחור', async () => {
+  it('בלי העדפה הפס מראה את הבד כפי שהוא נראה — משטח הנושא המוכהה — ולא שחור', async () => {
     // ברירת המחדל של הבורר היא `#000000`, והפס הוא ההבטחה של הכפתור הראשי —
     // כלומר בלי הענף הזה הפקד היה מבטיח „לחיצה תצבע את הבד בשחור”.
+    setCanvasDefaultColor('#ffffff');
     const harness = mountUi(ViewTab);
     await settle();
 
+    // 255 × 0.93 — הלבן של הנושא מתחת לשכבת `--color-shell-dim`.
     expect(harness.wrapper.find('.color-indicator-bar').attributes('style')).toContain(
-      'rgb(238, 236, 225)',
+      'rgb(237, 237, 237)',
     );
   });
 });

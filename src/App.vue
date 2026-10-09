@@ -6034,27 +6034,30 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
   flex-shrink: 0;
 }
 
-/* הפסים העליונים — רקע הנושא עם שכבת הכהייה עדינה (7% שחור) כדי לייצר
-   ניגוד קל מול הרצועה הלבנה, בלי לנגוע בצבע הנושא עצמו.
+/* פס הכותרת ועטיפת הרצועה — רקע הנושא עם שכבת הכהייה עדינה (7% שחור) כדי
+   לייצר ניגוד קל מול הרצועה הלבנה, בלי לנגוע בצבע הנושא עצמו.
    `background-image` לא מחליף את `background-color` שנגזר מהנושא — הוא יושב
-   מעליו כשכבה שקופה. כך הכלל עובד עם כל ערכת צבעים, בהירה או כהה. */
-.shell-top > :not(.ruler-row):not(:first-child),
-.shell-top .ruler-corner,
-.topbar {
+   מעליו כשכבה שקופה. כך הכלל עובד עם כל ערכת צבעים, בהירה או כהה. שני
+   הסרגלים והפינה שביניהם מקבלים את אותה שכבה בכללים שלהם.
+
+   שני השמות במפורש, ולא „כל ילד חוץ מהראשון”: זה היה נשען על כך ששורת טאבי
+   המסמכים היא הילד הראשון, וכל שינוי בסדר היה מעביר את השכבה בשקט לפס אחר.
+   `!important` אינו נחוץ — `.shell-top[data-v] > .x` גובר על `.topbar`
+   (shell.css) ועל `.word-ribbon-container` (ribbon.css) בספציפיות. */
+.shell-top > :deep(.word-titlebar),
+.shell-top > :deep(.word-ribbon-container) {
   background-image: linear-gradient(
     var(--color-shell-dim),
     var(--color-shell-dim)
-  ) !important;
+  );
 }
 
-/* רצועת הכלים: מרווח של 6px מקצוות המסך, ובלי הקו המפריד מתחת לשורת הכותרת.
-   הטאבים יושבים על רקע הסביבה (שקוף), וגוף הרצועה הוא הכרטיס הלבן עם הפינות
+/* רצועת הכלים: מרווח של 6px מקצוות המסך. הטאבים יושבים על רקע הסביבה
+   (העטיפה שקופה ב-ribbon.css), וגוף הרצועה הוא הכרטיס הלבן עם הפינות
    המעוגלות — כמו ב-Word. `overflow: hidden` על העטיפה הושמט בכוונה: הוא היה
    חותך תפריטים צפים שנפתחים מתוך הרצועה. */
 .shell-top :deep(.word-ribbon-container) {
   margin-inline: 6px;
-  border-radius: 0;
-  background: transparent !important;
 }
 
 /* הצללה של ששת הפיקסלים שבין הרצועה לקצה המסך. היא נצבעת באותו גוון כמו
@@ -6077,31 +6080,19 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
   inset-inline-end: -6px;
 }
 
-/* שורת הטאבים — שקופה לחלוטין, יורשת את צבע הסביבה.
-   ללא עיגול, ללא border, ללא רקע משלה. */
-.shell-top :deep(.word-tab-bar) {
-  background: transparent !important;
-  border-block-start: 0 !important;
-  border-block-end: 0 !important;
-  box-shadow: none !important;
-  border-radius: 0 !important;
-}
-
 /* גוף הרצועה מקבל את צבע המשטח מ-ribbon.css, לצד טקסט on-surface.
    פינות מעוגלות בעדינות כי הטאבים יושבים מחוצה לו, מעל הסביבה. */
 .shell-top :deep(.word-ribbon-body) {
   border-radius: 8px;
 }
 
-/* הקו המפריד בין שורת הכותרת לשורת הלשוניות */
+/* מפריד בין הכותרת לטאבי הרצועה, באותו צבע של קו סרגל השמירה המהירה —
+   במקום הגבול במלוא הרוחב, שהוסר מ-`.topbar` (shell.css). השוליים משאירים
+   20px מכל קצה של הסרגל. */
 .shell-top :deep(.word-titlebar) {
   position: relative;
-  border-block-end: 0 !important;
-  box-shadow: none !important;
 }
 
-/* מפריד בין הכותרת לטאבי הרצועה, באותו צבע של קו סרגל השמירה המהירה.
-   השוליים משאירים 20px מכל קצה של הסרגל. */
 .shell-top :deep(.word-titlebar)::after {
   content: '';
   position: absolute;
