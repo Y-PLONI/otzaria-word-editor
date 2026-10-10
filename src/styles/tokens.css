@@ -55,11 +55,30 @@
   /* מפריד בין הרצועה לקנבס ולסרגלים; בערכות כהות משתמש במשטח של ערכת הנושא. */
   --word-ribbon-bg: var(--color-surface-container-high);
 
-  /* צבע הבד כברירת מחדל תואם לסרגל הכותרת ועוקב אחרי ערכת הנושא.
-     בחירת משתמש דורסת אותו inline; שכבת ההכהיה מוחלת בנפרד ורק כשאין בחירה (App.vue). */
-  --word-canvas-bg: var(--color-surface);
-  /* פקדי המעטפת נשארים בצבע הנושא גם כשהמשתמש משנה את הבד. */
-  --word-doctab-active-bg: color-mix(in srgb, var(--color-surface) 93%, black);
+  /* הפס העליון — פס הכותרת והרצועה שסביב הכרטיס הלבן (App.vue) — הטאב
+     הפעיל של המסמכים, שמתמזג בו, וברירת המחדל של הבד (למטה).
+
+     גוון של אוצריא: הצבע של שורת טאבי המסמכים (`surfaceContainerHigh`)
+     מעורבב עם המשטח, כלומר בהיר ממנה. נגזר מערכת הנושא, ולכן נכון בשני
+     המצבים. 35% כתוב גם ב-TypeScript (`BAND_MIX`, composables/canvas-color.ts)
+     בשביל הפס בבורר „צבע רקע”, ו-tests/unit/canvas-color.test.ts מחזיק את
+     השניים זהים. */
+  --word-shell-band-bg: color-mix(in srgb, var(--color-surface-container-high) 35%, var(--color-surface));
+  --word-doctab-active-bg: var(--word-shell-band-bg);
+  /* הקו שמתחת לשורת טאבי המסמכים ומסביב לטאב הפעיל. גוון של הנושא ולא
+     `--color-outline-variant`: את זה אוצריא אינה שולחת, והוא נשאר אפור קבוע
+     שנראה כמו צל על ערכה צבעונית. */
+  --word-doctabs-border: var(--color-surface-container-highest);
+
+  /* צבע הבד — המשטח שסביב הדף, ורק הוא. בלי העדפה — צבע הפס העליון.
+
+     הטוקן נפרד מ-`--color-surface-container-highest` מפני שזה צובע גם את שני
+     הסרגלים, את הפינה שביניהם ואת כפתור היציאה ממצב מיקוד — ובלי טוקן נפרד,
+     „צבע רקע” של המשתמש היה נצבע גם עליהם. ומאותה סיבה הכיוון הוא מהפס לבד
+     ולא להפך: הדריסה של המשתמש היא סגנון inline על `--word-canvas-bg` בשורש
+     המסמך, כמו כל צבעי אוצריא, והיא אינה מגיעה לפס. היעדר העדפה הוא היעדר
+     ההצהרה, והבד חוזר לערך שכאן. */
+  --word-canvas-bg: var(--word-shell-band-bg);
   --statusbar-bg: linear-gradient(to top, var(--color-surface-highlight), transparent var(--statusbar-height)), var(--color-surface);
 
   /* גופנים.

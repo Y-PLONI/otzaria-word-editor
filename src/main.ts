@@ -17,17 +17,18 @@ import { setMenuLocale } from './ui/ribbon/i18n';
 import { setCanvasDefaultColor } from './composables/canvas-color';
 import type { ThemePayload } from './types/otzaria_plugin';
 
+/** ערכת הנושא, וגם הפס בבורר „צבע רקע” — הבד בלי העדפה נגזר ממנה. */
+function applyOtzariaTheme(theme: ThemePayload): void {
+  applyTheme(theme);
+  setCanvasDefaultColor(theme.colorScheme ?? {});
+}
+
 /** ב-build הסקריפט קלאסי, כלומר הוא עשוי לרוץ לפני שה-body נפרס. */
 function domReady(): Promise<void> {
   if (document.readyState !== 'loading') return Promise.resolve();
   return new Promise((resolve) => {
     document.addEventListener('DOMContentLoaded', () => resolve(), { once: true });
   });
-}
-
-function applyOtzariaTheme(theme: ThemePayload): void {
-  applyTheme(theme);
-  setCanvasDefaultColor(theme.colorScheme.surface);
 }
 
 async function main(): Promise<void> {

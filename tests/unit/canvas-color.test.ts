@@ -8,7 +8,7 @@
  *    הדפדפן פשוט מתעלם מההצהרה, והמשתמש מקבל בד בלי רקע כלל.
  *
  * 2. **„אין העדפה” הוא היעדר ההצהרה, ולא צבע שני.** `removeProperty` מחזיר
- *    את הבד לברירת המחדל שב-tokens.css. אילו „ברירת מחדל” הייתה
+ *    את הבד לברירת המחדל שב-tokens.css (חום בהיר). אילו „ברירת מחדל” הייתה
  *    נכתבת כצבע, היא הייתה נשמרת ב-`storage` כבחירה, ושינוי עתידי של ברירת
  *    המחדל לא היה מגיע למי שלחץ עליה.
  */
@@ -16,13 +16,15 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  BAND_MIX,
   CANVAS_COLOR_VAR,
   DEFAULT_CANVAS_COLOR,
+  FALLBACK_SURFACE,
+  FALLBACK_SURFACE_CONTAINER_HIGH,
   applyCanvasColor,
+  bandColor,
   canvasColor,
-  SHELL_DIM_ALPHA,
   canvasDefaultColor,
-  dimmedCanvasColor,
   normalizeCanvasColor,
   setCanvasDefaultColor,
 } from '../../src/composables/canvas-color';
@@ -38,7 +40,7 @@ function declared(): string {
 
 beforeEach(() => {
   applyCanvasColor(null);
-  setCanvasDefaultColor(DEFAULT_CANVAS_COLOR);
+  setCanvasDefaultColor({});
 });
 
 describe('normalizeCanvasColor', () => {
@@ -90,40 +92,6 @@ describe('applyCanvasColor', () => {
     expect(canvasColor.value).toBe('#123456');
   });
 
-  describe('ברירת המחדל של הבד', () => {
-    it('מתעדכנת מערך הנושא ומראה אותו עם שכבת ההכהיה', () => {
-      setCanvasDefaultColor('#FFFFFF');
-      // 255 × 0.93 = 237.15 — מה שהעין רואה על הבד, ולא המשטח עצמו.
-      expect(canvasDefaultColor.value).toBe('#ededed');
-
-      setCanvasDefaultColor('#101014');
-      expect(canvasDefaultColor.value).toBe('#0f0f13');
-    });
-
-    it('חוזרת לצבע ה-fallback כשערכת הנושא אינה מספקת hex תקין', () => {
-      setCanvasDefaultColor('var(--color-surface)');
-
-      expect(canvasDefaultColor.value).toBe(dimmedCanvasColor(DEFAULT_CANVAS_COLOR));
-    });
-
-    it('האלפא שב-TypeScript הוא האלפא של `--color-shell-dim`', () => {
-      expect(source('styles', 'tokens.css')).toContain(
-        `--color-shell-dim: rgba(0, 0, 0, ${SHELL_DIM_ALPHA});`,
-      );
-      expect(source('styles', 'tokens.css')).toContain(
-        `--color-surface: ${DEFAULT_CANVAS_COLOR};`,
-      );
-    });
-
-    it('מכהה את ברירת המחדל בלבד ומשאירה בחירה מותאמת ללא שכבה', () => {
-      const app = source('App.vue');
-
-      expect(app).toContain("'canvas-default': canvasColor === null");
-      expect(app).toContain('.editor-stack.canvas-default');
-      expect(app).toContain('background-image: linear-gradient(var(--color-shell-dim)');
-    });
-  });
-
   it('`null` מסיר את ההצהרה ואינו כותב צבע אחר', () => {
     // הלב של „ברירת מחדל”: הבד חוזר לערך שב-tokens.css, ולכן אסור שיישאר
     // כאן ערך כלשהו — גם לא הצבע שהיה שם רגע קודם.
@@ -158,19 +126,47 @@ describe('הטוקן שב-TypeScript הוא הטוקן שב-CSS', () => {
     );
   });
 
-  it('ברירת המחדל של הבד משתמשת במשתנה של סרגל הכותרת', () => {
-    expect(source('styles', 'shell.css')).toContain(
-      'background: var(--color-surface);',
-    );
+  it('הבד בלי העדפה הוא צבע הפס העליון, והפס אינו נגזר מהבד', () => {
+    const tokens = source('styles', 'tokens.css');
+    expect(tokens).toContain(`${CANVAS_COLOR_VAR}: var(--word-shell-band-bg);`);
+    // הכיוון הפוך היה מעביר את „צבע רקע” של המשתמש גם לפקדי המעטפת.
+    expect(tokens).not.toMatch(/--word-shell-band-bg:\s*var\(--word-canvas-bg\)/);
+  });
+
+  it('התערובת שב-CSS היא התערובת שב-TypeScript', () => {
+    // הפס בבורר מחושב ב-TS; שני יחסים שונים פירושם פס שמבטיח צבע אחד ובד
+    // שמצויר באחר.
     expect(source('styles', 'tokens.css')).toContain(
-      `${CANVAS_COLOR_VAR}: var(--color-surface);`,
+      `--word-shell-band-bg: color-mix(in srgb, var(--color-surface-container-high) ${BAND_MIX * 100}%, var(--color-surface));`,
+    );
+    expect(source('styles', 'tokens.css')).toContain(`--color-surface: ${FALLBACK_SURFACE};`);
+    expect(source('styles', 'tokens.css')).toContain(
+      `--color-surface-container-high: ${FALLBACK_SURFACE_CONTAINER_HIGH};`,
     );
   });
+});
 
-  it('הדוגמית בבורר צבע הבד עוקבת אחרי צבע סרגל הכותרת', () => {
-    expect(source('main.ts')).toContain('setCanvasDefaultColor(theme.colorScheme.surface);');
+describe('ברירת המחדל שבבורר', () => {
+  it('בהירה משורת הטאבים ונגזרת ממנה', () => {
+    // 0x40×0.35 + 0x80×0.65 = 105.6 → 0x6a: בין שני הצבעים, קרוב למשטח.
+    expect(bandColor('#404040', '#808080')).toBe('#6a6a6a');
+    setCanvasDefaultColor({ surface: '#ffffff', surfaceContainerHigh: '#e0d0c0' });
+    expect(canvasDefaultColor.value).toBe(bandColor('#e0d0c0', '#ffffff'));
+    expect(canvasDefaultColor.value).toBe('#f4efe9');
   });
 
+  it('בלי `surfaceContainerHigh` — `surfaceContainerHighest`, כמו ב-host/theme.ts', () => {
+    setCanvasDefaultColor({ surface: '#ffffff', surfaceContainerHighest: '#000000' });
+    expect(canvasDefaultColor.value).toBe(bandColor('#000000', '#ffffff'));
+  });
+
+  it('ערכת נושא בלי צבעים תקינים משאירה את ברירת המחדל של tokens.css', () => {
+    setCanvasDefaultColor({ surface: 'var(--x)' });
+    expect(canvasDefaultColor.value).toBe(DEFAULT_CANVAS_COLOR);
+  });
+});
+
+describe('פס הגלילה של הבד', () => {
   it('המסילה משתמשת בצבע משטח נפרד מצבע הקנבס', () => {
     expect(source('styles', 'shell.css')).toContain(
       'scrollbar-color: var(--color-outline) var(--color-surface);',

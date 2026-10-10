@@ -122,7 +122,6 @@
       <main
         ref="editorStackRef"
         class="editor-stack"
-        :class="{ 'canvas-default': canvasColor === null }"
       />
       <PageBorderOverlay
         :host="rulerHost"
@@ -638,7 +637,7 @@ import {
 } from './host/workspace';
 import { onPluginHidden, onPluginShown } from './host/lifecycle';
 import { revealZone, type RevealBounds, type RevealZone } from './composables/focus-mode';
-import { applyCanvasColor, canvasColor, normalizeCanvasColor } from './composables/canvas-color';
+import { applyCanvasColor, normalizeCanvasColor } from './composables/canvas-color';
 import { enterFullscreen, exitFullscreen, isFullscreen, watchFullscreen } from './composables/window-fullscreen';
 import SvgIcon from './ui/icons/SvgIcon.vue';
 import { copySelection, cutSelection, pasteFromClipboard, selectWholeDocument } from './engine/clipboard';
@@ -6034,22 +6033,16 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
   flex-shrink: 0;
 }
 
-/* פס הכותרת ועטיפת הרצועה — רקע הנושא עם שכבת הכהייה עדינה (7% שחור) כדי
-   לייצר ניגוד קל מול הרצועה הלבנה, בלי לנגוע בצבע הנושא עצמו.
-   `background-image` לא מחליף את `background-color` שנגזר מהנושא — הוא יושב
-   מעליו כשכבה שקופה. כך הכלל עובד עם כל ערכת צבעים, בהירה או כהה. שני
-   הסרגלים והפינה שביניהם מקבלים את אותה שכבה בכללים שלהם.
+/* פס הכותרת ועטיפת הרצועה — פס אחד בצבע `--word-shell-band-bg` (tokens.css):
+   גוון של אוצריא, בהיר משורת טאבי המסמכים, וזהה לבד שבלי העדפה.
 
    שני השמות במפורש, ולא „כל ילד חוץ מהראשון”: זה היה נשען על כך ששורת טאבי
-   המסמכים היא הילד הראשון, וכל שינוי בסדר היה מעביר את השכבה בשקט לפס אחר.
+   המסמכים היא הילד הראשון, וכל שינוי בסדר היה מעביר את הצבע בשקט לפס אחר.
    `!important` אינו נחוץ — `.shell-top[data-v] > .x` גובר על `.topbar`
    (shell.css) ועל `.word-ribbon-container` (ribbon.css) בספציפיות. */
 .shell-top > :deep(.word-titlebar),
 .shell-top > :deep(.word-ribbon-container) {
-  background-image: linear-gradient(
-    var(--color-shell-dim),
-    var(--color-shell-dim)
-  );
+  background: var(--word-shell-band-bg);
 }
 
 /* רצועת הכלים: מרווח של 6px מקצוות המסך. הטאבים יושבים על רקע הסביבה
@@ -6060,15 +6053,15 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
   margin-inline: 6px;
 }
 
-/* הצללה של ששת הפיקסלים שבין הרצועה לקצה המסך. היא נצבעת באותו גוון כמו
-   שכבת הרקע, בלי להכהות את שורת הטאבים השקופה שמעל הרצועה. */
+/* ששת הפיקסלים שבין הרצועה לקצה המסך נצבעים בצבע הפס, כדי שהפס יימשך
+   מקצה לקצה. */
 .shell-top :deep(.word-ribbon-container)::before,
 .shell-top :deep(.word-ribbon-container)::after {
   content: '';
   position: absolute;
   inset-block: 0;
   width: 6px;
-  background: var(--color-shell-dim);
+  background: var(--word-shell-band-bg);
   pointer-events: none;
 }
 
@@ -6127,8 +6120,8 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
 }
 
 /* הרקע הוא `--word-canvas-bg` ולא טוקן ערכת הנושא ישירות: זהו הבד, והוא
-   האלמנט היחיד שהמשתמש יכול לצבוע (composables/canvas-color.ts). הכהיה
-   עדינה קיימת רק לברירת המחדל, ולעולם לא מעל בחירת משתמש. */
+   האלמנט היחיד שהמשתמש יכול לצבוע (composables/canvas-color.ts). ברירת
+   המחדל של הטוקן היא צבע הפס העליון — ראו styles/tokens.css. */
 .editor-stack {
   position: relative;
   flex: 1 1 auto;
@@ -6138,9 +6131,6 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
   overflow: hidden;
 }
 
-.editor-stack.canvas-default {
-  background-image: linear-gradient(var(--color-shell-dim), var(--color-shell-dim));
-}
 
 /* שורת הסרגל האופקי */
 .ruler-row {

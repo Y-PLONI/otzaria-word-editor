@@ -41,11 +41,20 @@ function hexRgb(hex) {
   return `rgb(${hex.slice(1).match(/../g).map((c) => parseInt(c, 16)).join(', ')})`;
 }
 
-// הפס בבורר הוא אלמנט אחר, בלי שכבת ההכהיה: הוא חייב להראות את הצבע שהעין
-// רואה על הבד. ±1 לערוץ — עיגול של TypeScript מול ערבוב של הדפדפן.
-function swatchMatchesCanvas(swatch, canvas) {
-  const seen = rgb(compositeBlackOverlay(canvas.background, canvas.image));
-  return rgb(swatch).every((c, i) => Math.abs(c - seen[i]) <= 1);
+// ±1 לערוץ: `color-mix` מחושב בדפדפן ומעוגל אחרת מהחישוב כאן.
+function near(css, expected) {
+  const a = rgb(css);
+  return rgb(expected).every((c, i) => Math.abs(c - a[i]) <= 1);
+}
+
+/**
+ * הפס העליון וברירת המחדל של הבד: 35% שורת טאבי המסמכים
+ * (`surfaceContainerHigh`) ו-65% משטח — בהיר מהשורה ונגזר מהנושא.
+ */
+function expectedBand(theme) {
+  const high = rgb(hexRgb(theme.colorScheme.surfaceContainerHigh));
+  const surface = rgb(hexRgb(theme.colorScheme.surface));
+  return `rgb(${high.map((c, i) => Math.round(c * 0.35 + surface[i] * 0.65)).join(', ')})`;
 }
 
 function compositeBlackOverlay(background, image) {
@@ -83,6 +92,7 @@ async function measure() {
       theme: document.documentElement.dataset.theme,
       canvas: style('.editor-stack'),
       titlebar: style('.word-titlebar'),
+      doctabsBar: style('.word-doctabs-bar'),
       swatch: style('[data-tip-title="צבע רקע העורך"] .color-indicator-bar').background,
       stored: window.__qaHost.storage['canvas-color'] ?? null,
       chrome: {
@@ -136,7 +146,7 @@ try {
     await app.js(`window.__qaHost.emit('theme.changed', ${JSON.stringify(theme)})`);
     await sleep(100);
     const base = await measure();
-    const expectedDefault = hexRgb(theme.colorScheme.surface);
+    const band = expectedBand(theme);
     const expectedRibbonBg = theme.mode === 'light'
       ? 'rgb(255, 255, 255)'
       : hexRgb(theme.colorScheme.surfaceContainerHigh);
@@ -146,14 +156,18 @@ try {
       base.chrome.ribbon.background === expectedRibbonBg,
       `רצועה=${base.chrome.ribbon.background}, צפוי=${expectedRibbonBg}`,
     );
-    check(`${theme.mode} — הקנבס תואם לסרגל הכותרת ולא לרצועה`,
-      base.canvas.background === expectedDefault
-        && base.canvas.background === base.titlebar.background
-        && base.canvas.image === base.titlebar.image
-        && base.canvas.background !== base.chrome.ribbon.background
-        && swatchMatchesCanvas(base.swatch, base.canvas)
-        && base.canvas.image !== 'none',
-      `קנבס=${base.canvas.background} ${base.canvas.image}, כותרת=${base.titlebar.background} ${base.titlebar.image}, רצועה=${base.chrome.ribbon.background}, פס=${base.swatch}`);
+    check(`${theme.mode} — הבד בגוון הפס, בלי שכבה, והפס בבורר מראה אותו`,
+      near(base.canvas.background, band) && base.canvas.image === 'none' && near(base.swatch, band),
+      `בד=${base.canvas.background} ${base.canvas.image}, פס=${base.swatch}, צפוי=${band}`);
+    check(`${theme.mode} — שורת טאבי המסמכים בצבע הנושא, והפס שונה ממנה`,
+      near(base.doctabsBar.background, hexRgb(theme.colorScheme.surfaceContainerHigh))
+        && !near(base.titlebar.background, base.doctabsBar.background),
+      `פס=${base.titlebar.background}, שורת טאבים=${base.doctabsBar.background}`);
+    check(`${theme.mode} — הפס העליון והטאב הפעיל בצבע הפס, נפרדים מהרצועה`,
+      near(base.titlebar.background, band) && base.titlebar.image === 'none'
+        && near(base.chrome.active.background, band)
+        && !near(base.chrome.ribbon.background, band),
+      `כותרת=${base.titlebar.background} ${base.titlebar.image}, טאב=${base.chrome.active.background}, צפוי=${band}, רצועה=${base.chrome.ribbon.background}`);
 
     const pairs = [
       ['רצועה', base.chrome.ribbonButton.color, base.chrome.ribbon.background, 0],
@@ -190,15 +204,8 @@ try {
     if (!await app.clickSel('.palette-clear-btn', 0, { after: 100 })) throw new Error('כפתור ברירת המחדל אינו נגיש');
     const reset = await measure();
     check(`${theme.mode} — איפוס מחזיר את הבד ואת הפס לברירת המחדל`,
-      reset.canvas.background === expectedDefault
-        && reset.canvas.background === reset.titlebar.background
-        && reset.canvas.image === reset.titlebar.image
-        && swatchMatchesCanvas(reset.swatch, reset.canvas)
-        && reset.canvas.image !== 'none'
-        && reset.stored === null);
-    await palette();
-    const selected = await app.js(`Boolean(document.querySelector('.color-swatch.selected'))`);
-    check(`${theme.mode} — ברירת המחדל הדינמית אינה בחירת פלטה`, selected === false);
+      near(reset.canvas.background, band) && near(reset.swatch, band) && reset.stored === null,
+      `בד=${reset.canvas.background}, פס=${reset.swatch}, צפוי=${band}`);
     await app.escape();
 
     // שינוי בנושא מבלי לפתוח מחדש את המסמך חייב לצבוע גם פופאובר אמיתי.

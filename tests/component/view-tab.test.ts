@@ -247,7 +247,7 @@ describe('צבע רקע העורך', () => {
 
   afterEach(() => {
     applyCanvasColor(null);
-    setCanvasDefaultColor(null);
+    setCanvasDefaultColor({});
   });
 
   it('בחירת צבע צובעת את הבד ונזכרת', async () => {
@@ -308,16 +308,16 @@ describe('צבע רקע העורך', () => {
     expect(split.find('.btn-label').text()).toBe('צבע רקע');
   });
 
-  it('בלי העדפה הפס מראה את הבד כפי שהוא נראה — משטח הנושא המוכהה — ולא שחור', async () => {
+  it('בלי העדפה הפס מראה את גוון הנושא — הצבע שהבד צבוע בו — ולא שחור', async () => {
     // ברירת המחדל של הבורר היא `#000000`, והפס הוא ההבטחה של הכפתור הראשי —
     // כלומר בלי הענף הזה הפקד היה מבטיח „לחיצה תצבע את הבד בשחור”.
-    setCanvasDefaultColor('#ffffff');
+    setCanvasDefaultColor({ surface: '#ffffff', surfaceContainerHigh: '#e0d0c0' });
     const harness = mountUi(ViewTab);
     await settle();
 
-    // 255 × 0.93 — הלבן של הנושא מתחת לשכבת `--color-shell-dim`.
+    // #f4efe9 — 35% שורת הטאבים, 65% משטח.
     expect(harness.wrapper.find('.color-indicator-bar').attributes('style')).toContain(
-      'rgb(237, 237, 237)',
+      'rgb(244, 239, 233)',
     );
   });
 });
