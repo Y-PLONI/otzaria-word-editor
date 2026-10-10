@@ -87,7 +87,7 @@
         </button>
       </div>
 
-      <!-- שם המסמך והסטטוס -->
+      <!-- שם המסמך נדחק לקצה הפנימי של הקבוצה, לצד החיפוש. -->
       <div class="doc-title-wrapper">
         <input
           :value="title"
@@ -205,14 +205,18 @@ defineExpose({
  * `justify-content: space-between` שהיה כאן מרכז את התיבה בין הצדדים ולא
  * בחלון — והצד הימני (מותג, מתג, סרגל מהיר, שם מסמך) רחב פי כמה מגלולת המצב
  * שמשמאל, ולכן מרכז התיבה נמדד ב-35% מרוחב החלון. שלוש עמודות שבהן שני
- * הצדדים `minmax(0, 1fr)` נשארות שוות תמיד, ולכן העמודה האמצעית מרוכזת בלי
- * תלות בתוכן הצדדים ובלי לזוז כששם המסמך מתארך.
+ * הצדדים `minmax(160px, 1fr)` נשארות שוות תמיד, ולכן העמודה האמצעית מרוכזת
+ * בלי תלות בתוכן הצדדים ובלי לזוז כששם המסמך מתארך.
  *
- * שאר המאפיינים של הפס — גובה, רקע, ריפוד, גבול, gap ויישור אנכי — מוגדרים
+ * שם המסמך יושב בעמודה הימנית, אחרי סרגל השמירה, וממלא את כל המקום שנשאר בה
+ * (`flex: 1 1 0` על העטיפה) — ולכן הטקסט, המיושר לשמאל, נצמד לתיבת החיפוש
+ * ולא לסרגל השמירה.
+ *
+ * שאר המאפיינים של הפס — גובה, רקע, ריפוד, gap ויישור אנכי — מוגדרים
  * ב-`.topbar` שב-styles/shell.css על **אותו אלמנט**, ואינם חוזרים כאן: שתי
  * הגדרות לאותו מאפיין באותו אלמנט הן שני מקורות אמת שנפרדים בשקט (הם כבר
  * נפרדו: 12px מול 16px ריפוד, ושני צבעי גבול שונים). `display` הוא החריג
- * היחיד, ובכוונה — הוא דורס את ה-flex שם לטובת המרכוז.
+ * היחיד, ובכוונה — הוא דורס את ה-flex שם לטובת פריסת העמודות.
  */
 .word-titlebar {
   display: grid;
@@ -239,11 +243,6 @@ defineExpose({
 .autosave-toggle,
 .quick-access-tools {
   flex-shrink: 0;
-}
-
-/* שם המסמך סופג את הלחץ בחלון מצטמצם; `min-width: 0` דורס את `auto` שהיה מונע כיווץ מתחת לרוחב התוכן. */
-.doc-title-wrapper {
-  flex: 1 1 auto;
 }
 
 .word-app-badge {
@@ -385,6 +384,7 @@ defineExpose({
   border-radius: var(--radius-sm);
   transition: background 0.1s;
   min-width: 0;
+  flex: 1 1 0;
 }
 
 .doc-title-wrapper:hover {
@@ -393,6 +393,7 @@ defineExpose({
 
 /* הרוחב נקבע בתבנית לפי אורך השם — ראו composables/shell-format.ts. */
 .doc-title-input {
+  flex: 1 1 auto;
   background: transparent;
   border: none;
   color: var(--color-on-surface);
@@ -400,7 +401,7 @@ defineExpose({
   font-size: 13px;
   font-weight: 600;
   outline: none;
-  text-align: start;
+  text-align: left;
   min-width: 0;
 }
 
@@ -488,7 +489,7 @@ defineExpose({
    היה משתיק את הצירוף בלי סימן. */
 @media (max-width: 375px) {
   .word-titlebar {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 </style>

@@ -239,12 +239,14 @@ function resetZoom(): void {
   justify-content: space-between;
   height: var(--statusbar-height);
   padding-inline: 10px;
-  background: var(--color-surface-container-high);
+  /* שכבת הבהרה עדינה על משטח הנושא; צבע הבד אינו צובע פקדי ממשק. */
+  background: var(--statusbar-bg);
   border-block-start: 1px solid var(--color-outline-variant);
   color: var(--color-on-surface-variant);
   font-size: 11px;
   user-select: none;
   flex-shrink: 0;
+  box-shadow: var(--ribbon-shadow-top), var(--ribbon-shadow-bottom);
 }
 
 .statusbar-start,

@@ -18,7 +18,7 @@ export const DOC_TITLE_MIN_CH = 8;
  * הוא גריד של שלוש עמודות שוות־קצה, ותיבת החיפוש שבמרכזו חייבת להישאר במרכז
  * החלון בלי תלות באורך השם.
  */
-export const DOC_TITLE_MAX_CH = 30;
+export const DOC_TITLE_MAX_CH = 48;
 
 /**
  * רוחב שדה שם המסמך ב-ch, לפי אורך השם.

@@ -123,6 +123,19 @@ describe('פקדי פס הכותרת', () => {
     expect(harness.wrapper.emitted('update-title')).toEqual([['מסמך אחר']]);
   });
 
+  it('תיבת שם המסמך בקבוצה הימנית, אחרי כפתורי השמירה ולפני החיפוש', async () => {
+    const harness = mountUi(TitleBar);
+    await settle();
+
+    const title = harness.wrapper.find('.doc-title-wrapper');
+    expect(harness.wrapper.find('.quick-access-tools').element.parentElement)
+      .toBe(harness.wrapper.find('.titlebar-start').element);
+    expect(title.element.parentElement)
+      .toBe(harness.wrapper.find('.titlebar-start').element);
+    expect(title.element.previousElementSibling)
+      .toBe(harness.wrapper.find('.quick-access-tools').element);
+  });
+
   it('מצב השמירה מוצג רק כשיש מה לומר', async () => {
     const harness = mountUi(TitleBar, { props: { saveStateText: '' } });
     await settle();

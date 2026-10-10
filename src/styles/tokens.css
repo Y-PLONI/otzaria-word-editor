@@ -18,6 +18,10 @@
   --color-outline: #cbd5e1;
   --color-outline-variant: #e1dfdd;
   --color-scrim: rgba(0, 0, 0, 0.32);
+  --color-surface-highlight: rgba(255, 255, 255, 0.04);
+  /* שכבת הכהייה הניטרלית של הרקע העליון. מוגדרת כטוקן כדי ש-CSS צרכני
+     ישתמש בתפקיד צבע במקום להטמיע rgba ישירות. */
+  --color-shell-dim: rgba(0, 0, 0, 0.07);
 
   /* סולם הדרגות שנגזרות מ-primary. שלוש דרגות שקופות ולא אחת: פקד שהעכבר
      עובר מעליו ופקד דלוק שנראים זהים מוחקים את ההבחנה המרכזית ברצועה של Word.
@@ -48,21 +52,34 @@
   --word-btn-active-border: var(--color-primary);
   --word-group-label-color: var(--color-on-surface-variant);
   --word-group-border: var(--color-outline-variant);
+  /* מפריד בין הרצועה לקנבס ולסרגלים; בערכות כהות משתמש במשטח של ערכת הנושא. */
+  --word-ribbon-bg: var(--color-surface-container-high);
 
-  /* צבע הבד — המשטח שסביב הדף, ורק הוא.
+  /* הפס העליון — פס הכותרת והרצועה שסביב הכרטיס הלבן (App.vue) — הטאב
+     הפעיל של המסמכים, שמתמזג בו, וברירת המחדל של הבד (למטה).
 
-     ברירת המחדל היא „חום בהיר” — הגוון הבסיסי של העמודה הזאת בפלטה של
-     ColorPickerPopover.vue — ולא צבע ערכת הנושא: זו בחירה של מראה, והיא
-     קבועה גם במצב כהה, כמו הדף הלבן שהיא מקיפה. הטוקן נפרד מ-
-     `--color-surface-container-highest` מפני שזה צובע גם את שני הסרגלים, את
-     הפינה שביניהם ואת כפתור היציאה ממצב מיקוד — ובלי טוקן נפרד, „צבע רקע” של
-     המשתמש היה נצבע גם עליהם.
+     גוון של אוצריא: הצבע של שורת טאבי המסמכים (`surfaceContainerHigh`)
+     מעורבב עם המשטח, כלומר בהיר ממנה. נגזר מערכת הנושא, ולכן נכון בשני
+     המצבים. 35% כתוב גם ב-TypeScript (`BAND_MIX`, composables/canvas-color.ts)
+     בשביל הפס בבורר „צבע רקע”, ו-tests/unit/canvas-color.test.ts מחזיק את
+     השניים זהים. */
+  --word-shell-band-bg: color-mix(in srgb, var(--color-surface-container-high) 35%, var(--color-surface));
+  --word-doctab-active-bg: var(--word-shell-band-bg);
+  /* הקו שמתחת לשורת טאבי המסמכים ומסביב לטאב הפעיל. גוון של הנושא ולא
+     `--color-outline-variant`: את זה אוצריא אינה שולחת, והוא נשאר אפור קבוע
+     שנראה כמו צל על ערכה צבעונית. */
+  --word-doctabs-border: var(--color-surface-container-highest);
 
-     הדריסה היא סגנון inline על שורש המסמך, כמו כל צבעי אוצריא — ולכן היעדר
-     העדפה הוא היעדר ההצהרה, והבד חוזר לערך שכאן. הערך עצמו כתוב גם
-     ב-TypeScript (`DEFAULT_CANVAS_COLOR`, composables/canvas-color.ts), ושער
-     ב-tests/unit/canvas-color.test.ts מחזיק את השניים זהים. */
-  --word-canvas-bg: #eeece1;
+  /* צבע הבד — המשטח שסביב הדף, ורק הוא. בלי העדפה — צבע הפס העליון.
+
+     הטוקן נפרד מ-`--color-surface-container-highest` מפני שזה צובע גם את שני
+     הסרגלים, את הפינה שביניהם ואת כפתור היציאה ממצב מיקוד — ובלי טוקן נפרד,
+     „צבע רקע” של המשתמש היה נצבע גם עליהם. ומאותה סיבה הכיוון הוא מהפס לבד
+     ולא להפך: הדריסה של המשתמש היא סגנון inline על `--word-canvas-bg` בשורש
+     המסמך, כמו כל צבעי אוצריא, והיא אינה מגיעה לפס. היעדר העדפה הוא היעדר
+     ההצהרה, והבד חוזר לערך שכאן. */
+  --word-canvas-bg: var(--word-shell-band-bg);
+  --statusbar-bg: linear-gradient(to top, var(--color-surface-highlight), transparent var(--statusbar-height)), var(--color-surface);
 
   /* גופנים.
 
@@ -91,7 +108,13 @@
 
   /* גבהים */
   --topbar-height: 48px;
-  --tabbar-height: 24px;
+  --tabbar-height: 28px;
+  /* שורת טאבי המסמכים, מעל פס הכותרת — גבוהה מ-`--tabbar-height` כדי שיהיה
+     מקום לקשתות של הטאב הפעיל (DocumentTabsBar.vue). */
+  --doctabs-height: 34px;
+  /* צל בולט לרצועת ה-Ribbon (מעל ומתחת) */
+  --ribbon-shadow-top: 0 -4px 10px rgba(0, 0, 0, 0.06);
+  --ribbon-shadow-bottom: 0 6px 18px rgba(0, 0, 0, 0.07);
   --statusbar-height: 24px;
 
   /* גאומטריית הרצועה — נגזרת משורה אחת, ולא ארבעה מספרים שנקבעו בנפרד.
@@ -131,6 +154,11 @@
       var(--ribbon-scrollbar-h) + 2 * var(--ribbon-body-pad) +
       var(--ribbon-body-border)
   );
+}
+
+:root[data-theme='light'] {
+  /* לבן קבוע במצב בהיר יוצר את הניגודיות הרצויה מול הקנבס והסרגלים. */
+  --word-ribbon-bg: #ffffff;
 }
 
 /* אין כאן `--ribbon-height: auto`, וזו הסרה: הכלל נשאר מהשלד הראשון, מלפני

@@ -40,9 +40,8 @@ body {
   gap: 12px;
   height: var(--topbar-height);
   padding-inline: 16px;
-  background: var(--color-surface-container-high);
+  background: var(--color-surface);
   color: var(--color-on-surface);
-  border-block-end: 1px solid var(--color-outline);
 }
 
 button {
@@ -81,7 +80,7 @@ button:disabled {
   position: relative;
   flex: 1 1 auto;
   min-height: 0;
-  background: var(--word-canvas-bg);
+  background-color: var(--word-canvas-bg);
 }
 
 /* כל מסמך מקבל host משלו, וכולם באותו מקום: מסמך שנטען יושב מעל הפעיל עד
@@ -121,6 +120,18 @@ button:disabled {
   inset: 0;
   overflow: auto;
   direction: ltr;
+  scrollbar-gutter: stable;
+  scrollbar-width: auto;
+  scrollbar-color: transparent transparent;
+}
+
+/* :hover חל גם כשהעכבר מעל צאצא; אין צורך ב-:has() סביב עץ המסמך. */
+.editor-stack__host:hover {
+  /* הסרגל התקני מקבל רק צבעים אחידים — כאן המשטח שמתחת ל-`--statusbar-bg`.
+     אין כאן `::-webkit-scrollbar`, בכוונה: ב-Chromium `scrollbar-color` מבטל
+     אותו (נמדד ב-Chrome 154 — 15px ברירת מחדל במקום הרוחב שהכלל ביקש). */
+  scrollbar-color: var(--color-outline) var(--color-surface);
+  scrollbar-width: auto;
 }
 
 /* מרכוז העמוד.
@@ -145,6 +156,7 @@ button:disabled {
    הכלל אינו תלוי בכיווניות: מרכוז הוא סימטרי, ולכן מעבר המיכל ל-ltr אינו נוגע
    בו. */
 .editor-stack__host .superdoc {
+  direction: ltr;
   justify-content: center;
 }
 

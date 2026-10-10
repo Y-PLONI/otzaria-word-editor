@@ -1,17 +1,14 @@
 /**
- * שער QA חד-פעמי לבדיקת ריבוי מסמכים (חלק 3): פתיחת טאב שני, מעבר בין
- * טאבים, וסגירת טאב עם שינויים לא שמורים (ביטול ואישור).
- *
- * נכתב כבדיקה ידנית לסקירת התכונה — לא חלק קבוע מ-`npm run verify`.
- *
- *   node scripts/qa/multi-doc-qa.mjs
+ * פתיחת טאב שני, מעבר בין מסמכים וסגירת מסמך עם שינויים לא שמורים.
+ * הביטול והאישור נלחצים בדיאלוג הפנימי; ui.showConfirm של ה-SDK אינו
+ * משתתף במסלול הזה. הרצה: node scripts/qa/multi-doc-qa.mjs.
  */
 import { openApp, sleep } from './harness.mjs';
 
-const PORT = Number(process.env.QA_PORT ?? 9391);
+const PORT = Number(process.env.QA_PORT ?? 9652);
 let failed = false;
 
-function check(label, ok, detail) {
+function check(label, ok, detail = '') {
   console.log(`${ok ? '✓' : '✗'} ${label}${detail ? ` — ${detail}` : ''}`);
   if (!ok) failed = true;
 }
@@ -20,112 +17,51 @@ async function main() {
   const page = await openApp({ name: 'multi-doc', port: PORT });
   try {
     const tabsCount = () => page.js('document.querySelectorAll(".word-doctab").length');
-    const editorsSize = () => page.js('window.__otzariaEditors ? window.__otzariaEditors.size : -1');
-    const activeTitle = () =>
-      page.js(
-        'document.querySelector(".word-doctab.active .word-doctab-title")?.textContent ?? null',
-      );
+    const editorsSize = () => page.js('window.__otzariaEditors.size');
+    const activeId = () => page.js('document.querySelector(".word-doctab.active")?.id ?? null');
+    const click = async (selector, index = 0) => {
+      if (!await page.clickSel(selector, index)) throw new Error(`פקד אינו נגיש: ${selector}`);
+    };
 
-    check('טאב יחיד בעליה', (await tabsCount()) === 1, `נמדד ${await tabsCount()}`);
-    check(
-      'window.__otzariaEditors קיים עם רשומה אחת',
-      (await editorsSize()) === 1,
-      `נמדד ${await editorsSize()}`,
-    );
-
-    // כפתור „+”: טאב חדש-ריק, ואז פתיחת מסמך ריק (openDocument בלי קובץ).
-    await page.js('document.querySelector(".word-doctabs-new")?.click()');
+    check('טאב יחיד בעליה', (await tabsCount()) === 1);
+    check('window.__otzariaEditors קיים עם רשומה אחת', (await editorsSize()) === 1);
+    await click('.word-doctabs-new');
     await sleep(1500);
-    check('אחרי „+”: שני טאבים', (await tabsCount()) === 2, `נמדד ${await tabsCount()}`);
-    check(
-      'window.__otzariaEditors: שתי רשומות',
-      (await editorsSize()) === 2,
-      `נמדד ${await editorsSize()}`,
-    );
+    check('אחרי „+”: שני טאבים', (await tabsCount()) === 2);
+    check('window.__otzariaEditors: שתי רשומות', (await editorsSize()) === 2);
+    const ids = JSON.parse(await page.js('JSON.stringify([...document.querySelectorAll(".word-doctab")].map(e => e.id))'));
+    check('המסמך החדש הוא הטאב הפעיל', (await activeId()) === ids[1]);
 
-    // סימון dirty בטאב השני. `save.markDirty()` ישירות ולא הקלדה מסונתזת:
-    // הקלדה דרך CDP ב-headless אינה מגיעה אמינה ל-ProseMirror (בעיית תשתית,
-    // נבדק גם על הטאב הראשון היחיד — לא רגרסיה של הפיצ'ר הזה).
-    await page.js(
-      `(function(){var ids=Array.from(window.__otzariaEditors.keys()); var last=ids[ids.length-1]; window.__otzariaEditors.get(last).save.markDirty();})()`,
-    );
+    // סימון דרך מנהל השמירה של המסמך החדש, ולא שינוי מלאכותי במחלקת CSS.
+    await page.js(`(() => {
+      const sessions = [...window.__otzariaEditors.values()];
+      sessions[1].save.markDirty();
+    })()`);
     await sleep(300);
-    const dirtyAfterType = await page.js(
-      'document.querySelector(".word-doctab.active .word-doctab-dirty") ? true : false',
-    );
-    check('הטאב השני מסומן dirty אחרי markDirty', dirtyAfterType === true);
+    check('הטאב השני מציג שינויים לא שמורים', await page.exists('.word-doctab.active .word-doctab-dirty'));
 
-    // מעבר לטאב הראשון ובחזרה — ודא שאין קריסה ושהמעבר עצמו עובד.
-    const firstTabRect = await page.js(
-      `(function(){ var els = document.querySelectorAll(".word-doctab"); var el = els[0]; if(!el) return null; var r = el.getBoundingClientRect(); return JSON.stringify({x: r.left + r.width/2, y: r.top + r.height/2}); })()`,
-    );
-    if (firstTabRect) {
-      const { x, y } = JSON.parse(firstTabRect);
-      await page.clickAt(x, y);
-      await sleep(500);
-      const activeAfterSwitch = await activeTitle();
-      check('מעבר לטאב הראשון החליף את הטאב הפעיל', typeof activeAfterSwitch === 'string');
-    } else {
-      check('נמצא ה-rect של הטאב הראשון', false);
-    }
+    await click('.word-doctab', 0);
+    check('מעבר לטאב הראשון החליף את המסמך הפעיל', (await activeId()) === ids[0]);
+    await click('.word-doctab', 1);
+    check('חזרה לטאב השני החליפה את המסמך הפעיל', (await activeId()) === ids[1]);
 
-    // חזרה לטאב השני (dirty) וסגירתו — עם ביטול קודם, ואז עם אישור.
-    const secondTabRect = await page.js(
-      `(function(){ var els = document.querySelectorAll(".word-doctab"); var el = els[1]; if(!el) return null; var r = el.getBoundingClientRect(); return JSON.stringify({x: r.left + r.width/2, y: r.top + r.height/2}); })()`,
-    );
-    if (secondTabRect) {
-      const { x, y } = JSON.parse(secondTabRect);
-      await page.clickAt(x, y);
-      await sleep(400);
+    await click('.word-doctab-close', 1);
+    check('סגירת מסמך מלוכלך פותחת דיאלוג פנימי', await page.exists('.unsaved-dialog'));
+    await click('.unsaved-dialog [data-choice="cancel"]');
+    check('ביטול סוגר את הדיאלוג', !await page.exists('.unsaved-dialog'));
+    check('ביטול משאיר שני טאבים ואת אותו מסמך פעיל',
+      (await tabsCount()) === 2 && (await activeId()) === ids[1]);
+    check('ביטול שומר את שני העורכים ואת סימון השינויים',
+      (await editorsSize()) === 2 && await page.exists('.word-doctab.active .word-doctab-dirty'));
 
-      // ביטול: השאלה הראשונה („לשמור קודם?”) עונה „לא”, השנייה („למחוק
-      // בוודאות?”) עונה „לא” גם היא — כלומר „ביטול” מלא. `decideDocumentSwitch`
-      // שואל עד שתי שאלות דו-כפתוריות ברצף (ראו open-flow.ts).
-      await page.js(
-        'window.__qaHost.replies["ui.showConfirm"] = function(){ return Promise.resolve({ success: true, data: { confirmed: false }, error: null }); }',
-      );
-      const closeBtnRect = await page.js(
-        `(function(){ var els = document.querySelectorAll(".word-doctab"); var el = els[1]; if(!el) return null; var btn = el.querySelector(".word-doctab-close"); if(!btn) return null; var r = btn.getBoundingClientRect(); return JSON.stringify({x: r.left + r.width/2, y: r.top + r.height/2}); })()`,
-      );
-      if (closeBtnRect) {
-        const { x: cx, y: cy } = JSON.parse(closeBtnRect);
-        await page.clickAt(cx, cy);
-        await sleep(600);
-        check(
-          'ביטול סגירה: הטאב עדיין קיים (2 טאבים)',
-          (await tabsCount()) === 2,
-          `נמדד ${await tabsCount()}`,
-        );
-
-        // אישור: „לשמור קודם?” — לא; „למחוק בוודאות?” — כן. זה בדיוק המסלול
-        // „לא לשמור” שסוגר את הטאב בפועל.
-        await page.js(`
-          window.__qaHost.replies["ui.showConfirm"] = (function(){
-            var n = 0;
-            return function(){
-              n += 1;
-              return Promise.resolve({ success: true, data: { confirmed: n >= 2 }, error: null });
-            };
-          })();
-        `);
-        await page.clickAt(cx, cy);
-        await sleep(800);
-        check(
-          'אישור סגירה: חזרה לטאב יחיד',
-          (await tabsCount()) === 1,
-          `נמדד ${await tabsCount()}`,
-        );
-        check(
-          'window.__otzariaEditors: רשומה אחת אחרי סגירה',
-          (await editorsSize()) === 1,
-          `נמדד ${await editorsSize()}`,
-        );
-      } else {
-        check('נמצא כפתור הסגירה של הטאב השני', false);
-      }
-    } else {
-      check('נמצא ה-rect של הטאב השני', false);
-    }
+    await click('.word-doctab-close', 1);
+    await click('.unsaved-dialog [data-choice="discard"]');
+    // הפירוק ממתין לגיבוי המסמך; מדידה מיידית עלולה לתפוס אותו באמצע.
+    for (let waited = 0; waited < 5000 && (await editorsSize()) !== 1; waited += 100) await sleep(100);
+    check('„לא לשמור” מחזיר לטאב יחיד', (await tabsCount()) === 1);
+    check('window.__otzariaEditors: רשומה אחת אחרי סגירה', (await editorsSize()) === 1);
+    check('הטאב שנותר חוזר להיות פעיל', (await activeId()) === ids[0]);
+    check('הדיאלוג נסגר אחרי אישור', !await page.exists('.unsaved-dialog'));
   } finally {
     page.close();
   }

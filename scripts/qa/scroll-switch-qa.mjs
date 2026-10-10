@@ -130,7 +130,17 @@ try {
 
   await openDoc('scroll-a');
   await app.js('document.querySelector(".word-doctabs-new")?.click()');
-  await sleep(2500);
+  // עד שהמסמך הריק של „+” מוכן, ולא זמן קבוע: „פתח קובץ” בזמן שהוא עוד נטען
+  // נבלע, ו„מסמך ב'” נשאר המסמך הריק — עמוד אחד, שבו 403 הוא כבר התחתית
+  // והגלגלת „לא זזה”. נמדד: כשל בכמחצית הריצות על מכונה עמוסה, ו-0 עם ההמתנה.
+  for (let waited = 0; waited < 30_000; waited += 250) {
+    const ready = await app.js(
+      `(window.__otzariaEditors ? window.__otzariaEditors.size : 0) === 2 && !document.querySelector('.editor-stack__host--pending')`,
+    );
+    if (ready) break;
+    await sleep(250);
+  }
+  await sleep(1000);
   await openDoc('scroll-b');
   await switchTo(0);
 

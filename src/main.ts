@@ -14,6 +14,14 @@ import { setHostAppVersion } from './host/host-capabilities';
 import { splashFail, splashStage, SPLASH_STAGES } from './host/splash';
 import { applyTheme } from './host/theme';
 import { setMenuLocale } from './ui/ribbon/i18n';
+import { setCanvasDefaultColor } from './composables/canvas-color';
+import type { ThemePayload } from './types/otzaria_plugin';
+
+/** ערכת הנושא, וגם הפס בבורר „צבע רקע” — הבד בלי העדפה נגזר ממנה. */
+function applyOtzariaTheme(theme: ThemePayload): void {
+  applyTheme(theme);
+  setCanvasDefaultColor(theme.colorScheme ?? {});
+}
 
 /** ב-build הסקריפט קלאסי, כלומר הוא עשוי לרוץ לפני שה-body נפרס. */
 function domReady(): Promise<void> {
@@ -52,7 +60,7 @@ async function main(): Promise<void> {
   const root = document.documentElement;
   try {
     const info = await bootPromise;
-    applyTheme(info.theme);
+    applyOtzariaTheme(info.theme);
     // שפת התפריטים לפי שפת המשתמש (`app.language` — 'he' / 'en'; ראו
     // docs/plugin-sdk). נקבעת גם במסלול „recovered", כי `app.getInfo`
     // מחזיר את אותו מידע. כשל אתחול משאיר עברית — שפת ברירת המחדל.
@@ -60,7 +68,7 @@ async function main(): Promise<void> {
     // גרסת אוצריא קובעת אילו קריאות Host קיימות — ר' host/host-capabilities.ts.
     // נקבעת גם במסלול „recovered", מאותה סיבה ומאותו מקור כמו השפה.
     setHostAppVersion(info.app.version);
-    onThemeChanged(applyTheme);
+    onThemeChanged(applyOtzariaTheme);
     root.dataset.boot = info.source === 'recovered' ? 'recovered' : 'event';
 
     if (info.source === 'recovered') {

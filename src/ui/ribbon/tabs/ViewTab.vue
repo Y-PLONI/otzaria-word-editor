@@ -101,7 +101,8 @@
         בעמודה, ורצועת חץ במלוא הרוחב מתחת.
       -->
       <ColorPickerPopover
-        :model-value="canvasColor ?? ''"
+        :model-value="canvasSwatch"
+        :follow-model-value="true"
         icon="shading"
         variant="large"
         label="צבע רקע"
@@ -129,8 +130,8 @@ import { editorStackWidth, fitWidthPercent } from '../../../engine/fit-width';
 import { zoomBounds } from '../../../engine/zoom';
 import { zoomPayload } from '../../../engine/payloads';
 import {
-  DEFAULT_CANVAS_COLOR,
   canvasColor,
+  canvasDefaultColor,
   setCanvasColor,
 } from '../../../composables/canvas-color';
 
@@ -193,7 +194,7 @@ async function runFitPageWidth(): Promise<void> {
  * מה שהבד צבוע בו **עכשיו**. בלי הענף השני הוא היה מראה שחור (ברירת המחדל
  * של הבורר) כל עוד לא נבחר צבע, כלומר מבטיח שלחיצה תצבע את הבד בשחור.
  */
-const canvasSwatch = computed(() => canvasColor.value ?? DEFAULT_CANVAS_COLOR);
+const canvasSwatch = computed(() => canvasColor.value ?? canvasDefaultColor.value);
 
 /**
  * `null` מהבורר („ברירת מחדל”) הוא הסרת ההעדפה, לא צביעה בשקוף: הבד חוזר

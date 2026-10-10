@@ -10,10 +10,12 @@
  * (styles/tokens.css) יושב בין השניים, והצרכן היחיד שלו הוא `.editor-stack` —
  * הבד עצמו.
  *
- * ## ברירת המחדל: חום בהיר, לא צבע ערכת הנושא
+ * ## ברירת המחדל: גוון של אוצריא, בהיר משורת טאבי המסמכים
  *
- * בלי העדפה הבד נצבע ב-`DEFAULT_CANVAS_COLOR`, ולא בצבע המשטח של אוצריא. זו
- * בחירה של מראה, ולכן היא קבועה גם במצב כהה — בדיוק כמו הדף הלבן שבמרכז.
+ * בלי העדפה הבד נצבע ב-`--word-shell-band-bg` — אותו צבע כמו פס הכותרת
+ * ושורת הלשוניות של הרצועה: `surfaceContainerHigh` של אוצריא (הצבע של שורת
+ * טאבי המסמכים) מעורבב עם `surface`, כלומר בהיר ממנה ונגזר מערכת הנושא בשני
+ * המצבים. הפס בבורר מראה את אותו צבע — `canvasDefaultColor` למטה.
  *
  * ## למה סגנון inline על שורש המסמך
  *
@@ -36,13 +38,48 @@ import { saveCanvasColor } from '../host/settings';
 export const CANVAS_COLOR_VAR = '--word-canvas-bg';
 
 /**
- * הצבע שהבד נצבע בו בלי העדפה — „חום בהיר”, הגוון הבסיסי של העמודה הזאת
- * בפלטה של `ColorPickerPopover`, ולכן „ברירת מחדל” והמשבצת הם אותו צבע.
- *
- * כתוב פעמיים — כאן בשביל הפס שבבורר, וב-tokens.css בשביל הבד — והקשר בין
- * השניים אינו נראה בקוד, ולכן הוא נמדד ב-tests/unit/canvas-color.test.ts.
+ * החלק של `surfaceContainerHigh` בתערובת — `color-mix(... 35%, surface)` של
+ * `--word-shell-band-bg` ב-tokens.css. כתוב פעמיים, כאן בשביל הפס שבבורר ושם
+ * בשביל הבד, ו-tests/unit/canvas-color.test.ts מחזיק את השניים זהים.
  */
-export const DEFAULT_CANVAS_COLOR = '#eeece1';
+export const BAND_MIX = 0.35;
+
+/** ערכי ברירת המחדל של שני הטוקנים ב-tokens.css, לפני שאוצריא שולחת ערכת נושא. */
+export const FALLBACK_SURFACE = '#f8f9fa';
+export const FALLBACK_SURFACE_CONTAINER_HIGH = '#f3f2f1';
+
+/** `color-mix(in srgb, high BAND_MIX, surface)` — מה שהדפדפן מצייר על הבד. */
+export function bandColor(high: string, surface: string): string {
+  const channels = (hex: string) => hex.slice(1).match(/../g)!.map((pair) => parseInt(pair, 16));
+  const h = channels(high);
+  const s = channels(surface);
+  return `#${h
+    .map((c, i) => Math.round(c * BAND_MIX + s[i] * (1 - BAND_MIX)).toString(16).padStart(2, '0'))
+    .join('')}`;
+}
+
+/** הצבע שהבד נצבע בו בלי העדפה, לפני שאוצריא שולחת ערכת נושא. */
+export const DEFAULT_CANVAS_COLOR = bandColor(FALLBACK_SURFACE_CONTAINER_HIGH, FALLBACK_SURFACE);
+
+/** ברירת המחדל כפי שהיא נראית עכשיו, לפי ערכת הנושא — בשביל הפס בבורר. */
+export const canvasDefaultColor = ref(DEFAULT_CANVAS_COLOR);
+
+/**
+ * מעדכנת את `canvasDefaultColor` אחרי החלת ערכת נושא. אותה נפילה כמו
+ * ב-host/theme.ts: בלי `surfaceContainerHigh` — `surfaceContainerHighest`.
+ * ערך שאינו `#rrggbb` משאיר את ברירת המחדל של tokens.css.
+ */
+export function setCanvasDefaultColor(colors: {
+  surface?: string;
+  surfaceContainerHigh?: string;
+  surfaceContainerHighest?: string;
+}): void {
+  const surface = normalizeCanvasColor(colors.surface) ?? FALLBACK_SURFACE;
+  const high = normalizeCanvasColor(colors.surfaceContainerHigh)
+    ?? normalizeCanvasColor(colors.surfaceContainerHighest)
+    ?? FALLBACK_SURFACE_CONTAINER_HIGH;
+  canvasDefaultColor.value = bandColor(high, surface);
+}
 
 /**
  * `#rrggbb` באותיות קטנות, או `null` על כל דבר אחר.
@@ -62,7 +99,7 @@ export function normalizeCanvasColor(raw: unknown): string | null {
 }
 
 /**
- * ההעדפה כפי שהיא כרגע. `null` = אין העדפה, והבד ב-`DEFAULT_CANVAS_COLOR`.
+ * ההעדפה כפי שהיא כרגע. `null` = אין העדפה, והבד ב-`canvasDefaultColor`.
  *
  * מודול ולא `provide`: הבד נצבע בעלייה (App.vue), והפקד שמשנה אותו יושב
  * בלשונית „תצוגה” — שהיא `v-else-if` ב-Ribbon.vue, כלומר מורכבת רק כשהיא

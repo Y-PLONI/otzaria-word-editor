@@ -1,5 +1,5 @@
 <template>
-  <!-- רצועת טאבים אופקית מתחת לפס הכותרת — אחד לכל מסמך פתוח. -->
+  <!-- רצועת טאבים אופקית מעל פס הכותרת — אחד לכל מסמך פתוח. -->
   <div class="word-doctabs-bar">
     <div
       class="word-doctabs-strip"
@@ -105,10 +105,10 @@ function onTabKeydown(event: KeyboardEvent): void {
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
-  height: var(--tabbar-height);
+  height: var(--doctabs-height);
   padding-inline: 8px;
   background: var(--color-surface-container-high);
-  border-block-end: 1px solid var(--color-outline-variant);
+  border-bottom: 2px solid var(--word-doctabs-border);
   user-select: none;
 }
 
@@ -117,8 +117,10 @@ function onTabKeydown(event: KeyboardEvent): void {
   align-items: stretch;
   gap: 2px;
   min-width: 0;
-  height: 100%;
+  height: calc(100% + 2px);
+  margin-bottom: -2px;
   overflow-x: auto;
+  padding-inline: 10px;
   scrollbar-width: none;
 }
 
@@ -131,12 +133,12 @@ function onTabKeydown(event: KeyboardEvent): void {
   align-items: center;
   gap: 6px;
   background: transparent;
-  border: 1px solid transparent;
+  border: 2px solid transparent;
   border-radius: var(--radius-sm);
   color: var(--color-on-surface);
   font-family: var(--font-main);
   font-size: var(--font-size-tab);
-  padding: 2px 8px;
+  padding: 2px 10px;
   cursor: pointer;
   white-space: nowrap;
   max-width: 220px;
@@ -147,9 +149,46 @@ function onTabKeydown(event: KeyboardEvent): void {
 }
 
 .word-doctab.active {
-  background: var(--color-surface);
-  border-color: var(--color-outline-variant);
-  color: var(--color-primary);
+  background: var(--word-doctab-active-bg);
+  border-color: var(--word-doctabs-border);
+  border-bottom-color: transparent;
+  color: var(--color-on-surface);
+  box-shadow: none;
+  border-top-left-radius: var(--radius-md);
+  border-top-right-radius: var(--radius-md);
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  margin-top: 2px;
+  margin-bottom: -2px;
+  position: relative;
+  z-index: 6;
+}
+
+.word-doctab.active::before,
+.word-doctab.active::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  width: 10px;
+  height: 10px;
+  background: transparent;
+  pointer-events: none;
+}
+
+.word-doctab.active::before {
+  left: -12px;
+  border-bottom-right-radius: 10px;
+  border-right: 2px solid var(--word-doctabs-border);
+  border-bottom: 2px solid var(--word-doctabs-border);
+  box-shadow: 5px 5px 0 5px var(--word-doctab-active-bg);
+}
+
+.word-doctab.active::after {
+  right: -12px;
+  border-bottom-left-radius: 10px;
+  border-bottom: 2px solid var(--word-doctabs-border);
+  border-left: 2px solid var(--word-doctabs-border);
+  box-shadow: -5px 5px 0 5px var(--word-doctab-active-bg);
 }
 
 .word-doctab-title {

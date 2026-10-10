@@ -16,11 +16,17 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  BAND_MIX,
   CANVAS_COLOR_VAR,
   DEFAULT_CANVAS_COLOR,
+  FALLBACK_SURFACE,
+  FALLBACK_SURFACE_CONTAINER_HIGH,
   applyCanvasColor,
+  bandColor,
   canvasColor,
+  canvasDefaultColor,
   normalizeCanvasColor,
+  setCanvasDefaultColor,
 } from '../../src/composables/canvas-color';
 
 function source(...parts: string[]): string {
@@ -34,6 +40,7 @@ function declared(): string {
 
 beforeEach(() => {
   applyCanvasColor(null);
+  setCanvasDefaultColor({});
 });
 
 describe('normalizeCanvasColor', () => {
@@ -112,24 +119,64 @@ describe('applyCanvasColor', () => {
  */
 describe('הטוקן שב-TypeScript הוא הטוקן שב-CSS', () => {
   it('הכלל של הבד צורך בדיוק את `CANVAS_COLOR_VAR`', () => {
-    // שני הכללים: ה-`scoped` ב-App.vue (המנצח) והגלובלי ב-shell.css.
+    // שני הכללים: ה-`scoped` ב-App.vue והגלובלי ב-shell.css.
     expect(source('App.vue')).toContain(`background: var(${CANVAS_COLOR_VAR});`);
-    expect(source('styles', 'shell.css')).toContain(`background: var(${CANVAS_COLOR_VAR});`);
+    expect(source('styles', 'shell.css')).toContain(
+      `background-color: var(${CANVAS_COLOR_VAR});`,
+    );
   });
 
-  it('ברירת המחדל של הטוקן היא `DEFAULT_CANVAS_COLOR` שהבורר מראה', () => {
-    // זה מה שמחזיק את „ברירת מחדל”: הפס בבורר מראה את `DEFAULT_CANVAS_COLOR`,
-    // והבד — בלי העדפה — נצבע מ-tokens.css. שני ערכים שונים כאן פירושם פס
-    // שמבטיח צבע אחד ובד שמצויר באחר.
+  it('הבד בלי העדפה הוא צבע הפס העליון, והפס אינו נגזר מהבד', () => {
+    const tokens = source('styles', 'tokens.css');
+    expect(tokens).toContain(`${CANVAS_COLOR_VAR}: var(--word-shell-band-bg);`);
+    // הכיוון הפוך היה מעביר את „צבע רקע” של המשתמש גם לפקדי המעטפת.
+    expect(tokens).not.toMatch(/--word-shell-band-bg:\s*var\(--word-canvas-bg\)/);
+  });
+
+  it('התערובת שב-CSS היא התערובת שב-TypeScript', () => {
+    // הפס בבורר מחושב ב-TS; שני יחסים שונים פירושם פס שמבטיח צבע אחד ובד
+    // שמצויר באחר.
     expect(source('styles', 'tokens.css')).toContain(
-      `${CANVAS_COLOR_VAR}: ${DEFAULT_CANVAS_COLOR};`,
+      `--word-shell-band-bg: color-mix(in srgb, var(--color-surface-container-high) ${BAND_MIX * 100}%, var(--color-surface));`,
+    );
+    expect(source('styles', 'tokens.css')).toContain(`--color-surface: ${FALLBACK_SURFACE};`);
+    expect(source('styles', 'tokens.css')).toContain(
+      `--color-surface-container-high: ${FALLBACK_SURFACE_CONTAINER_HIGH};`,
+    );
+  });
+});
+
+describe('ברירת המחדל שבבורר', () => {
+  it('בהירה משורת הטאבים ונגזרת ממנה', () => {
+    // 0x40×0.35 + 0x80×0.65 = 105.6 → 0x6a: בין שני הצבעים, קרוב למשטח.
+    expect(bandColor('#404040', '#808080')).toBe('#6a6a6a');
+    setCanvasDefaultColor({ surface: '#ffffff', surfaceContainerHigh: '#e0d0c0' });
+    expect(canvasDefaultColor.value).toBe(bandColor('#e0d0c0', '#ffffff'));
+    expect(canvasDefaultColor.value).toBe('#f4efe9');
+  });
+
+  it('בלי `surfaceContainerHigh` — `surfaceContainerHighest`, כמו ב-host/theme.ts', () => {
+    setCanvasDefaultColor({ surface: '#ffffff', surfaceContainerHighest: '#000000' });
+    expect(canvasDefaultColor.value).toBe(bandColor('#000000', '#ffffff'));
+  });
+
+  it('ערכת נושא בלי צבעים תקינים משאירה את ברירת המחדל של tokens.css', () => {
+    setCanvasDefaultColor({ surface: 'var(--x)' });
+    expect(canvasDefaultColor.value).toBe(DEFAULT_CANVAS_COLOR);
+  });
+});
+
+describe('פס הגלילה של הבד', () => {
+  it('המסילה משתמשת בצבע משטח נפרד מצבע הקנבס', () => {
+    expect(source('styles', 'shell.css')).toContain(
+      'scrollbar-color: var(--color-outline) var(--color-surface);',
     );
   });
 
-  it('ברירת המחדל היא „חום בהיר” מהפלטה — המשבצת מסומנת כשאין העדפה', () => {
-    // הגוון הבסיסי של העמודה „חום בהיר” ב-ColorPickerPopover.vue.
-    expect(source('ui', 'ribbon', 'common', 'ColorPickerPopover.vue')).toContain(
-      `{ family: 'חום בהיר', shades: ['${DEFAULT_CANVAS_COLOR}',`,
-    );
+  it('אין כללי `::-webkit-scrollbar` על מיכל הגלילה — `scrollbar-color` מבטל אותם', () => {
+    // נמדד ב-Chrome 154: כלל webkit של 40px נתן 40px, ועם `scrollbar-color`
+    // על אותו אלמנט — 15px, ברירת המחדל. כלל כזה כאן הוא קוד מת שנראה חי,
+    // ו-getComputedStyle על הפסאודו מחזיר אותו גם כשאינו מצויר.
+    expect(source('styles', 'shell.css')).not.toMatch(/\.editor-stack__host[^{]*::-webkit-scrollbar/);
   });
 });

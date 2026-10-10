@@ -19,6 +19,15 @@
       `.shell-top` ב-`<style>`.
     -->
     <div class="shell-top">
+      <!-- רצועת טאבים — העליונה ביותר, מעל הכותרת. אחד ל-`DocumentSession` פתוח. ראו „ריבוי מסמכים” ליד `sessions` בסקריפט. -->
+      <DocumentTabsBar
+        :tabs="documentTabs"
+        :active-id="documentIdView"
+        @select-tab="onDocumentTabSelect"
+        @close-tab="onDocumentTabClose"
+        @new-tab="onDocumentTabNew"
+      />
+
       <!-- פס עליון -->
       <TitleBar
         ref="titleBarRef"
@@ -40,15 +49,6 @@
         @open-ribbon-tab="openRibbonTab"
         @toggle-autosave="toggleAutosave"
         @update-title="onTitleUpdate"
-      />
-
-      <!-- רצועת טאבים — אחד ל-`DocumentSession` פתוח. ראו „ריבוי מסמכים” ליד `sessions` בסקריפט. -->
-      <DocumentTabsBar
-        :tabs="documentTabs"
-        :active-id="documentIdView"
-        @select-tab="onDocumentTabSelect"
-        @close-tab="onDocumentTabClose"
-        @new-tab="onDocumentTabNew"
       />
 
       <!-- רצועת הכלים (Ribbon) -->
@@ -6033,6 +6033,69 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
   flex-shrink: 0;
 }
 
+/* פס הכותרת ועטיפת הרצועה — פס אחד בצבע `--word-shell-band-bg` (tokens.css):
+   גוון של אוצריא, בהיר משורת טאבי המסמכים, וזהה לבד שבלי העדפה.
+
+   שני השמות במפורש, ולא „כל ילד חוץ מהראשון”: זה היה נשען על כך ששורת טאבי
+   המסמכים היא הילד הראשון, וכל שינוי בסדר היה מעביר את הצבע בשקט לפס אחר.
+   `!important` אינו נחוץ — `.shell-top[data-v] > .x` גובר על `.topbar`
+   (shell.css) ועל `.word-ribbon-container` (ribbon.css) בספציפיות. */
+.shell-top > :deep(.word-titlebar),
+.shell-top > :deep(.word-ribbon-container) {
+  background: var(--word-shell-band-bg);
+}
+
+/* רצועת הכלים: מרווח של 6px מקצוות המסך. הטאבים יושבים על רקע הסביבה
+   (העטיפה שקופה ב-ribbon.css), וגוף הרצועה הוא הכרטיס הלבן עם הפינות
+   המעוגלות — כמו ב-Word. `overflow: hidden` על העטיפה הושמט בכוונה: הוא היה
+   חותך תפריטים צפים שנפתחים מתוך הרצועה. */
+.shell-top :deep(.word-ribbon-container) {
+  margin-inline: 6px;
+}
+
+/* ששת הפיקסלים שבין הרצועה לקצה המסך נצבעים בצבע הפס, כדי שהפס יימשך
+   מקצה לקצה. */
+.shell-top :deep(.word-ribbon-container)::before,
+.shell-top :deep(.word-ribbon-container)::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  width: 6px;
+  background: var(--word-shell-band-bg);
+  pointer-events: none;
+}
+
+.shell-top :deep(.word-ribbon-container)::before {
+  inset-inline-start: -6px;
+}
+
+.shell-top :deep(.word-ribbon-container)::after {
+  inset-inline-end: -6px;
+}
+
+/* גוף הרצועה מקבל את צבע המשטח מ-ribbon.css, לצד טקסט on-surface.
+   פינות מעוגלות בעדינות כי הטאבים יושבים מחוצה לו, מעל הסביבה. */
+.shell-top :deep(.word-ribbon-body) {
+  border-radius: 8px;
+}
+
+/* מפריד בין הכותרת לטאבי הרצועה, באותו צבע של קו סרגל השמירה המהירה —
+   במקום הגבול במלוא הרוחב, שהוסר מ-`.topbar` (shell.css). השוליים משאירים
+   20px מכל קצה של הסרגל. */
+.shell-top :deep(.word-titlebar) {
+  position: relative;
+}
+
+.shell-top :deep(.word-titlebar)::after {
+  content: '';
+  position: absolute;
+  inset-inline: 20px;
+  inset-block-end: 0;
+  height: 1px;
+  background: var(--color-outline-variant);
+  pointer-events: none;
+}
+
 /* אזור המסמך: שורה של הסרגל האנכי וה-stack. `min-width: 0` על ה-stack הוא מה
    שמאפשר לו להצטמצם — פריט flex אינו יורד מתחת לרוחב התוכן שלו בלעדיו, ומיכל
    הגלילה של המנוע היה דוחף את הסרגל האנכי אל מחוץ למסך. */
@@ -6058,7 +6121,7 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
 
 /* הרקע הוא `--word-canvas-bg` ולא טוקן ערכת הנושא ישירות: זהו הבד, והוא
    האלמנט היחיד שהמשתמש יכול לצבוע (composables/canvas-color.ts). ברירת
-   המחדל של הטוקן היא אותו צבע ערכת נושא בדיוק — ראו styles/tokens.css. */
+   המחדל של הטוקן היא צבע הפס העליון — ראו styles/tokens.css. */
 .editor-stack {
   position: relative;
   flex: 1 1 auto;
@@ -6067,6 +6130,7 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
   background: var(--word-canvas-bg);
   overflow: hidden;
 }
+
 
 /* שורת הסרגל האופקי */
 .ruler-row {
@@ -6081,6 +6145,10 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
   width: 22px;
   height: 22px;
   background: var(--color-surface-container-highest);
+  background-image: linear-gradient(
+    var(--color-shell-dim),
+    var(--color-shell-dim)
+  );
   border-block-end: 1px solid var(--color-outline-variant);
   border-inline-end: 1px solid var(--color-outline-variant);
 }

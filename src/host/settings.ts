@@ -164,8 +164,8 @@ export async function saveListAutoformatEnabled(enabled: boolean): Promise<void>
 const CANVAS_COLOR_KEY = 'canvas-color';
 
 /**
- * צבע הבד — המשטח שסביב הדף. `null` = אין העדפה, והבד עוקב אחרי ערכת הנושא
- * של אוצריא.
+ * צבע הבד — המשטח שסביב הדף. `null` = אין העדפה, והבד מקבל את ברירת
+ * המחדל שב-composables/canvas-color.ts וב-styles/tokens.css.
  *
  * מוחזר גולמי ולא כצבע: מה שמגיע מ-`storage` הוא JSON שנכתב בהפעלה קודמת,
  * והאימות שלו יושב אצל הקורא (composables/canvas-color.ts) — שם גם מוגדר

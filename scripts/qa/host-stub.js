@@ -24,6 +24,10 @@
     /** מה שהוצג למשתמש דרך המאחז — showError / showMessage / showConfirm. */
     messages: [],
     confirmAnswer: true,
+    /** מדמה אירוע SDK אמיתי, למשל החלפת נושא אחרי העלייה. */
+    emit: function (event, payload) {
+      (listeners[event] || []).slice().forEach(function (handler) { handler(payload); });
+    },
     /** מה שנשלח ל-`ui.exportPdf`, ומה שהמאחז יענה עליו. */
     exportPdfCalls: [],
     exportPdfReply: null,
