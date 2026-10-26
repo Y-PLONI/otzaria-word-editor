@@ -366,7 +366,7 @@ describe('voice-dictation', () => {
     const failing: FetchStream = () =>
       (async function* () {
         await gate;
-        throw new Error('refused');
+        throw new Error('connection refused');
       })();
     const d = createVoiceDictation({
       fetchStream: () => failing,
@@ -424,7 +424,7 @@ describe('voice-dictation', () => {
     const said: string[] = [];
     const d = createVoiceDictation({
       fetchStream: () => () => {
-        throw new Error('refused');
+        throw new Error('connection refused');
       },
       target: () => fakeTarget('x'),
       say: (t) => said.push(t),

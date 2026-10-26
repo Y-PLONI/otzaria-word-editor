@@ -79,12 +79,18 @@ export function otzariaFetchStream(): FetchStream {
 /**
  * כשל מהגשר של אוצריא. הרשאה חסרה או כתובת שנחסמה אינם "השירות לא פועל" —
  * אוצריא מסבירה בעצמה מה לעשות (למשל להפעיל את ההרשאה בהגדרות התוספים),
- * וההודעה שלה היא שמגיעה למשתמש. כל כשל אחר הוא חיבור שלא נענה.
+ * וההודעה שלה היא שמגיעה למשתמש. ה-SDK עשוי להעביר רק message, בלי code:
+ * כשל לא מוכר נשמר כפי שהוא; רק שגיאת חיבור מזוהה מפנה להתקנת השירות.
  */
 function hostFailure(error: unknown): VoiceServiceError {
   const message = String((error as Error)?.message ?? error);
-  const refused = /permission_denied|forbidden/.exec(message);
-  return new VoiceServiceError(refused ? refused[0] : 'unreachable', message);
+  const suppliedCode = (error as { code?: unknown } | null)?.code;
+  const code = typeof suppliedCode === 'string'
+    ? suppliedCode.replace(/^error\./, '')
+    : /^(?:Exception: )?error\.([a-z_]+):/.exec(message)?.[1];
+  if (code) return new VoiceServiceError(code, message);
+  const connectionFailure = /connection (?:refused|reset|closed|aborted)|failed host lookup|socketexception|econnrefused|econnreset|enetunreach|ehostunreach|failed to fetch|networkerror/i.test(message);
+  return new VoiceServiceError(connectionFailure ? 'unreachable' : 'host_error', message);
 }
 
 /**

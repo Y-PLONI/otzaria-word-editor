@@ -4717,7 +4717,7 @@ function toggleFocusMode(): void {
 const dictationState = ref<'idle' | 'starting' | 'listening'>('idle');
 const voiceDictation = createVoiceDictation({
   fetchStream: otzariaFetchStream,
-  target: () => superdocTarget(activeSuperdoc.value),
+  target: () => superdocTarget(activeSuperdoc.value, activeEditorContainer.value),
   say: (text, isError) => setStatus(text, isError ?? false),
   onState: (state) => {
     dictationState.value = state;
