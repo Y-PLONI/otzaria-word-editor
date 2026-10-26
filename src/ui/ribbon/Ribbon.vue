@@ -110,11 +110,13 @@
       <OtzariaTab
         v-else-if="currentTabId === 'otzaria'"
         :book-completion-enabled="bookCompletionEnabled"
+        :dictation-state="dictationState"
         @insert-citation="$emit('insert-citation')"
         @search-otzaria="$emit('search-otzaria')"
         @open-library="$emit('open-library')"
         @export-otzaria="$emit('export-otzaria')"
         @toggle-book-completion="$emit('toggle-book-completion')"
+        @toggle-dictation="$emit('toggle-dictation')"
       />
     </div>
   </div>
@@ -175,6 +177,7 @@ withDefaults(
     isOpening?: boolean;
     isExiting?: boolean;
     bookCompletionEnabled?: boolean;
+    dictationState?: 'idle' | 'starting' | 'listening';
     listAutoformatEnabled?: boolean;
     navigationPaneVisible?: boolean;
   }>(),
@@ -185,6 +188,7 @@ withDefaults(
     isOpening: false,
     isExiting: false,
     bookCompletionEnabled: false,
+    dictationState: 'idle',
     listAutoformatEnabled: true,
     navigationPaneVisible: false,
   },
@@ -240,6 +244,7 @@ defineEmits<{
   (e: 'macro-record'): void;
   (e: 'macro-play'): void;
   (e: 'toggle-book-completion'): void;
+  (e: 'toggle-dictation'): void;
   (e: 'toggle-list-autoformat'): void;
   (e: 'toggle-navigation-pane'): void;
 }>();

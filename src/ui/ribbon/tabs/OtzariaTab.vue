@@ -43,6 +43,15 @@
         @click="$emit('export-otzaria')"
       />
       <RibbonButton
+        icon="mic"
+        :label="dictationLabel"
+        variant="large"
+        :active="dictationState === 'listening'"
+        :tooltip="dictationTooltip"
+        :disabled="!canDictate"
+        @click="$emit('toggle-dictation')"
+      />
+      <RibbonButton
         icon="highlight"
         label="השלמה מהספר"
         variant="large"
@@ -74,11 +83,12 @@ import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
 import { isAvailable } from '../../../host/otzaria-client';
 import { canInsertText } from '../../../host/otzaria-reader';
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     bookCompletionEnabled?: boolean;
+    dictationState?: 'idle' | 'starting' | 'listening';
   }>(),
-  { bookCompletionEnabled: false },
+  { bookCompletionEnabled: false, dictationState: 'idle' },
 );
 
 defineEmits<{
@@ -87,6 +97,7 @@ defineEmits<{
   (e: 'open-library'): void;
   (e: 'export-otzaria'): void;
   (e: 'toggle-book-completion'): void;
+  (e: 'toggle-dictation'): void;
 }>();
 
 const superdoc = inject(ACTIVE_SUPERDOC, shallowRef<SuperDoc | null>(null));
@@ -155,6 +166,26 @@ const searchTooltip = computed(() => {
   if (!sdkAvailable) return OUTSIDE_OTZARIA;
   if (superdoc.value === null) return 'יש לפתוח מסמך ולסמן בו את הטקסט לחיפוש';
   return 'חיפוש הטקסט המסומן במסמך בכל ספריות אוצריא';
+});
+
+/**
+ * הקלטה: הכפתור אחד, והוא מתחיל ועוצר. בזמן ההקלטה הוא לחוץ והתווית מציעה
+ * לעצור; בזמן ההתחלה (בדיקת השירות) הוא מנוטרל כדי שלא יתחילו פעמיים.
+ * מחוץ לאוצריא אין שירות, ולכן הוא מנוטרל כמו שאר הפקדים כאן.
+ */
+const canDictate = computed(
+  () => sdkAvailable && superdoc.value !== null && props.dictationState !== 'starting',
+);
+
+const dictationLabel = computed(() =>
+  props.dictationState === 'listening' ? 'עצור דיבור' : 'הקלטה',
+);
+
+const dictationTooltip = computed(() => {
+  if (!sdkAvailable) return OUTSIDE_OTZARIA;
+  if (superdoc.value === null) return 'יש לפתוח מסמך ולהציב בו את הסמן';
+  if (props.dictationState === 'listening') return 'עצירת ההקלטה אחרי המשפט האחרון';
+  return 'הקלדה בדיבור במיקום הסמן. הזיהוי נעשה במחשב, בלי אינטרנט';
 });
 
 /**

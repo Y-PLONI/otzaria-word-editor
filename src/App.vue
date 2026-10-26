@@ -61,6 +61,7 @@
         :is-opening="isOpening"
         :is-exiting="isExiting"
         :book-completion-enabled="bookCompletionEnabled"
+        :dictation-state="dictationState"
         :list-autoformat-enabled="listAutoformatEnabled"
         :navigation-pane-visible="navigationPaneVisible"
         @new-doc="openOpenDialog('new')"
@@ -86,6 +87,7 @@
         @macro-record="onMacroRecord"
         @macro-play="onMacroPlay"
         @toggle-book-completion="onToggleBookCompletion"
+        @toggle-dictation="() => void voiceDictation.toggle()"
         @toggle-list-autoformat="onToggleListAutoformat"
         @toggle-navigation-pane="onToggleNavigationPane"
       />
@@ -169,6 +171,13 @@
         :enabled="pageMarkingEnabled"
         :changed-pages="pageMarkingChanged"
         :revision="spellcheckRevision"
+      />
+      <!-- כפתור ההקלטה הצף, בפינה התחתונה של אזור המסמך — ראו DictationFab.vue. -->
+      <DictationFab
+        :state="dictationState"
+        :available="canDictateHere"
+        :unavailable-reason="dictationUnavailableReason"
+        @toggle="() => void voiceDictation.toggle()"
       />
     </div>
 
@@ -393,6 +402,7 @@ import LineNumberOverlay from './ui/shell/LineNumberOverlay.vue';
 import PilcrowOverlay from './ui/shell/PilcrowOverlay.vue';
 import SpellingOverlay from './ui/shell/SpellingOverlay.vue';
 import PageMarkingOverlay from './ui/shell/PageMarkingOverlay.vue';
+import DictationFab from './ui/shell/DictationFab.vue';
 import FindReplaceDialog from './ui/panels/FindReplaceDialog.vue';
 import AboutDialog from './ui/panels/AboutDialog.vue';
 import BugReportDialog from './ui/panels/BugReportDialog.vue';
@@ -455,6 +465,8 @@ import {
   type SendToDocumentEvent,
   type ReaderResult,
 } from './host/otzaria-reader';
+import { otzariaFetchStream } from './host/voice-service';
+import { createVoiceDictation, superdocTarget } from './engine/voice-dictation';
 import {
   readReceivedFile,
   takePendingPageOpens,
@@ -4697,6 +4709,35 @@ function toggleFocusMode(): void {
   void (isFocusMode.value ? enterFullscreen() : exitFullscreen());
 }
 
+/**
+ * הקלדה בדיבור (engine/voice-dictation.ts). השירות מקומי ופועל רק מתוך אוצריא:
+ * הכפתור מנוטרל מחוץ לה, והבקשה עוברת ב-SDK שלה.
+ */
+const dictationState = ref<'idle' | 'starting' | 'listening'>('idle');
+const voiceDictation = createVoiceDictation({
+  fetchStream: otzariaFetchStream,
+  target: () => superdocTarget(activeSuperdoc.value),
+  say: (text, isError) => setStatus(text, isError ?? false),
+  onState: (state) => {
+    dictationState.value = state;
+  },
+});
+const canDictateHere = computed(
+  () => isAvailable() && activeSuperdoc.value !== null && isDocumentEditable.value,
+);
+/** למה הכפתור הצף מנוטרל — מסמך לקריאה בלבד אינו מקבל טקסט מוכתב. */
+const dictationUnavailableReason = computed(() =>
+  isAvailable() && activeSuperdoc.value !== null && !isDocumentEditable.value
+    ? 'המסמך פתוח לקריאה בלבד'
+    : 'זמין רק בתוך אוצריא, כשמסמך פתוח',
+);
+// מסמך שנסגר או הוחלף באמצע הקלטה: ההקלטה נעצרת, ולא נכתבת לתוך מסמך אחר.
+watch(documentGeneration, () => voiceDictation.cancel());
+// וכך גם מסמך שננעל לקריאה בלבד באמצע הקלטה: הכתיבה הבאה הייתה נכשלת.
+watch(isDocumentEditable, (editable) => {
+  if (!editable) voiceDictation.cancel();
+});
+
 function onToggleBookCompletion(): void {
   bookCompletionEnabled.value = !bookCompletionEnabled.value;
 }
@@ -6141,6 +6182,7 @@ onUnmounted(() => {
   stopPickerFontsChanged();
   // מי שממתין לתשובה מקבל „ביטול” ואינו נשאר תלוי — ראו use-unsaved-prompt.ts.
   unsavedPrompt.dispose();
+  voiceDictation.cancel();
   bookCompletion?.dispose();
   bookCompletion = null;
   atMention?.dispose();
@@ -6863,6 +6905,13 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
   opacity: 1;
   border-color: var(--color-outline);
   color: var(--color-on-surface);
+}
+
+/* כפתור ההקלטה הצף (DictationFab.vue) יושב באותה פינה, 32 פיקסלים מעל תחתית
+   אזור המסמך. במצב מיקוד שורת המצב יוצאת מהזרימה, והוא היה נוחת בדיוק על
+   כפתור היציאה: 72 = 32 של היציאה, ועוד גובהה ומרווח. */
+.word-app-shell.focus-mode :deep(.dictation-fab) {
+  inset-block-end: 72px;
 }
 
 /* מי שביקש פחות תנועה מקבל את אותה חשיפה בלי ההחלקה — ולא חשיפה שנעלמת. */
