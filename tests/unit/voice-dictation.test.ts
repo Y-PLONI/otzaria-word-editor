@@ -331,9 +331,11 @@ describe('voice-dictation', () => {
       release = resolve;
     });
     const base = fakeTarget('אבג');
+    let entered = false;
     const slowBefore: DictationTarget = {
       ...base,
       textBefore: async (at) => {
+        entered = true;
         await gate;
         return base.textBefore(at);
       },
@@ -345,8 +347,9 @@ describe('voice-dictation', () => {
       onState: () => {},
     });
     const running = d.toggle();
-    for (let i = 0; i < 20 && !calls.includes('GET /status'); i++) await Promise.resolve();
-    await new Promise((r) => setTimeout(r, 0));
+    for (let i = 0; i < 50 && !entered; i++) await new Promise((r) => setTimeout(r, 0));
+    // הביטול נופל בזמן קריאת הטקסט, לא בזמן בדיקת השירות.
+    expect(entered).toBe(true);
     d.cancel();
     release();
     await running;
