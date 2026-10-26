@@ -324,6 +324,99 @@ describe('voice-dictation', () => {
     }
   });
 
+  it('ביטול בזמן קריאת הטקסט שלפני הסמן - המיקרופון אינו נפתח', async () => {
+    const calls: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const base = fakeTarget('אבג');
+    const slowBefore: DictationTarget = {
+      ...base,
+      textBefore: async (at) => {
+        await gate;
+        return base.textBefore(at);
+      },
+    };
+    const d = createVoiceDictation({
+      fetchStream: () => fakeService([{ type: 'ready' }, END], calls),
+      target: () => slowBefore,
+      say: () => {},
+      onState: () => {},
+    });
+    const running = d.toggle();
+    for (let i = 0; i < 20 && !calls.includes('GET /status'); i++) await Promise.resolve();
+    await new Promise((r) => setTimeout(r, 0));
+    d.cancel();
+    release();
+    await running;
+    expect(calls).toEqual(['GET /status']);
+    expect(d.state()).toBe('idle');
+  });
+
+  it('שירות שנכשל אחרי שהמשתמש ביטל - בלי הודעת שגיאה', async () => {
+    const said: string[] = [];
+    let fail!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      fail = resolve;
+    });
+    const failing: FetchStream = () =>
+      (async function* () {
+        await gate;
+        throw new Error('refused');
+      })();
+    const d = createVoiceDictation({
+      fetchStream: () => failing,
+      target: () => fakeTarget('x'),
+      say: (text) => said.push(text),
+      onState: () => {},
+    });
+    const running = d.toggle();
+    await Promise.resolve();
+    d.cancel();
+    fail();
+    await running;
+    expect(said).toEqual([]);
+    expect(d.state()).toBe('idle');
+  });
+
+  it('עצירה שנלחצת בין שתי הקלטות של 100 שניות - ההקלטה השנייה אינה נפתחת', async () => {
+    const calls: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const base = fakeTarget('');
+    let reads = 0;
+    const target: DictationTarget = {
+      ...base,
+      textBefore: async (at) => {
+        reads++;
+        if (reads === 2) await gate; // לפני ההקלטה השנייה
+        return base.textBefore(at);
+      },
+    };
+    const d = createVoiceDictation({
+      fetchStream: () =>
+        fakeService(
+          [{ type: 'ready' }, { type: 'update', segment: 0, text: 'אחת', final: true }, { type: 'end', reason: 'time_limit' }],
+          calls,
+        ),
+      target: () => target,
+      say: () => {},
+      onState: () => {},
+    });
+    const running = d.toggle();
+    for (let i = 0; i < 50 && reads < 2; i++) await new Promise((r) => setTimeout(r, 0));
+    expect(reads).toBe(2);
+    await d.toggle(); // „עצור”, בדיוק במעבר
+    release();
+    await running;
+    expect(calls.filter((c) => c === 'POST /dictate')).toHaveLength(1);
+    expect(d.state()).toBe('idle');
+    expect(base.text()).toBe('אחת');
+  });
+
   it('שירות שלא פועל מוסבר בעברית וחוזר למצב רגיל', async () => {
     const said: string[] = [];
     const d = createVoiceDictation({

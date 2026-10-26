@@ -229,7 +229,8 @@ export function createVoiceDictation(deps: VoiceDictationDeps): VoiceDictation {
         return;
       }
     } catch (error) {
-      deps.say(explainError(error), true);
+      // המשתמש כבר ביטל: שירות שנכשל אחר כך אינו חדשה בשבילו.
+      if (!aborted) deps.say(explainError(error), true);
       setState('idle');
       return;
     }
@@ -266,7 +267,9 @@ export function createVoiceDictation(deps: VoiceDictationDeps): VoiceDictation {
     origin: DictationPoint,
   ): Promise<{ reason: string; detached: boolean }> {
     const before = await target.textBefore(origin);
-    if (aborted) return { reason: 'cancelled', detached: true };
+    // ביטול, או עצירה שנלחצה בדיוק במעבר בין שתי הקלטות של 100 שניות — אז
+    // ה-`stop` הגיע להקלטה שכבר הסתיימה, וההקלטה הזו עוד לא התחילה.
+    if (aborted || stopping) return { reason: 'cancelled', detached: true };
     let lead = before !== '' && !/\s$/.test(before) ? ' ' : '';
     // מקטעים שנסגרו אינם משתנים עוד: רק המקטע הנוכחי מוחלף בכל עדכון, ולכן
     // עלות הכתיבה אינה גדלה עם אורך ההכתבה. `frozen` הוא אורך מה שנסגר בפסקה

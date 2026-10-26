@@ -150,8 +150,13 @@ async function main() {
       if (!clicked) throw new Error('„הגבל עריכה” לא נמצא');
       await sleep(300);
     };
+    // נעילה באמצע הקלטה: ההקלטה נעצרת, והכפתור מנוטרל.
+    await caretInDoc();
+    await clickFab();
+    check('לפני הנעילה: מקליט', await waitFor(async () => (await fab()).cls.includes('--on')));
     await lock();
     await lock(); // לחיצה שנייה מאשרת
+    check('נעילה באמצע הקלטה עוצרת אותה', await waitFor(async () => !(await fab()).cls.includes('--on')));
     check('קריאה בלבד: הכפתור הצף מנוטרל', await waitFor(async () => (await fab()).disabled));
     check('קריאה בלבד: הטולטיפ מסביר', (await fab()).desc === 'המסמך פתוח לקריאה בלבד', (await fab()).desc);
     await js(`[...document.querySelectorAll('[role=tab], button')].find((e) => e.textContent.trim().includes('אוצריא'))?.click()`);
