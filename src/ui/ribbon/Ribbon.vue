@@ -111,6 +111,7 @@
         v-else-if="currentTabId === 'otzaria'"
         :book-completion-enabled="bookCompletionEnabled"
         :dictation-state="dictationState"
+        :dictation-read-only="dictationReadOnly"
         @insert-citation="$emit('insert-citation')"
         @search-otzaria="$emit('search-otzaria')"
         @open-library="$emit('open-library')"
@@ -178,6 +179,7 @@ withDefaults(
     isExiting?: boolean;
     bookCompletionEnabled?: boolean;
     dictationState?: 'idle' | 'starting' | 'listening';
+    dictationReadOnly?: boolean;
     listAutoformatEnabled?: boolean;
     navigationPaneVisible?: boolean;
   }>(),
@@ -189,6 +191,7 @@ withDefaults(
     isExiting: false,
     bookCompletionEnabled: false,
     dictationState: 'idle',
+    dictationReadOnly: false,
     listAutoformatEnabled: true,
     navigationPaneVisible: false,
   },

@@ -62,6 +62,7 @@
         :is-exiting="isExiting"
         :book-completion-enabled="bookCompletionEnabled"
         :dictation-state="dictationState"
+        :dictation-read-only="!isDocumentEditable"
         :list-autoformat-enabled="listAutoformatEnabled"
         :navigation-pane-visible="navigationPaneVisible"
         @new-doc="openOpenDialog('new')"
@@ -4721,6 +4722,7 @@ const voiceDictation = createVoiceDictation({
   onState: (state) => {
     dictationState.value = state;
   },
+  canWrite: () => isDocumentEditable.value,
 });
 const canDictateHere = computed(
   () => isAvailable() && activeSuperdoc.value !== null && isDocumentEditable.value,
@@ -4732,7 +4734,11 @@ const dictationUnavailableReason = computed(() =>
     : 'זמין רק בתוך אוצריא, כשמסמך פתוח',
 );
 // מסמך שנסגר או הוחלף באמצע הקלטה: ההקלטה נעצרת, ולא נכתבת לתוך מסמך אחר.
+// גם `activeSuperdoc`: במעבר בין טאבים `documentGeneration` מקבל את המונה של
+// הטאב השני, ולשני טאבים שנפתחו פעם אחת יש אותו מונה — בלי זה ההקלטה המשיכה
+// לכתוב למסמך שהוסתר.
 watch(documentGeneration, () => voiceDictation.cancel());
+watch(activeSuperdoc, () => voiceDictation.cancel());
 // וכך גם מסמך שננעל לקריאה בלבד באמצע הקלטה: הכתיבה הבאה הייתה נכשלת.
 watch(isDocumentEditable, (editable) => {
   if (!editable) voiceDictation.cancel();

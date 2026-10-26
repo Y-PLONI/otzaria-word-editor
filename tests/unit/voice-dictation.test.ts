@@ -270,6 +270,60 @@ describe('voice-dictation', () => {
     expect(calls).toEqual([]);
   });
 
+  it('מסמך לקריאה בלבד - מסביר ולא פותח את המיקרופון', async () => {
+    const calls: string[] = [];
+    const said: Array<[string, boolean]> = [];
+    const states: string[] = [];
+    const d = createVoiceDictation({
+      fetchStream: () => fakeService([{ type: 'ready' }, END], calls),
+      target: () => fakeTarget('אבג'),
+      say: (text, isError) => said.push([text, isError === true]),
+      onState: (s) => states.push(s),
+      canWrite: () => false,
+    });
+    await d.toggle();
+    expect(said).toEqual([['המסמך פתוח לקריאה בלבד, ולכן אי אפשר להקליט לתוכו', true]]);
+    expect(calls).toEqual([]);
+    expect(states).toEqual([]);
+  });
+
+  it('ביטול בזמן ההתחלה (בדיקת השירות) - המיקרופון אינו נפתח', async () => {
+    for (const how of ['cancel', 'toggle'] as const) {
+      const calls: string[] = [];
+      const states: string[] = [];
+      let answer!: () => void;
+      const statusGate = new Promise<void>((resolve) => {
+        answer = resolve;
+      });
+      const service = fakeService([{ type: 'ready' }, END], calls);
+      const slowStatus: FetchStream = (req) => {
+        if (!req.url.endsWith('/status')) return service(req);
+        calls.push(req.method + ' /status');
+        return (async function* () {
+          await statusGate;
+          yield* respond(200, [JSON.stringify(READY) + '\n']);
+        })();
+      };
+      const t = fakeTarget('אבג');
+      const d = createVoiceDictation({
+        fetchStream: () => slowStatus,
+        target: () => t,
+        say: () => {},
+        onState: (s) => states.push(s),
+      });
+      const running = d.toggle();
+      await Promise.resolve();
+      expect(d.state()).toBe('starting');
+      if (how === 'cancel') d.cancel();
+      else await d.toggle();
+      answer();
+      await running;
+      expect(calls).toEqual(['GET /status']);
+      expect(states).toEqual(['starting', 'idle']);
+      expect(t.text()).toBe('אבג');
+    }
+  });
+
   it('שירות שלא פועל מוסבר בעברית וחוזר למצב רגיל', async () => {
     const said: string[] = [];
     const d = createVoiceDictation({
@@ -281,7 +335,7 @@ describe('voice-dictation', () => {
       onState: () => {},
     });
     await d.toggle();
-    expect(said[0]).toContain('שירות ההקלטה');
+    expect(said[0]).toContain('שירות הדיבור של אוצריא אינו פועל');
     expect(d.state()).toBe('idle');
   });
 

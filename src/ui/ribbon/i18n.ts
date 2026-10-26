@@ -577,6 +577,7 @@ const EN: Readonly<Record<string, string>> = {
   'הקלטה': 'Dictate',
   'זמין רק בתוך אוצריא, כשמסמך פתוח': 'Available only inside Otzaria, with a document open',
   'המסמך פתוח לקריאה בלבד': 'The document is open read-only',
+  'פותח את המיקרופון. לחיצה מבטלת': 'Opening the microphone. Click to cancel',
   'עצור דיבור': 'Stop Dictation',
   'יש לפתוח מסמך ולהציב בו את הסמן': 'Open a document and place the cursor in it',
   'עצירת ההקלטה אחרי המשפט האחרון': 'Stop dictating after the last sentence',

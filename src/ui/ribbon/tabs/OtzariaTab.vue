@@ -87,8 +87,10 @@ const props = withDefaults(
   defineProps<{
     bookCompletionEnabled?: boolean;
     dictationState?: 'idle' | 'starting' | 'listening';
+    /** המסמך לקריאה בלבד — אין לאן לכתוב, ולכן ההקלטה אינה מתחילה. */
+    dictationReadOnly?: boolean;
   }>(),
-  { bookCompletionEnabled: false, dictationState: 'idle' },
+  { bookCompletionEnabled: false, dictationState: 'idle', dictationReadOnly: false },
 );
 
 defineEmits<{
@@ -174,7 +176,11 @@ const searchTooltip = computed(() => {
  * מחוץ לאוצריא אין שירות, ולכן הוא מנוטרל כמו שאר הפקדים כאן.
  */
 const canDictate = computed(
-  () => sdkAvailable && superdoc.value !== null && props.dictationState !== 'starting',
+  () =>
+    sdkAvailable &&
+    superdoc.value !== null &&
+    props.dictationState !== 'starting' &&
+    (!props.dictationReadOnly || props.dictationState === 'listening'),
 );
 
 const dictationLabel = computed(() =>
@@ -185,6 +191,7 @@ const dictationTooltip = computed(() => {
   if (!sdkAvailable) return OUTSIDE_OTZARIA;
   if (superdoc.value === null) return 'יש לפתוח מסמך ולהציב בו את הסמן';
   if (props.dictationState === 'listening') return 'עצירת ההקלטה אחרי המשפט האחרון';
+  if (props.dictationReadOnly) return 'המסמך פתוח לקריאה בלבד';
   return 'הקלדה בדיבור במיקום הסמן. הזיהוי נעשה במחשב, בלי אינטרנט';
 });
 

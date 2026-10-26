@@ -155,13 +155,21 @@ export interface VoiceDictationDeps {
   /** הודעה למשתמש (שורת המצב). */
   say(text: string, isError?: boolean): void;
   onState(state: DictationState): void;
+  /**
+   * `false` כשהמסמך לקריאה בלבד: ה-Document API דוחה בו כתיבה, ופתיחת
+   * המיקרופון הייתה נגמרת ב„הכתיבה למסמך נכשלה”. בלעדיו — תמיד אפשר.
+   */
+  canWrite?: () => boolean;
 }
 
 export interface VoiceDictation {
   state(): DictationState;
-  /** לחיצה על הכפתור: מתחילה, או עוצרת אם כבר מקליטים. */
+  /**
+   * לחיצה על הכפתור: מתחילה; בזמן ההתחלה — מבטלת; בזמן הקלטה — עוצרת אחרי
+   * המשפט האחרון.
+   */
   toggle(): Promise<void>;
-  /** עוצרת מיד (סגירת מסמך, יציאה). */
+  /** עוצרת מיד (סגירת מסמך, מעבר למסמך אחר, יציאה), גם בזמן ההתחלה. */
   cancel(): void;
 }
 
@@ -180,6 +188,9 @@ export function createVoiceDictation(deps: VoiceDictationDeps): VoiceDictation {
   let state: DictationState = 'idle';
   let handle: DictationHandle | null = null;
   let stopping = false;
+  // ביטול שהגיע לפני שההקלטה עצמה התחילה — בזמן בדיקת השירות או קריאת
+  // הטקסט שלפני הסמן, כשעוד אין `handle` לבטל.
+  let aborted = false;
 
   function setState(next: DictationState): void {
     state = next;
@@ -192,16 +203,25 @@ export function createVoiceDictation(deps: VoiceDictationDeps): VoiceDictation {
       deps.say('פתחו מסמך והציבו בו את הסמן לפני ההקלטה', true);
       return;
     }
+    if (deps.canWrite && !deps.canWrite()) {
+      deps.say('המסמך פתוח לקריאה בלבד, ולכן אי אפשר להקליט לתוכו', true);
+      return;
+    }
     const start0 = target.caret();
     if (start0 === null) {
       deps.say('יש טקסט מסומן, או שאין סמן. לחצו במסמך כדי להציב סמן, ואז התחילו להקליט', true);
       return;
     }
+    aborted = false;
     setState('starting');
     let fetchStream: FetchStream;
     try {
       fetchStream = deps.fetchStream();
       const status = await voiceStatus(fetchStream);
+      if (aborted) {
+        setState('idle');
+        return;
+      }
       const problem = explainNotReady(status);
       if (problem) {
         deps.say(problem, true);
@@ -246,6 +266,7 @@ export function createVoiceDictation(deps: VoiceDictationDeps): VoiceDictation {
     origin: DictationPoint,
   ): Promise<{ reason: string; detached: boolean }> {
     const before = await target.textBefore(origin);
+    if (aborted) return { reason: 'cancelled', detached: true };
     let lead = before !== '' && !/\s$/.test(before) ? ' ' : '';
     // מקטעים שנסגרו אינם משתנים עוד: רק המקטע הנוכחי מוחלף בכל עדכון, ולכן
     // עלות הכתיבה אינה גדלה עם אורך ההכתבה. `frozen` הוא אורך מה שנסגר בפסקה
@@ -361,12 +382,17 @@ export function createVoiceDictation(deps: VoiceDictationDeps): VoiceDictation {
     async toggle() {
       if (state === 'idle') {
         await start();
+      } else if (state === 'starting') {
+        // המיקרופון עוד לא נפתח: אין מה לסיים, רק לבטל.
+        aborted = true;
+        handle?.cancel();
       } else if (handle) {
         stopping = true;
         await handle.stop();
       }
     },
     cancel() {
+      aborted = true;
       handle?.cancel();
     },
   };

@@ -17,7 +17,7 @@
     :aria-label="title"
     :aria-pressed="state === 'listening'"
     :aria-busy="state === 'starting'"
-    :disabled="(!available && state !== 'listening') || state === 'starting'"
+    :disabled="!available && state === 'idle'"
     @pointerdown.prevent
     @click="$emit('toggle')"
   >
@@ -38,7 +38,7 @@ const props = withDefaults(
     state?: 'idle' | 'starting' | 'listening';
     /**
      * בתוך אוצריא, ויש מסמך פתוח לעריכה. מחוץ לאוצריא אין שירות דיבור.
-     * הקלטה שכבר רצה נשארת ניתנת לעצירה גם כשזה `false`.
+     * הקלטה שכבר רצה, או שמתחילה, נשארת ניתנת לעצירה גם כשזה `false`.
      */
     available?: boolean;
     /** הטולטיפ כשהכפתור מנוטרל. */
@@ -49,12 +49,11 @@ const props = withDefaults(
 
 defineEmits<{ (e: 'toggle'): void }>();
 
-const title = computed(() =>
-  menuString(props.state === 'listening' ? 'עצור דיבור' : 'הקלטה'),
-);
+const title = computed(() => menuString(props.state === 'idle' ? 'הקלטה' : 'עצור דיבור'));
 
 const description = computed(() => {
   if (props.state === 'listening') return menuString('עצירת ההקלטה אחרי המשפט האחרון');
+  if (props.state === 'starting') return menuString('פותח את המיקרופון. לחיצה מבטלת');
   if (!props.available) return menuString(props.unavailableReason);
   return menuString('הקלדה בדיבור במיקום הסמן. הזיהוי נעשה במחשב, בלי אינטרנט');
 });
@@ -135,13 +134,13 @@ const description = computed(() => {
   }
 }
 
-/* בודק את השירות ופותח את המיקרופון: עדיין בצבע הנושא, ולא לוחצים שוב. */
-.dictation-fab--starting:disabled {
+/* בודק את השירות ופותח את המיקרופון: עדיין בצבע הנושא, עמום מעט. לחיצה
+   בשלב הזה מבטלת — כך הקלטה שלא מתחילה אינה נתקעת עד שהשירות יענה. */
+.dictation-fab--starting {
   opacity: 0.75;
-  cursor: progress;
 }
 
-.dictation-fab:disabled:not(.dictation-fab--starting) {
+.dictation-fab:disabled {
   opacity: 0.4;
   cursor: default;
   box-shadow: none;
