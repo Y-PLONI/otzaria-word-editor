@@ -1,5 +1,23 @@
 <template>
   <div class="ribbon-tab-pane otzaria-tab">
+    <!-- הקלדה בדיבור: קבוצה משלה, הראשונה ולכן בקצה הימני. היא אינה פעולה
+         מול הקורא כמו שאר הכפתורים כאן, אלא מול שירות מקומי נפרד. -->
+    <RibbonGroup
+      title="דיבור"
+      icon="mic"
+    >
+      <RibbonButton
+        class="ribbon-dictation"
+        icon="mic"
+        :label="dictationLabel"
+        variant="large"
+        :active="dictationState === 'listening'"
+        :aria-busy="dictationState === 'starting' ? 'true' : 'false'"
+        :tooltip="dictationTooltip"
+        :disabled="!canDictate"
+        @click="$emit('toggle-dictation')"
+      />
+    </RibbonGroup>
     <!-- שילוב עם אוצריא -->
     <RibbonGroup
       title="אוצריא"
@@ -41,15 +59,6 @@
         :tooltip="exportBookTooltip"
         :disabled="!hasDocument"
         @click="$emit('export-otzaria')"
-      />
-      <RibbonButton
-        icon="mic"
-        :label="dictationLabel"
-        variant="large"
-        :active="dictationState === 'listening'"
-        :tooltip="dictationTooltip"
-        :disabled="!canDictate"
-        @click="$emit('toggle-dictation')"
       />
       <RibbonButton
         icon="highlight"

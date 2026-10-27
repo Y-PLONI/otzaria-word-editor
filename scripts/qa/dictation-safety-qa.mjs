@@ -19,12 +19,15 @@ async function until(predicate) {
   } while (Date.now() < deadline);
   throw new Error('Timed out waiting for dictation');
 }
-const idle = () => json(`document.querySelector('.dictation-fab').getAttribute('aria-busy') === 'false' &&
-  document.querySelector('.dictation-fab').getAttribute('aria-pressed') === 'false'`);
+// הכפתור יושב בלשונית „אוצריא”, והרצועה בונה לשונית רק כשהיא פעילה.
+await app.js(`[...document.querySelectorAll('[role=tab], button')].find((e) => e.textContent.trim().includes('אוצריא'))?.click()`);
+await sleep(500);
+const idle = () => json(`document.querySelector('.ribbon-dictation').getAttribute('aria-busy') === 'false' &&
+  document.querySelector('.ribbon-dictation').getAttribute('aria-pressed') === 'false'`);
 async function start() {
   assert.equal(await idle(), true, 'previous recording must be finished');
-  assert.equal(await app.clickSel('.dictation-fab', 0, { after: 0 }), true);
-  await until(() => json(`document.querySelector('.dictation-fab').getAttribute('aria-pressed') === 'true'`));
+  assert.equal(await app.clickSel('.ribbon-dictation', 0, { after: 0 }), true);
+  await until(() => json(`document.querySelector('.ribbon-dictation').getAttribute('aria-pressed') === 'true'`));
 }
 const send = (event) => app.js(`window.__dictationSafety.send(${JSON.stringify(event)})`);
 const text = async () => {
@@ -127,7 +130,7 @@ try {
 
   const message = 'לתוסף אין הרשאת גישה לשירותים מקומיים (network.localhost). ניתן להפעיל את ההרשאה בהגדרות.';
   await app.js(`window.__dictationSafety.failure = ${JSON.stringify(message)}`);
-  await app.clickSel('.dictation-fab', 0, { after: 0 });
+  await app.clickSel('.ribbon-dictation', 0, { after: 0 });
   await until(async () => (await app.status()).text === message);
   check('שגיאת הרשאה נשמרת ללא הפניה להתקנת שירות', (await app.status()).text === message);
   check('שגיאת הרשאה מחזירה את הכפתור להמתנה', await idle());

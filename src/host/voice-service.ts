@@ -13,6 +13,9 @@ import type { NetworkFetchStreamChunk } from '../types/otzaria_plugin';
 
 export const VOICE_SERVICE_URL = 'http://127.0.0.1:47811';
 
+/** דף ההורדה של השירות: בוחרים בו את המתקין למערכת שלכם. */
+export const VOICE_SERVICE_DOWNLOAD_URL = 'https://github.com/yakov100/otzaria-voice/releases/latest';
+
 const HEADERS = { 'X-Otzaria-Voice': '1', 'Content-Type': 'application/json' };
 
 /** הדיבור מסתיים מעצמו אחרי משפט שנגמר ושקט קצר, או כשלא נאמר דבר. */

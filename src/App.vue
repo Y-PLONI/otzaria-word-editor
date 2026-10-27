@@ -173,13 +173,6 @@
         :changed-pages="pageMarkingChanged"
         :revision="spellcheckRevision"
       />
-      <!-- כפתור ההקלטה הצף, בפינה התחתונה של אזור המסמך — ראו DictationFab.vue. -->
-      <DictationFab
-        :state="dictationState"
-        :available="canDictateHere"
-        :unavailable-reason="dictationUnavailableReason"
-        @toggle="() => void voiceDictation.toggle()"
-      />
     </div>
 
     <!--
@@ -357,6 +350,13 @@
       @choose="unsavedPrompt.answer"
     />
 
+    <!-- „הקלטה” לא מצאה את שירות הדיבור — קישור להורדה. -->
+    <VoiceServiceDialog
+      :open="isVoiceServiceDialogOpen"
+      @download="onDownloadVoiceService"
+      @close="isVoiceServiceDialogOpen = false"
+    />
+
     <MacrosDialog
       :is-open="isMacrosOpen"
       :handle="activeMacros"
@@ -403,7 +403,6 @@ import LineNumberOverlay from './ui/shell/LineNumberOverlay.vue';
 import PilcrowOverlay from './ui/shell/PilcrowOverlay.vue';
 import SpellingOverlay from './ui/shell/SpellingOverlay.vue';
 import PageMarkingOverlay from './ui/shell/PageMarkingOverlay.vue';
-import DictationFab from './ui/shell/DictationFab.vue';
 import FindReplaceDialog from './ui/panels/FindReplaceDialog.vue';
 import AboutDialog from './ui/panels/AboutDialog.vue';
 import BugReportDialog from './ui/panels/BugReportDialog.vue';
@@ -412,6 +411,7 @@ import ShortcutsDialog from './ui/panels/ShortcutsDialog.vue';
 import ShortcutManagerDialog from './ui/panels/ShortcutManagerDialog.vue';
 import OpenDocumentDialog from './ui/panels/OpenDocumentDialog.vue';
 import UnsavedChangesDialog from './ui/panels/UnsavedChangesDialog.vue';
+import VoiceServiceDialog from './ui/panels/VoiceServiceDialog.vue';
 import DiscardedDocumentsDialog from './ui/panels/DiscardedDocumentsDialog.vue';
 import TooltipLayer from './ui/tooltip/TooltipLayer.vue';
 import { DOCUMENT_TEMPLATES, applyTemplate, type TemplateId } from './engine/templates';
@@ -466,7 +466,8 @@ import {
   type SendToDocumentEvent,
   type ReaderResult,
 } from './host/otzaria-reader';
-import { otzariaFetchStream } from './host/voice-service';
+import { otzariaFetchStream, VOICE_SERVICE_DOWNLOAD_URL } from './host/voice-service';
+import { openInBrowser } from './host/bug-report';
 import { createVoiceDictation, superdocTarget } from './engine/voice-dictation';
 import {
   readReceivedFile,
@@ -4715,6 +4716,7 @@ function toggleFocusMode(): void {
  * הכפתור מנוטרל מחוץ לה, והבקשה עוברת ב-SDK שלה.
  */
 const dictationState = ref<'idle' | 'starting' | 'listening'>('idle');
+const isVoiceServiceDialogOpen = ref(false);
 const voiceDictation = createVoiceDictation({
   fetchStream: otzariaFetchStream,
   target: () => superdocTarget(activeSuperdoc.value, activeEditorContainer.value),
@@ -4723,16 +4725,20 @@ const voiceDictation = createVoiceDictation({
     dictationState.value = state;
   },
   canWrite: () => isDocumentEditable.value,
+  onServiceMissing: () => {
+    isVoiceServiceDialogOpen.value = true;
+  },
 });
-const canDictateHere = computed(
-  () => isAvailable() && activeSuperdoc.value !== null && isDocumentEditable.value,
-);
-/** למה הכפתור הצף מנוטרל — מסמך לקריאה בלבד אינו מקבל טקסט מוכתב. */
-const dictationUnavailableReason = computed(() =>
-  isAvailable() && activeSuperdoc.value !== null && !isDocumentEditable.value
-    ? 'המסמך פתוח לקריאה בלבד'
-    : 'זמין רק בתוך אוצריא, כשמסמך פתוח',
-);
+
+/** „להורדה” בחלון: דף הגרסאות בדפדפן. כשאוצריא מסרבת — הכתובת בשורת המצב. */
+async function onDownloadVoiceService(): Promise<void> {
+  isVoiceServiceDialogOpen.value = false;
+  try {
+    await openInBrowser(VOICE_SERVICE_DOWNLOAD_URL);
+  } catch {
+    setStatus(`אפשר להוריד את שירות הדיבור מ-${VOICE_SERVICE_DOWNLOAD_URL}`, true);
+  }
+}
 // מסמך שנסגר או הוחלף באמצע הקלטה: ההקלטה נעצרת, ולא נכתבת לתוך מסמך אחר.
 // גם `activeSuperdoc`: במעבר בין טאבים `documentGeneration` מקבל את המונה של
 // הטאב השני, ולשני טאבים שנפתחו פעם אחת יש אותו מונה — בלי זה ההקלטה המשיכה
@@ -6913,12 +6919,6 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
   color: var(--color-on-surface);
 }
 
-/* כפתור ההקלטה הצף (DictationFab.vue) יושב באותה פינה, 32 פיקסלים מעל תחתית
-   אזור המסמך. במצב מיקוד שורת המצב יוצאת מהזרימה, והוא היה נוחת בדיוק על
-   כפתור היציאה: 72 = 32 של היציאה, ועוד גובהה ומרווח. */
-.word-app-shell.focus-mode :deep(.dictation-fab) {
-  inset-block-end: 72px;
-}
 
 /* מי שביקש פחות תנועה מקבל את אותה חשיפה בלי ההחלקה — ולא חשיפה שנעלמת. */
 @media (prefers-reduced-motion: reduce) {

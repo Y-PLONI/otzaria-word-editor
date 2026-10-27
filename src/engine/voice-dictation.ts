@@ -14,6 +14,7 @@ import {
   explainNotReady,
   startDictation,
   voiceStatus,
+  VoiceServiceError,
   type DictationHandle,
   type FetchStream,
 } from '../host/voice-service';
@@ -205,6 +206,11 @@ export interface VoiceDictationDeps {
    * המיקרופון הייתה נגמרת ב„הכתיבה למסמך נכשלה”. בלעדיו — תמיד אפשר.
    */
   canWrite?: () => boolean;
+  /**
+   * השירות לא ענה בבדיקה שלפני ההקלטה, כלומר כנראה אינו מותקן. כשהוא קיים,
+   * הוא מקבל את המקרה במקום הודעת שורת המצב (במעטפת: חלון עם קישור להורדה).
+   */
+  onServiceMissing?: () => void;
 }
 
 export interface VoiceDictation {
@@ -290,7 +296,11 @@ export function createVoiceDictation(deps: VoiceDictationDeps): VoiceDictation {
       }
     } catch (error) {
       // המשתמש כבר ביטל: שירות שנכשל אחר כך אינו חדשה בשבילו.
-      if (!aborted) deps.say(explainError(error), true);
+      if (!aborted) {
+        const missing = error instanceof VoiceServiceError && error.code === 'unreachable';
+        if (missing && deps.onServiceMissing) deps.onServiceMissing();
+        else deps.say(explainError(error), true);
+      }
       setState('idle');
       return;
     }
