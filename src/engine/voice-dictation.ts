@@ -172,7 +172,10 @@ export function superdocTarget(host: SuperDoc | null, container?: HTMLElement | 
       const split = doc.blocks?.split;
       if (typeof split !== 'function') return null;
       const result = await split.call(doc.blocks, {
-        target: { kind: 'block', nodeType: 'paragraph', nodeId: at.blockId },
+        target: {
+          kind: 'block', nodeType: 'paragraph', nodeId: at.blockId,
+          ...(at.story ? { story: at.story } : {}),
+        },
         offset,
       });
       if (guard && !guard.isActive()) return null;
@@ -472,7 +475,7 @@ export function createVoiceDictation(deps: VoiceDictationDeps): VoiceDictation {
       if (state === 'idle') {
         await start();
       } else if (state === 'starting') {
-        // המיקרופון עוד לא נפתח: אין מה לסיים, רק לבטל.
+        // גם כשהמיקרופון נפתח והמודל עדיין נטען, מבטלים בלי להמתין לטקסט.
         cancel();
       } else if (handle) {
         stopping = true;

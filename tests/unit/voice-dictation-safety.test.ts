@@ -170,6 +170,26 @@ describe('dictation preserves user edits and cancelled sessions', () => {
 });
 
 describe('SuperDoc dictation target', () => {
+  it.each([
+    { kind: 'story', storyType: 'footnote', noteId: '1' },
+    { kind: 'story', storyType: 'endnote', noteId: '1' },
+    { kind: 'story', storyType: 'headerFooterPart', refId: 'rId1' },
+  ])('keeps paragraph splits and the new caret in $storyType', async (story) => {
+    const { sd, doc, selection } = superdocMock();
+    const point = { ...at, story };
+    const next = await superdocTarget(sd as never)!.breakLine(point, 7);
+    expect(doc.blocks.split).toHaveBeenCalledWith({
+      target: { kind: 'block', nodeType: 'paragraph', nodeId: 'b', story },
+      offset: 7,
+    });
+    expect(next).toEqual({ blockId: 'next', offset: 0, story });
+    expect(selection.apply).toHaveBeenCalledWith(expect.objectContaining({
+      story,
+      start: expect.objectContaining({ blockId: 'next', offset: 0, story }),
+      end: expect.objectContaining({ blockId: 'next', offset: 0, story }),
+    }));
+  });
+
   it('requires the previous draft text in the atomic replace request', async () => {
     const { sd, doc } = superdocMock();
     const target = superdocTarget(sd as never)!;

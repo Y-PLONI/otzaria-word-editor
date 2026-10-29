@@ -443,6 +443,33 @@ describe('„אוצריא”', () => {
     expect(permanentlyDisabled).toEqual([]);
   });
 
+  it.each([false, true])('אפשר לבטל אתחול הכתבה מהכפתור גם כשהמסמך ננעל: %s', async (dictationReadOnly) => {
+    const { wrapper } = mountUi(OtzariaTab, {
+      superdoc: withSelection(),
+      props: { dictationState: 'starting', dictationReadOnly },
+    });
+    await settle();
+    const button = wrapper.get('.ribbon-dictation');
+    expect(button.attributes('disabled')).toBeUndefined();
+    expect(button.attributes('aria-busy')).toBe('true');
+    expect(button.text()).toBe('בטל הקלטה');
+    expect(tipMessage(button)).toContain('ביטול התחלת ההקלטה');
+    await button.trigger('click');
+    expect(wrapper.emitted('toggle-dictation')).toHaveLength(1);
+  });
+
+  it('מסמך לקריאה בלבד עדיין אינו מאפשר להתחיל הכתבה', async () => {
+    const { wrapper } = mountUi(OtzariaTab, {
+      superdoc: withSelection(),
+      props: { dictationState: 'idle', dictationReadOnly: true },
+    });
+    await settle();
+    const button = wrapper.get('.ribbon-dictation');
+    expect(button.attributes('disabled')).toBeDefined();
+    await button.trigger('click');
+    expect(wrapper.emitted('toggle-dictation')).toBeUndefined();
+  });
+
   it('מחוץ לאוצריא: פקדי ה-SDK מנוטרלים, והייצוא — שאינו תלוי בו — נשאר חי', async () => {
     Reflect.deleteProperty(window, 'Otzaria');
     const harness = mountUi(OtzariaTab, { superdoc: withSelection() });

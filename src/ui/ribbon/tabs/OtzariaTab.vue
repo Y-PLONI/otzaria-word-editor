@@ -181,24 +181,25 @@ const searchTooltip = computed(() => {
 
 /**
  * הקלטה: הכפתור אחד, והוא מתחיל ועוצר. בזמן ההקלטה הוא לחוץ והתווית מציעה
- * לעצור; בזמן ההתחלה (בדיקת השירות) הוא מנוטרל כדי שלא יתחילו פעמיים.
+ * לעצור; בזמן ההתחלה הוא נשאר פעיל כדי לאפשר ביטול, גם לפני `ready`.
  * מחוץ לאוצריא אין שירות, ולכן הוא מנוטרל כמו שאר הפקדים כאן.
  */
 const canDictate = computed(
   () =>
     sdkAvailable &&
     superdoc.value !== null &&
-    props.dictationState !== 'starting' &&
-    (!props.dictationReadOnly || props.dictationState === 'listening'),
+    (!props.dictationReadOnly || props.dictationState !== 'idle'),
 );
 
 const dictationLabel = computed(() =>
-  props.dictationState === 'listening' ? 'עצור דיבור' : 'הקלטה',
+  props.dictationState === 'starting' ? 'בטל הקלטה' :
+    props.dictationState === 'listening' ? 'עצור דיבור' : 'הקלטה',
 );
 
 const dictationTooltip = computed(() => {
   if (!sdkAvailable) return OUTSIDE_OTZARIA;
   if (superdoc.value === null) return 'יש לפתוח מסמך ולהציב בו את הסמן';
+  if (props.dictationState === 'starting') return 'ביטול התחלת ההקלטה';
   if (props.dictationState === 'listening') return 'עצירת ההקלטה אחרי המשפט האחרון';
   if (props.dictationReadOnly) return 'המסמך פתוח לקריאה בלבד';
   return 'הקלדה בדיבור במיקום הסמן. הזיהוי נעשה במחשב, בלי אינטרנט';

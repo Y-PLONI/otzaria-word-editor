@@ -582,6 +582,8 @@ const EN: Readonly<Record<string, string>> = {
     'Voice typing needs the Otzaria voice service, a separate program installed once. Recognition runs on this computer, offline.',
   'המסמך פתוח לקריאה בלבד': 'The document is open read-only',
   'עצור דיבור': 'Stop Dictation',
+  'בטל הקלטה': 'Cancel Dictation',
+  'ביטול התחלת ההקלטה': 'Cancel starting dictation',
   'יש לפתוח מסמך ולהציב בו את הסמן': 'Open a document and place the cursor in it',
   'עצירת ההקלטה אחרי המשפט האחרון': 'Stop dictating after the last sentence',
   'הקלדה בדיבור במיקום הסמן. הזיהוי נעשה במחשב, בלי אינטרנט':
