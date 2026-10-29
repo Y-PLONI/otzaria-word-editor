@@ -23,8 +23,15 @@
     "library.refresh",
     "library.books.read",
     "library.content.read",
-    "app.open_url"
+    "app.open_url",
+    "network.localhost"
   ],
+  "network": {
+    "enabled": true,
+    "allowlist": [
+      "http://127.0.0.1:47811"
+    ]
+  },
   "contributes": {
     "startup": {
       "contextMenuItems": [

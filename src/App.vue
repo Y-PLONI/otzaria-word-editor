@@ -61,6 +61,8 @@
         :is-opening="isOpening"
         :is-exiting="isExiting"
         :book-completion-enabled="bookCompletionEnabled"
+        :dictation-state="dictationState"
+        :dictation-read-only="!isDocumentEditable"
         :list-autoformat-enabled="listAutoformatEnabled"
         :navigation-pane-visible="navigationPaneVisible"
         @new-doc="openOpenDialog('new')"
@@ -86,6 +88,7 @@
         @macro-record="onMacroRecord"
         @macro-play="onMacroPlay"
         @toggle-book-completion="onToggleBookCompletion"
+        @toggle-dictation="() => void voiceDictation.toggle()"
         @toggle-list-autoformat="onToggleListAutoformat"
         @toggle-navigation-pane="onToggleNavigationPane"
       />
@@ -347,6 +350,13 @@
       @choose="unsavedPrompt.answer"
     />
 
+    <!-- „הקלטה” לא מצאה את שירות הדיבור — קישור להורדה. -->
+    <VoiceServiceDialog
+      :open="isVoiceServiceDialogOpen"
+      @download="onDownloadVoiceService"
+      @close="isVoiceServiceDialogOpen = false"
+    />
+
     <MacrosDialog
       :is-open="isMacrosOpen"
       :handle="activeMacros"
@@ -401,6 +411,7 @@ import ShortcutsDialog from './ui/panels/ShortcutsDialog.vue';
 import ShortcutManagerDialog from './ui/panels/ShortcutManagerDialog.vue';
 import OpenDocumentDialog from './ui/panels/OpenDocumentDialog.vue';
 import UnsavedChangesDialog from './ui/panels/UnsavedChangesDialog.vue';
+import VoiceServiceDialog from './ui/panels/VoiceServiceDialog.vue';
 import DiscardedDocumentsDialog from './ui/panels/DiscardedDocumentsDialog.vue';
 import TooltipLayer from './ui/tooltip/TooltipLayer.vue';
 import { DOCUMENT_TEMPLATES, applyTemplate, type TemplateId } from './engine/templates';
@@ -455,6 +466,9 @@ import {
   type SendToDocumentEvent,
   type ReaderResult,
 } from './host/otzaria-reader';
+import { otzariaFetchStream, VOICE_SERVICE_DOWNLOAD_URL } from './host/voice-service';
+import { openInBrowser } from './host/bug-report';
+import { createVoiceDictation, superdocTarget } from './engine/voice-dictation';
 import {
   readReceivedFile,
   takePendingPageOpens,
@@ -4697,6 +4711,45 @@ function toggleFocusMode(): void {
   void (isFocusMode.value ? enterFullscreen() : exitFullscreen());
 }
 
+/**
+ * הקלדה בדיבור (engine/voice-dictation.ts). השירות מקומי ופועל רק מתוך אוצריא:
+ * הכפתור מנוטרל מחוץ לה, והבקשה עוברת ב-SDK שלה.
+ */
+const dictationState = ref<'idle' | 'starting' | 'listening'>('idle');
+const isVoiceServiceDialogOpen = ref(false);
+const voiceDictation = createVoiceDictation({
+  fetchStream: otzariaFetchStream,
+  target: () => superdocTarget(activeSuperdoc.value, activeEditorContainer.value),
+  say: (text, isError) => setStatus(text, isError ?? false),
+  onState: (state) => {
+    dictationState.value = state;
+  },
+  canWrite: () => isDocumentEditable.value,
+  onServiceMissing: () => {
+    isVoiceServiceDialogOpen.value = true;
+  },
+});
+
+/** „להורדה” בחלון: דף הגרסאות בדפדפן. כשאוצריא מסרבת — הכתובת בשורת המצב. */
+async function onDownloadVoiceService(): Promise<void> {
+  isVoiceServiceDialogOpen.value = false;
+  try {
+    await openInBrowser(VOICE_SERVICE_DOWNLOAD_URL);
+  } catch {
+    setStatus(`אפשר להוריד את שירות הדיבור מ-${VOICE_SERVICE_DOWNLOAD_URL}`, true);
+  }
+}
+// מסמך שנסגר או הוחלף באמצע הקלטה: ההקלטה נעצרת, ולא נכתבת לתוך מסמך אחר.
+// גם `activeSuperdoc`: במעבר בין טאבים `documentGeneration` מקבל את המונה של
+// הטאב השני, ולשני טאבים שנפתחו פעם אחת יש אותו מונה — בלי זה ההקלטה המשיכה
+// לכתוב למסמך שהוסתר.
+watch(documentGeneration, () => voiceDictation.cancel());
+watch(activeSuperdoc, () => voiceDictation.cancel());
+// וכך גם מסמך שננעל לקריאה בלבד באמצע הקלטה: הכתיבה הבאה הייתה נכשלת.
+watch(isDocumentEditable, (editable) => {
+  if (!editable) voiceDictation.cancel();
+});
+
 function onToggleBookCompletion(): void {
   bookCompletionEnabled.value = !bookCompletionEnabled.value;
 }
@@ -6141,6 +6194,7 @@ onUnmounted(() => {
   stopPickerFontsChanged();
   // מי שממתין לתשובה מקבל „ביטול” ואינו נשאר תלוי — ראו use-unsaved-prompt.ts.
   unsavedPrompt.dispose();
+  voiceDictation.cancel();
   bookCompletion?.dispose();
   bookCompletion = null;
   atMention?.dispose();
@@ -6864,6 +6918,7 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
   border-color: var(--color-outline);
   color: var(--color-on-surface);
 }
+
 
 /* מי שביקש פחות תנועה מקבל את אותה חשיפה בלי ההחלקה — ולא חשיפה שנעלמת. */
 @media (prefers-reduced-motion: reduce) {

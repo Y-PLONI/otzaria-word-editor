@@ -574,6 +574,20 @@ const EN: Readonly<Record<string, string>> = {
   'יש לפתוח מסמך ולסמן בו את הטקסט לחיפוש':
     'Open a document and select the text to search',
   'השלמה מהספר': 'Complete from Book',
+  'הקלטה': 'Dictate',
+  'דיבור': 'Voice',
+  'להורדה': 'Download',
+  'ביטול': 'Cancel',
+  'להקלדה בדיבור צריך את „שירות הדיבור של אוצריא”, תוכנה נפרדת שמתקינים פעם אחת. הזיהוי נעשה במחשב, בלי אינטרנט.':
+    'Voice typing needs the Otzaria voice service, a separate program installed once. Recognition runs on this computer, offline.',
+  'המסמך פתוח לקריאה בלבד': 'The document is open read-only',
+  'עצור דיבור': 'Stop Dictation',
+  'בטל הקלטה': 'Cancel Dictation',
+  'ביטול התחלת ההקלטה': 'Cancel starting dictation',
+  'יש לפתוח מסמך ולהציב בו את הסמן': 'Open a document and place the cursor in it',
+  'עצירת ההקלטה אחרי המשפט האחרון': 'Stop dictating after the last sentence',
+  'הקלדה בדיבור במיקום הסמן. הזיהוי נעשה במחשב, בלי אינטרנט':
+    'Type by voice at the cursor. Recognition runs on this computer, offline',
   'בזמן הקלדה, אם הטקסט תואם את הספר הפתוח בקורא — Tab משלים 5 מילים מהמקור':
     'While typing, if the text matches the book open in the reader — Tab completes five words from the source',
   'יש לפתוח מסמך תחילה': 'Open a document first',

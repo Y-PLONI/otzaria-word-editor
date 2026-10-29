@@ -1,5 +1,23 @@
 <template>
   <div class="ribbon-tab-pane otzaria-tab">
+    <!-- הקלדה בדיבור: קבוצה משלה, הראשונה ולכן בקצה הימני. היא אינה פעולה
+         מול הקורא כמו שאר הכפתורים כאן, אלא מול שירות מקומי נפרד. -->
+    <RibbonGroup
+      title="דיבור"
+      icon="mic"
+    >
+      <RibbonButton
+        class="ribbon-dictation"
+        icon="mic"
+        :label="dictationLabel"
+        variant="large"
+        :active="dictationState === 'listening'"
+        :aria-busy="dictationState === 'starting' ? 'true' : 'false'"
+        :tooltip="dictationTooltip"
+        :disabled="!canDictate"
+        @click="$emit('toggle-dictation')"
+      />
+    </RibbonGroup>
     <!-- שילוב עם אוצריא -->
     <RibbonGroup
       title="אוצריא"
@@ -74,11 +92,14 @@ import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
 import { isAvailable } from '../../../host/otzaria-client';
 import { canInsertText } from '../../../host/otzaria-reader';
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     bookCompletionEnabled?: boolean;
+    dictationState?: 'idle' | 'starting' | 'listening';
+    /** המסמך לקריאה בלבד — אין לאן לכתוב, ולכן ההקלטה אינה מתחילה. */
+    dictationReadOnly?: boolean;
   }>(),
-  { bookCompletionEnabled: false },
+  { bookCompletionEnabled: false, dictationState: 'idle', dictationReadOnly: false },
 );
 
 defineEmits<{
@@ -87,6 +108,7 @@ defineEmits<{
   (e: 'open-library'): void;
   (e: 'export-otzaria'): void;
   (e: 'toggle-book-completion'): void;
+  (e: 'toggle-dictation'): void;
 }>();
 
 const superdoc = inject(ACTIVE_SUPERDOC, shallowRef<SuperDoc | null>(null));
@@ -155,6 +177,32 @@ const searchTooltip = computed(() => {
   if (!sdkAvailable) return OUTSIDE_OTZARIA;
   if (superdoc.value === null) return 'יש לפתוח מסמך ולסמן בו את הטקסט לחיפוש';
   return 'חיפוש הטקסט המסומן במסמך בכל ספריות אוצריא';
+});
+
+/**
+ * הקלטה: הכפתור אחד, והוא מתחיל ועוצר. בזמן ההקלטה הוא לחוץ והתווית מציעה
+ * לעצור; בזמן ההתחלה הוא נשאר פעיל כדי לאפשר ביטול, גם לפני `ready`.
+ * מחוץ לאוצריא אין שירות, ולכן הוא מנוטרל כמו שאר הפקדים כאן.
+ */
+const canDictate = computed(
+  () =>
+    sdkAvailable &&
+    superdoc.value !== null &&
+    (!props.dictationReadOnly || props.dictationState !== 'idle'),
+);
+
+const dictationLabel = computed(() =>
+  props.dictationState === 'starting' ? 'בטל הקלטה' :
+    props.dictationState === 'listening' ? 'עצור דיבור' : 'הקלטה',
+);
+
+const dictationTooltip = computed(() => {
+  if (!sdkAvailable) return OUTSIDE_OTZARIA;
+  if (superdoc.value === null) return 'יש לפתוח מסמך ולהציב בו את הסמן';
+  if (props.dictationState === 'starting') return 'ביטול התחלת ההקלטה';
+  if (props.dictationState === 'listening') return 'עצירת ההקלטה אחרי המשפט האחרון';
+  if (props.dictationReadOnly) return 'המסמך פתוח לקריאה בלבד';
+  return 'הקלדה בדיבור במיקום הסמן. הזיהוי נעשה במחשב, בלי אינטרנט';
 });
 
 /**
