@@ -448,6 +448,7 @@ import type { StyleEdit } from './engine/docx-style-edit';
 import { applyLiveStyleEdit, styleRevision } from './engine/live-style-edit';
 import { ACTIVE_SUPERDOC } from './engine/document-api';
 import { readDocSelection } from './engine/doc-selection';
+import { insertHyperlinkAtCaret } from './engine/hyperlinks-manage';
 import { layOutTocRows } from './engine/toc';
 import type { Dictionary } from './engine/spellcheck';
 import { loadTorahDictionary, rememberUserWord } from './engine/spellcheck-dictionary';
@@ -5459,6 +5460,7 @@ const linkDialog = createLinkDialog({
   canOpen: () => commandAdapter.value?.getState('link').enabled === true,
   readSelection: () => readDocSelection(activeSuperdoc.value, { includeText: true }),
   runLink: (payload) => void runShortcutCommand('link', payload),
+  insertAtCaret: (link) => insertHyperlinkAtCaret(activeSuperdoc.value, link),
   report: reportCommand,
 });
 

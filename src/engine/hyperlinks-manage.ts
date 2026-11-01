@@ -21,6 +21,7 @@
 import type { SuperDoc } from 'superdoc';
 import type { CommandOutcome } from './command-adapter';
 import { receiptFailureText, thrownText, type DocReceipt } from './document-api';
+import { removeBlankHyperlinks } from './hyperlink-blanks';
 
 const UNAVAILABLE_TEXT = 'אינו זמין בגרסה זו';
 
@@ -56,6 +57,7 @@ interface HyperlinksApiShape {
   selection?: {
     current?: () => MaybePromise<SelectionInfoLike | undefined>;
   };
+  insert?: (input: { value: string; type: 'text'; target?: unknown }) => MaybePromise<DocReceipt>;
   hyperlinks?: {
     list?: (input?: Record<string, unknown>) => MaybePromise<unknown>;
     wrap?: (input: Record<string, unknown>) => MaybePromise<DocReceipt>;
@@ -65,6 +67,12 @@ interface HyperlinksApiShape {
 
 export interface HyperlinksHost {
   activeEditor?: { doc?: HyperlinksApiShape | null } | null;
+  ui?: {
+    selection?: {
+      /** מציבה סמן. אותה ידית ש-at-mention-overlay.ts מציב בה את הסמן אחרי קישור. */
+      apply?: (target: Record<string, unknown>) => unknown;
+    } | null;
+  } | null;
 }
 
 export type HyperlinksTarget = SuperDoc | HyperlinksHost | null | undefined;
@@ -168,6 +176,140 @@ export async function listHyperlinks(host: HyperlinksTarget): Promise<HyperlinkI
   } catch {
     return null;
   }
+}
+
+/**
+ * „הטווח נוגע בקישור קיים”, בכל הצורות שהמנוע מדווח בהן.
+ *
+ * הבדיקה היא על ההודעה ולא על הקוד בלבד, וזה נמדד: הקוד שחזר הוא
+ * `INVALID_CONTEXT` (ומ-`wrap` — `INVALID_TARGET`), בעוד
+ * `hyperlink-nested-unsupported` הוא **ההודעה**. בדיקה על הקוד לבדו לא
+ * התאימה מעולם, ולכן המשתמש קיבל בשורת המצב את המחרוזת האנגלית הגולמית
+ * במקום את ההודעה בעברית. משותפת לאזכור „@” ולדיאלוג הקישור.
+ */
+export function isHyperlinkOverlapFailure(receipt: DocReceipt | null | undefined): boolean {
+  const failure = receipt?.failure;
+  const text = `${failure?.code ?? ''} ${failure?.message ?? ''}`;
+  return /hyperlink-nested-unsupported/i.test(text) || /overlap.*existing hyperlink/i.test(text);
+}
+
+/** סמן יחיד בבלוק טקסט, מתוך `selectionTarget`. `null` לכל צורה אחרת. */
+function readCaretPoint(
+  target: unknown,
+): { blockId: string; offset: number; story: unknown } | null {
+  const t = target as {
+    kind?: string;
+    story?: unknown;
+    start?: { kind?: string; blockId?: unknown; offset?: unknown; story?: unknown };
+    end?: { kind?: string; blockId?: unknown; offset?: unknown };
+  } | null;
+  if (!t || t.kind !== 'selection') return null;
+  const { start, end } = t;
+  if (start?.kind !== 'text' || end?.kind !== 'text') return null;
+  if (typeof start.blockId !== 'string' || start.blockId !== end.blockId) return null;
+  if (typeof start.offset !== 'number' || start.offset !== end.offset) return null;
+  return { blockId: start.blockId, offset: start.offset, story: t.story ?? start.story ?? null };
+}
+
+/**
+ * „הוסף קישור” בסמן, בלי טווח מסומן: כתיבת הטקסט ב-`doc.insert` ואז
+ * `hyperlinks.wrap` עליו — **ולא** פקודת `link` של המנוע.
+ *
+ * הפקודה של המנוע הולכת במסלול הזה ל-`hyperlinks.insert`, וזו נדחית
+ * ב-`INVALID_CONTEXT / hyperlink-nested-unsupported` בכל פסקה שכבר יש בה
+ * קישור, גם הרחק ממנו. נמדד בדיאלוג עצמו: הקישור הראשון בפסקה נכתב, השני
+ * נכשל — „קישור אחד עובד, השני לא”. היא גם אינה מזיזה את הסמן, כך שמה
+ * שמוקלד אחריה נדחף לפני הקישור. אזכור „@” נתקל באותם שני דברים ופתר אותם
+ * באותה דרך (at-mention-overlay.ts).
+ *
+ * `null` = אין כאן סמן יחיד שאפשר לכתוב בו; הקורא נופל לפקודת המנוע.
+ */
+export async function insertHyperlinkAtCaret(
+  host: HyperlinksTarget,
+  input: { href: string; text?: string; at: unknown },
+): Promise<CommandOutcome | null> {
+  const failedAction = 'הוספת הקישור נכשלה';
+
+  const doc = docOf(host);
+  const insert = doc?.insert;
+  const wrap = doc?.hyperlinks?.wrap;
+  const caret = readCaretPoint(input.at);
+  if (!doc || typeof insert !== 'function' || typeof wrap !== 'function' || !caret) return null;
+
+  // בלי טקסט להצגה הכתובת עצמה היא הטקסט — כמו ב-Word.
+  const text = input.text?.trim() || input.href;
+  const { blockId, offset, story } = caret;
+  const point = (at: number) => ({ kind: 'text', blockId, offset: at, ...(story ? { story } : {}) });
+  const over = (start: number, end: number) => ({
+    kind: 'selection',
+    start: point(start),
+    end: point(end),
+    ...(story ? { story } : {}),
+  });
+
+  // צומת קישור ריק ששרד מחיקה חוסם את העטיפה באותו בלוק. ראו hyperlink-blanks.ts.
+  await removeBlankHyperlinks(doc, { blockId });
+
+  let written: DocReceipt;
+  try {
+    written = await insert.call(doc, { value: text, type: 'text', target: over(offset, offset) });
+  } catch (error) {
+    return { ok: false, message: thrownText(failedAction, error), reason: 'threw' };
+  }
+  if (written?.success === false) {
+    return { ok: false, message: receiptFailureText(failedAction, written), reason: written.failure?.code };
+  }
+
+  // היסטי המנוע הם יחידות UTF-16, כמו `String.length` (נמדד ב-at-mention-overlay.ts).
+  const end = offset + text.length;
+
+  const placeCaret = (at: number): void => {
+    const selection = (host as HyperlinksHost | null | undefined)?.ui?.selection;
+    try {
+      selection?.apply?.call(selection, over(at, at));
+    } catch (error) {
+      // מיקום הסמן אינו שווה הודעת שגיאה.
+      console.warn('[otzaria-word] קישור: הצבת הסמן נכשלה', error);
+    }
+  };
+
+  /**
+   * הטקסט נכתב אך אינו קישור — מוחקים אותו, כדי שהכשל לא ישאיר שארית במסמך,
+   * ומחזירים את הסמן למקומו: נמדד שאחרי המחיקה אין למנוע בחירה כלל.
+   */
+  const undoText = async (): Promise<void> => {
+    try {
+      await insert.call(doc, { value: '', type: 'text', target: over(offset, end) });
+    } catch (error) {
+      console.warn('[otzaria-word] קישור: מחיקת הטקסט אחרי עטיפה שנכשלה נכשלה', error);
+    }
+    placeCaret(offset);
+  };
+
+  let wrapped: DocReceipt;
+  try {
+    wrapped = await wrap.call(doc.hyperlinks, {
+      target: { kind: 'text', blockId, range: { start: offset, end }, ...(story ? { story } : {}) },
+      link: { destination: { href: input.href } },
+    });
+  } catch (error) {
+    await undoText();
+    return { ok: false, message: thrownText(failedAction, error), reason: 'threw' };
+  }
+  if (wrapped?.success === false) {
+    await undoText();
+    return {
+      ok: false,
+      message: isHyperlinkOverlapFailure(wrapped)
+        ? `${failedAction}: אי אפשר להוסיף קישור בתוך קישור קיים`
+        : receiptFailureText(failedAction, wrapped),
+      reason: wrapped.failure?.code,
+    };
+  }
+
+  // הסמן אחרי הקישור, כדי שההקלדה הבאה תמשיך ממנו ולא תידחף לפניו.
+  placeCaret(end);
+  return { ok: true };
 }
 
 /** „הסר קישור" על הטווח המסומן. TARGET_NOT_FOUND = כבר אין קישור = הצלחה. */

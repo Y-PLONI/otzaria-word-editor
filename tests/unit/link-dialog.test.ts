@@ -141,4 +141,52 @@ describe('createLinkDialog', () => {
 
     expect(dialog.selection.value.text).toBe('שני');
   });
+
+  describe('סמן בלי טווח: insertAtCaret ולא פקודת המנוע', () => {
+    // פקודת `link` של המנוע כותבת כאן ב-`hyperlinks.insert`, שנדחית בכל פסקה
+    // שכבר יש בה קישור — „קישור אחד עובד, השני לא”.
+    const at = { kind: 'selection' };
+
+    it('הכתיבה עוברת ל-insertAtCaret, והתוצאה מדווחת', async () => {
+      const insertAtCaret = vi.fn(async () => ({ ok: true as const }));
+      const { dialog, runLink, reports } = setup({
+        readSelection: async () => snapshot({ selectionTarget: at, target: { id: 't' } }),
+        insertAtCaret,
+      });
+
+      await dialog.open();
+      dialog.submit({ href: 'https://b.org', text: 'שני' });
+      await vi.waitFor(() => expect(reports).toHaveLength(1));
+
+      expect(insertAtCaret).toHaveBeenCalledWith({ href: 'https://b.org/', text: 'שני', at });
+      expect(runLink).not.toHaveBeenCalled();
+      expect(reports[0]).toEqual({ outcome: { ok: true }, id: 'link' });
+    });
+
+    it('null — נופל לפקודת המנוע', async () => {
+      const { dialog, runLink } = setup({
+        readSelection: async () => snapshot({ selectionTarget: at }),
+        insertAtCaret: async () => null,
+      });
+
+      await dialog.open();
+      dialog.submit({ href: 'https://b.org', text: 'שני' });
+
+      await vi.waitFor(() => expect(runLink).toHaveBeenCalledWith({ href: 'https://b.org/', text: 'שני' }));
+    });
+
+    it('עם טווח מסומן — עדיין פקודת המנוע (wrap)', async () => {
+      const insertAtCaret = vi.fn();
+      const { dialog, runLink } = setup({
+        readSelection: async () => snapshot({ hasRange: true, selectionTarget: at, target: { id: 't' } }),
+        insertAtCaret,
+      });
+
+      await dialog.open();
+      dialog.submit({ href: 'https://b.org', text: '' });
+
+      expect(insertAtCaret).not.toHaveBeenCalled();
+      expect(runLink).toHaveBeenCalled();
+    });
+  });
 });

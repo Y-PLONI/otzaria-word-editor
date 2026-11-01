@@ -9,6 +9,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   editHyperlink,
+  insertHyperlinkAtCaret,
   listHyperlinks,
   removeHyperlink,
 } from '../../src/engine/hyperlinks-manage';
@@ -161,5 +162,67 @@ describe('editHyperlink', () => {
 
     expect(outcome).toMatchObject({ ok: false, reason: 'invalid-href' });
     expect(calls.size).toBe(0);
+  });
+});
+
+describe('insertHyperlinkAtCaret', () => {
+  const caret = (offset: number) => ({
+    kind: 'selection',
+    start: { kind: 'text', blockId: 'b1', offset },
+    end: { kind: 'text', blockId: 'b1', offset },
+  });
+
+  function caretHost(options: { wrap?: () => unknown } = {}) {
+    const { doc, calls } = fakeDoc(options);
+    const inserts: unknown[] = [];
+    (doc as { insert: unknown }).insert = vi.fn(async (input: unknown) => {
+      inserts.push(input);
+      return { success: true };
+    });
+    const apply = vi.fn();
+    return { host: { activeEditor: { doc }, ui: { selection: { apply } } }, calls, inserts, apply };
+  }
+
+  it('כותב טקסט ועוטף אותו — לא hyperlinks.insert, שנדחה בפסקה שיש בה קישור', async () => {
+    const { host, calls, inserts, apply } = caretHost();
+
+    const outcome = await insertHyperlinkAtCaret(host, { href: 'https://b.org/', text: 'שני', at: caret(10) });
+
+    expect(outcome).toEqual({ ok: true });
+    expect(inserts).toEqual([{ value: 'שני', type: 'text', target: caret(10) }]);
+    expect(calls.get('wrap')).toEqual([
+      { target: { kind: 'text', blockId: 'b1', range: { start: 10, end: 13 } }, link: { destination: { href: 'https://b.org/' } } },
+    ]);
+    // הסמן אחרי הקישור, ולא לפניו.
+    expect(apply).toHaveBeenLastCalledWith(caret(13));
+  });
+
+  it('בלי טקסט להצגה — הכתובת היא הטקסט', async () => {
+    const { host, inserts } = caretHost();
+
+    await insertHyperlinkAtCaret(host, { href: 'https://a.org/', at: caret(0) });
+
+    expect(inserts[0]).toMatchObject({ value: 'https://a.org/' });
+  });
+
+  it('עטיפה שנדחתה בתוך קישור — הטקסט נמחק, הסמן חוזר, וההודעה בעברית', async () => {
+    const { host, inserts, apply } = caretHost({
+      wrap: () => ({ success: false, failure: { code: 'INVALID_TARGET', message: 'hyperlink-nested-unsupported' } }),
+    });
+
+    const outcome = await insertHyperlinkAtCaret(host, { href: 'https://c.org/', text: 'abc', at: caret(4) });
+
+    expect(outcome).toMatchObject({ ok: false, message: expect.stringContaining('בתוך קישור קיים') });
+    expect(inserts[1]).toEqual({ value: '', type: 'text', target: { ...caret(4), end: { kind: 'text', blockId: 'b1', offset: 7 } } });
+    expect(apply).toHaveBeenLastCalledWith(caret(4));
+  });
+
+  it('בחירה שאינה סמן יחיד — null, והקורא נופל לפקודת המנוע', async () => {
+    const { host, inserts } = caretHost();
+    const range = { ...caret(0), end: { kind: 'text', blockId: 'b1', offset: 3 } };
+
+    expect(await insertHyperlinkAtCaret(host, { href: 'https://a.org/', at: range })).toBeNull();
+    expect(await insertHyperlinkAtCaret(host, { href: 'https://a.org/', at: null })).toBeNull();
+    expect(inserts).toHaveLength(0);
   });
 });
