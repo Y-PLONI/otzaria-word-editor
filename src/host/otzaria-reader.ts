@@ -275,6 +275,13 @@ function isResolvedRefHit(value: unknown): value is ResolvedRefHit {
  *
  * `bookUid` נשלח כשהוא קיים בקישור: הוא המזהה היציב, והמאחז פותר לפיו
  * ישירות — לפני כל ניחוש לפי `id`. ראו at-mention.ts:buildRefHref.
+ *
+ * `source` נשלח רק כשהקישור נושא אותו (קישור שהועתק מהקורא לספר אישי או
+ * ממסד מצורף): הוא מה שמבדיל בין ספר אישי לרשמי שקיבלו אותו `id`.
+ *
+ * `markText`/`markSection` הם `m`/`mark` של קישור „עם הדגשה” מתפריט הקורא.
+ * מאחז שמכיר אותם מדגיש כמו ב-deep link; מאחז ישן קורא מהארגומנטים רק את
+ * השדות שהוא מכיר ומתעלם מהשאר, ולכן פותח את המקטע בלי הדגשה — כמו קודם.
  */
 export async function openOtzariaLink(target: OtzariaLinkTarget): Promise<ReaderResult> {
   const failedAction = 'פתיחת הקישור נכשלה';
@@ -289,6 +296,9 @@ export async function openOtzariaLink(target: OtzariaLinkTarget): Promise<Reader
       id: target.id,
       index: target.index,
       type: target.kind === 'pdf' ? 'pdf' : 'text',
+      ...(target.source ? { source: target.source } : {}),
+      ...(target.kind === 'book' && target.markText ? { markText: target.markText } : {}),
+      ...(target.kind === 'book' && target.markSection ? { markSection: true } : {}),
       navigateToPositionIfReused: true,
     });
   } catch (error) {

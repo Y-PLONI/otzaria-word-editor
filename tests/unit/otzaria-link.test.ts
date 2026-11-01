@@ -35,6 +35,72 @@ describe('parseOtzariaLink', () => {
     ).toEqual({ kind: 'detection', query: 'פסחים לד' });
   });
 
+  /**
+   * הצורות ש-book_link_builder.dart של אוצריא כותב ב„העתק קישור” של תפריט
+   * הקורא. בלעדיהן הקישור נפתח במקטע הנכון אבל בלי ההדגשה (Otzaria#3822).
+   */
+  it('קישור עם הדגשת טקסט: m נקרא ומפוענח', () => {
+    expect(
+      parseOtzariaLink('otzaria://open/book/42?index=7&m=%D7%95%D7%99%D7%90%D7%9E%D7%A8%20%D7%94%27'),
+    ).toEqual({ kind: 'book', id: 42, index: 7, markText: "ויאמר ה'" });
+  });
+
+  it('קישור עם הדגשת המקטע: mark הוא דגל גם בלי ערך', () => {
+    expect(parseOtzariaLink('otzaria://open/book/42?index=7&mark')).toEqual({
+      kind: 'book',
+      id: 42,
+      index: 7,
+      markSection: true,
+    });
+    expect(parseOtzariaLink('otzaria://open/book/42?index=7&mark=')).toMatchObject({
+      markSection: true,
+    });
+  });
+
+  it('m ריק או רווחים בלבד אינו הדגשה', () => {
+    expect(parseOtzariaLink('otzaria://open/book/42?index=7&m=%20%20')).toEqual({
+      kind: 'book',
+      id: 42,
+      index: 7,
+    });
+  });
+
+  it('source של הקישור מתורגם לערכי חוזה התוספים', () => {
+    expect(parseOtzariaLink('otzaria://open/book/42?source=user&index=7&mark')).toEqual({
+      kind: 'book',
+      id: 42,
+      index: 7,
+      source: 'user',
+      markSection: true,
+    });
+    expect(
+      parseOtzariaLink('otzaria://open/book/42?source=db%3Amy-lib&index=7&m=%D7%90'),
+    ).toEqual({ kind: 'book', id: 42, index: 7, source: 'attached', markText: 'א' });
+    expect(parseOtzariaLink('otzaria://open/book/42?source=official')).toMatchObject({
+      source: 'library',
+    });
+    expect(parseOtzariaLink('otzaria://open/pdf/8?source=user&index=3')).toEqual({
+      kind: 'pdf',
+      id: 8,
+      index: 3,
+      source: 'user',
+    });
+  });
+
+  it('בלי source, או עם ערך שהראוטר אינו מכיר, השדה אינו נוצר', () => {
+    expect(parseOtzariaLink('otzaria://open/book/42?index=7')).not.toHaveProperty('source');
+    expect(parseOtzariaLink('otzaria://open/book/42?source=weird')).not.toHaveProperty('source');
+    expect(parseOtzariaLink('otzaria://open/book/42?source=db%3A')).not.toHaveProperty('source');
+  });
+
+  it('בקישור PDF הדגשה אינה נקראת — כמו בראוטר', () => {
+    expect(parseOtzariaLink('otzaria://open/pdf/8?index=3&m=%D7%90&mark')).toEqual({
+      kind: 'pdf',
+      id: 8,
+      index: 3,
+    });
+  });
+
   it('פוסל מזהה שאינו מספר חיובי', () => {
     expect(parseOtzariaLink('otzaria://open/book/0')).toBeNull();
     expect(parseOtzariaLink('otzaria://open/book/-1')).toBeNull();
