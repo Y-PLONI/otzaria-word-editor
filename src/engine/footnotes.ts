@@ -104,6 +104,7 @@
 import type { SuperDoc } from 'superdoc';
 import type { CommandOutcome } from './command-adapter';
 import { receiptFailureText, thrownText, type DocReceipt, type MaybePromise } from './document-api';
+import { captureNoteAnchor, carryFormatPastNote, type NoteRunFormatTarget } from './footnote-run-format';
 
 export type NoteType = 'footnote' | 'endnote';
 
@@ -181,6 +182,9 @@ export async function insertNote(
     return { ok: false, message: `${failedAction}: אינו זמין בגרסה זו`, reason: 'command-unsupported' };
   }
 
+  // לפני ההכנסה: אחריה הסמן כבר בתוך ההערה. ראו footnote-run-format.ts.
+  const anchor = await captureNoteAnchor(host as NoteRunFormatTarget);
+
   let receipt: DocReceipt;
   try {
     receipt = await insert({ type, content: '' });
@@ -192,6 +196,7 @@ export async function insertNote(
     return { ok: false, message: receiptFailureText(failedAction, receipt), reason: receipt.failure?.code };
   }
 
+  if (anchor) carryFormatPastNote(host as NoteRunFormatTarget, anchor);
   return { ok: true };
 }
 
