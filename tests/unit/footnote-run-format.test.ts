@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   captureNoteAnchor,
   carryFormatPastNote,
+  createNoteRunFormatExtension,
   type NoteRunFormatHost,
 } from '../../src/engine/footnote-run-format';
 import { insertNote } from '../../src/engine/footnotes';
@@ -20,23 +21,26 @@ function caret(blockId: string, offset: number, story: unknown = BODY) {
   return { kind: 'selection', start: point, end: point, story };
 }
 
-function fakeHost(options: { family?: unknown; size?: unknown; at?: unknown } = {}) {
+function fakeHost(options: { family?: unknown; size?: unknown; at?: unknown; initial?: unknown } = {}) {
   const executed: Array<[string, unknown]> = [];
   let listener: ((slice: unknown) => void) | null = null;
   const unsubscribe = vi.fn(() => {
     listener = null;
   });
   let insideNote = false;
+  let noteType = 'footnote';
   const values: Record<string, unknown> = { 'font-family': options.family ?? 'TaameyDavidCLM', 'font-size': options.size ?? '16' };
   const host = {
     activeEditor: {
       doc: {
         selection: { current: async () => ({ selectionTarget: options.at ?? caret('b1', 9) }) },
         footnotes: {
-          insert: () => {
+          insert: (input: { type: string }) => {
             insideNote = true;
-            return { success: true };
+            noteType = input.type;
+            return { success: true, footnote: { kind: 'entity', entityType: 'footnote', noteId: '1' } };
           },
+          get: vi.fn(async () => ({ noteId: '1', type: noteType })),
         },
       },
     },
@@ -53,7 +57,7 @@ function fakeHost(options: { family?: unknown; size?: unknown; at?: unknown } = 
       selection: {
         observe: (fn: (slice: unknown) => void) => {
           listener = fn;
-          fn({ status: 'ready', selectionTarget: caret('n1', 0, NOTE) });
+          fn({ status: 'ready', selectionTarget: options.initial ?? caret('n1', 0, NOTE) });
           return unsubscribe;
         },
       },
@@ -81,7 +85,7 @@ describe('footnote-run-format', () => {
     expect(executed).toHaveLength(2);
   });
 
-  it('במקום אחר בגוף — לא נוגעים בעיצוב, וממשיכים לחכות', async () => {
+  it('חזרה למקום אחר בגוף מבטלת לצמיתות את התיקון', async () => {
     const { host, executed, move, isListening } = fakeHost();
 
     await insertNote(host as never, 'footnote');
@@ -90,18 +94,40 @@ describe('footnote-run-format', () => {
     move(caret('b1', 10), 'stale'); // הקריאה עוד לא התיישבה
 
     expect(executed).toEqual([]);
-    expect(isListening()).toBe(true);
+    expect(isListening()).toBe(false);
+    move(caret('b1', 10));
+    await Promise.resolve();
+    expect(executed).toEqual([]);
+  });
+
+  it('ignores a settled pre-insertion snapshot until the selection actually enters the note', async () => {
+    const f = fakeHost({ initial: caret('b1', 9) });
+    await insertNote(f.host as never, 'footnote');
+    expect(f.isListening()).toBe(true);
+    f.move(caret('n1', 0, NOTE));
+    f.move(caret('b1', 10));
+    await vi.waitFor(() => expect(f.executed).toHaveLength(2));
+  });
+
+  it('a later body selection cancels even when no note snapshot was observed', async () => {
+    const f = fakeHost({ initial: caret('b1', 9) });
+    await insertNote(f.host as never, 'footnote');
+    f.move(caret('b2', 0));
+    f.move(caret('n1', 0, NOTE));
+    f.move(caret('b1', 10));
+    await Promise.resolve();
+    expect(f.executed).toEqual([]);
+    expect(f.isListening()).toBe(false);
   });
 
   it('הערה שנייה מחליפה את המעקב של הראשונה', async () => {
     const first = fakeHost();
     const anchor = { blockId: 'b1', offset: 9, family: 'David', size: 12 };
 
-    carryFormatPastNote(first.host as never, anchor);
-    carryFormatPastNote(first.host as never, { ...anchor, offset: 20 });
+    carryFormatPastNote(first.host as never, anchor, { noteId: '1', type: 'footnote' });
+    carryFormatPastNote(first.host as never, { ...anchor, offset: 20 }, { noteId: '1', type: 'footnote' });
 
     expect(first.unsubscribe).toHaveBeenCalledTimes(1);
-    first.move(caret('b1', 10));
     first.move(caret('b1', 21));
     await vi.waitFor(() => expect(first.executed).toHaveLength(2));
   });
@@ -120,5 +146,87 @@ describe('footnote-run-format', () => {
 
     expect(await insertNote(host as never, 'footnote')).toEqual({ ok: true });
     expect(insert).toHaveBeenCalledTimes(1);
+  });
+});
+
+function installMutationGuard(host: ReturnType<typeof fakeHost>['host']) {
+  const controller = createNoteRunFormatExtension();
+  let mutate!: (event: { stories: Array<{ kind: 'story'; storyType: 'body' | 'footnote' | 'endnote' }> }) => void;
+  const dispose = controller.extension.activate({
+    onMutation: (_filter: unknown, listener: typeof mutate) => { mutate = listener; },
+  } as never);
+  controller.bind(host as never);
+  return { mutate, controller, dispose };
+}
+
+describe('note anchor lifetime', () => {
+  for (const edit of ['delete reference', 'move reference', 'replace reference', 'undo insertion', 'explicit body formatting']) {
+    it(`${edit} cancels the old anchor before returning to its offset`, async () => {
+      const f = fakeHost();
+      const { mutate } = installMutationGuard(f.host);
+      await insertNote(f.host as never, 'footnote');
+      mutate({ stories: [BODY as { kind: 'story'; storyType: 'body' }] });
+      f.move(caret('b1', 10));
+      await Promise.resolve();
+      expect(f.executed).toEqual([]);
+      expect(f.isListening()).toBe(false);
+    });
+  }
+
+  it('a removed note cancels even when its mutation omits the body story', async () => {
+    const f = fakeHost();
+    await insertNote(f.host as never, 'footnote');
+    f.host.activeEditor.doc.footnotes.get.mockRejectedValueOnce(new Error('not found'));
+    f.move(caret('b1', 10));
+    await vi.waitFor(() => expect(f.isListening()).toBe(false));
+    expect(f.executed).toEqual([]);
+  });
+
+  it('an ambiguous note identity does not apply formatting', async () => {
+    const f = fakeHost();
+    await insertNote(f.host as never, 'endnote');
+    f.host.activeEditor.doc.footnotes.get.mockResolvedValueOnce({ noteId: '1', type: 'footnote' });
+    f.move(caret('b1', 10));
+    await vi.waitFor(() => expect(f.isListening()).toBe(false));
+    expect(f.executed).toEqual([]);
+  });
+
+  it('editing the footnote content preserves the first return correction', async () => {
+    const f = fakeHost();
+    const { mutate } = installMutationGuard(f.host);
+    await insertNote(f.host as never, 'footnote');
+    mutate({ stories: [NOTE as { kind: 'story'; storyType: 'footnote' }] });
+    f.move(caret('b1', 10));
+    await vi.waitFor(() => expect(f.executed).toHaveLength(2));
+  });
+
+  it('a document replacement or disposal cancels the pending correction', async () => {
+    const f = fakeHost();
+    const { controller } = installMutationGuard(f.host);
+    await insertNote(f.host as never, 'footnote');
+    controller.dispose();
+    f.move(caret('b1', 10));
+    await Promise.resolve();
+    expect(f.executed).toEqual([]);
+    expect(f.isListening()).toBe(false);
+  });
+
+  it('a selection change during font-family prevents font-size affecting another caret', async () => {
+    const f = fakeHost();
+    let finish!: () => void;
+    f.host.ui.commands.executeAsync.mockImplementationOnce(async (id, payload) => {
+      f.executed.push([id, payload]);
+      await new Promise<void>((resolve) => { finish = resolve; });
+      return true;
+    });
+    await insertNote(f.host as never, 'footnote');
+    f.move(caret('b1', 10));
+    await vi.waitFor(() => expect(f.executed).toHaveLength(1));
+    f.move(caret('b2', 0));
+    finish();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(f.executed).toEqual([['font-family', 'TaameyDavidCLM']]);
+    expect(f.isListening()).toBe(false);
   });
 });

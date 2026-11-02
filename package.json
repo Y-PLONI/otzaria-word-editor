@@ -67,6 +67,7 @@
     "golden:compare": "npm run build && node scripts/qa/golden.mjs compare scripts/qa/smoke.mjs scripts/qa/hebrew-numbering-probe.mjs scripts/qa/hebrew-list-probe.mjs scripts/qa/hebrew-numbering-ui-qa.mjs scripts/qa/replace-all-probe.mjs scripts/qa/replace-race-probe.mjs scripts/qa/replace-ui-probe.mjs scripts/qa/replace-all-multiparagraph-qa.mjs scripts/qa/find-replace-navigation-qa.mjs scripts/qa/replace-all-undo-qa.mjs scripts/qa/replace-buttons-reenable-qa.mjs scripts/qa/export-pdf-qa.mjs scripts/qa/file-ops-qa.mjs scripts/qa/file-freeze-qa.mjs scripts/qa/installed-fonts-qa.mjs scripts/qa/load-progress-qa.mjs scripts/qa/spellcheck-qa.mjs scripts/qa/bold-cs-qa.mjs scripts/qa/page-border-overlay-qa.mjs scripts/qa/line-number-overlay-qa.mjs scripts/qa/pilcrow-overlay-qa.mjs",
     "verify:boundary": "npm run build && npm run check:ruler && npm run check:readout && npm run check:session && npm run check:startup && node scripts/qa/multi-doc-qa.mjs && npm run check:scroll && node scripts/qa/golden.mjs compare scripts/qa/page-border-overlay-qa.mjs scripts/qa/line-number-overlay-qa.mjs scripts/qa/pilcrow-overlay-qa.mjs",
     "preview": "vite preview",
+    "check:footnote-format": "node scripts/qa/footnote-run-format-qa.mjs",
     "check:word-delete": "node scripts/qa/word-delete-qa.mjs",
     "check:dictation-safety": "node scripts/qa/dictation-safety-qa.mjs"
   },

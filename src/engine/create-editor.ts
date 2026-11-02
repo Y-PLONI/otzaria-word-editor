@@ -23,6 +23,7 @@ import { installWordSelection } from './word-selection';
 import { createOtzariaLinkActivation } from './otzaria-link-activation';
 import { openOtzariaLink } from '../host/otzaria-reader';
 import { engineWorkerUrls } from './workers';
+import { createNoteRunFormatExtension } from './footnote-run-format';
 
 export interface EditorSession {
   superdoc: SuperDoc;
@@ -192,7 +193,10 @@ export function createEditor(options: CreateEditorOptions): Promise<EditorSessio
     // שהמנוע רושם על window/document בבנייה — סדר הרישום הוא סדר הריצה.
     disposers.push(installPointerSnap(container).dispose);
 
+    const noteRunFormat = createNoteRunFormatExtension();
+    disposers.push(noteRunFormat.dispose);
     const superdoc = new SuperDoc({
+      extensions: [noteRunFormat.extension],
       selector: container,
       document: source,
 
@@ -254,6 +258,7 @@ export function createEditor(options: CreateEditorOptions): Promise<EditorSessio
       // להישען על סדר ההשמה של הבנאי.
       onReady: ({ superdoc: ready }) => {
         if (settled) return;
+        noteRunFormat.bind(ready);
         settled = true;
         stopWaiting();
         const session: EditorSession = {

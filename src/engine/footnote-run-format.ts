@@ -37,10 +37,11 @@
  * `<w:sz w:val="32"/><w:rFonts w:ascii="TaameyDavidCLM" w:hAnsi="TaameyDavidCLM"/>`,
  * זהה לריצה שלפני ההערה.
  *
- * רק המקום שאחרי הסימן: במקום אחר אין מה לתקן, והפעלת פקודות גופן בכל
- * חזרה לגוף הייתה דורסת עיצוב שהמשתמש בחר.
+ * התיקון תקף רק בחזרה הראשונה לגוף, ורק אם הגוף לא השתנה בינתיים.
+ * שינוי בגוף מבטל את העוגן במקום לנחש לאן ההפניה זזה; עריכה בתוך ההערה
+ * אינה מבטלת אותו. כך עוגן של הערה שנמחקה אינו דורס בחירת גופן מאוחרת.
  */
-import type { SuperDoc } from 'superdoc';
+import { defineSuperDocExtension, type SuperDoc } from 'superdoc';
 import { fontFamilyPayload, fontSizePayload } from './payloads';
 import type { MaybePromise } from './document-api';
 
@@ -73,6 +74,9 @@ export interface NoteRunFormatHost {
   activeEditor?: {
     doc?: {
       selection?: { current?: () => MaybePromise<{ selectionTarget?: unknown } | undefined> };
+      footnotes?: {
+        get?: (input: { target: { kind: 'entity'; entityType: 'footnote'; noteId: string } }) => MaybePromise<{ noteId?: string; type?: string } | undefined>;
+      };
     } | null;
   } | null;
   ui?: {
@@ -82,6 +86,11 @@ export interface NoteRunFormatHost {
       observe?: (listener: (snapshot: SelectionSliceLike) => void) => () => void;
     } | null;
   } | null;
+}
+
+export interface InsertedNoteIdentity {
+  noteId: string;
+  type: 'footnote' | 'endnote';
 }
 
 export type NoteRunFormatTarget = SuperDoc | NoteRunFormatHost | null | undefined;
@@ -146,16 +155,21 @@ const pending = new WeakMap<object, () => void>();
 
 /**
  * אחרי הכנסה מוצלחת: מחכה שהסמן יחזור למקום שאחרי הסימן, ומריצה שם את
- * פקודות הגופן פעם אחת. המעקב נשאר עד שזה קורה, או עד ההערה הבאה.
+ * פקודות הגופן פעם אחת. חזרה למקום אחר בגוף או שינוי בגוף מבטלים אותו.
  */
-export function carryFormatPastNote(host: NoteRunFormatTarget, anchor: NoteAnchor): void {
+export function carryFormatPastNote(host: NoteRunFormatTarget, anchor: NoteAnchor, note: InsertedNoteIdentity): void {
   const h = host as NoteRunFormatHost | null | undefined;
   const commands = h?.ui?.commands;
   const observe = h?.ui?.selection?.observe;
-  if (!h || !commands || typeof observe !== 'function') return;
+  const get = h?.activeEditor?.doc?.footnotes?.get;
+  if (!h || !commands || typeof observe !== 'function' || typeof get !== 'function') return;
 
   pending.get(h)?.();
+  const editor = h.activeEditor;
   const after = anchor.offset + 1;
+  let applying = false;
+  let enteredNote = false;
+  let allowPreInsertionSnapshot = true;
   let done = false;
   let unsubscribe: (() => void) | null = null;
   const stop = (): void => {
@@ -169,21 +183,81 @@ export function carryFormatPastNote(host: NoteRunFormatTarget, anchor: NoteAncho
   unsubscribe = observe.call(h.ui!.selection, (slice) => {
     if (done) return;
     if (slice.status !== 'ready') return;
-    const caret = bodyCaret(slice.selectionTarget);
-    if (!caret || caret.blockId !== anchor.blockId || caret.offset !== after) return;
-    stop();
-    void applyCaretFormat(commands, anchor);
+    if (h.activeEditor !== editor) return stop();
+    const target = slice.selectionTarget;
+    const storyType = (target?.story ?? target?.start?.story)?.storyType;
+    if (storyType === 'footnote' || storyType === 'endnote') {
+      enteredNote = true;
+      if (applying) stop();
+      return;
+    }
+    const caret = bodyCaret(target);
+    if (!enteredNote) {
+      // The first settled snapshot can still describe the pre-insertion body caret.
+      // Ignore that snapshot once; later body selections must not leave a dormant anchor.
+      if (allowPreInsertionSnapshot && caret?.blockId === anchor.blockId && caret.offset === anchor.offset) {
+        allowPreInsertionSnapshot = false;
+        return;
+      }
+      return stop();
+    }
+    if (!caret || caret.blockId !== anchor.blockId || caret.offset !== after) return stop();
+    if (applying) return;
+    applying = true;
+    void (async () => {
+      // Some 2.23 note removals omit the body's affected-story event. Check the
+      // inserted entity as well; ambiguous footnote/endnote ids fail closed.
+      try {
+        const live = await get({ target: { kind: 'entity', entityType: 'footnote', noteId: note.noteId } });
+        if (live?.noteId !== note.noteId || live.type !== note.type) return;
+      } catch {
+        return;
+      }
+      await applyCaretFormat(commands, anchor, () => !done && h.activeEditor === editor);
+    })().finally(stop);
   });
   // `observe` יורה מיד, עוד לפני שההשמה למעלה הסתיימה.
   if (done) unsubscribe?.();
 }
 
-async function applyCaretFormat(commands: CommandsLike, anchor: NoteAnchor): Promise<void> {
+async function applyCaretFormat(commands: CommandsLike, anchor: NoteAnchor, isCurrent: () => boolean): Promise<void> {
   try {
-    if (anchor.family !== null && commands.has('font-family')) await commands.executeAsync('font-family', anchor.family);
-    if (anchor.size !== null && commands.has('font-size')) await commands.executeAsync('font-size', anchor.size);
+    if (isCurrent() && anchor.family !== null && commands.has('font-family')) await commands.executeAsync('font-family', anchor.family);
+    if (isCurrent() && anchor.size !== null && commands.has('font-size')) await commands.executeAsync('font-size', anchor.size);
   } catch (error) {
     // ההערה כבר נכתבה; גופן ההקלדה הבאה אינו שווה הודעת שגיאה.
     console.warn('[otzaria-word] הערה: החזרת גופן הגוף אחרי הסימן נכשלה', error);
   }
+}
+
+/**
+ * הגוף הוא מרחב הקואורדינטות של העוגן. כל שינוי בו (כולל Undo, מחיקה
+ * והחלפת מסמך) מבטל את התיקון; הקלדה בתוכן ההערה רשאית להמשיך.
+ * אירועי המוטציה הציבוריים כוללים את ה-stories שהשתנו, בלי סריקת מסמך.
+ */
+export function createNoteRunFormatExtension() {
+  let host: NoteRunFormatTarget = null;
+  const cancel = (): void => {
+    if (host) pending.get(host)?.();
+  };
+  return {
+    extension: defineSuperDocExtension({
+      id: 'otzaria.note-run-format',
+      activate(context) {
+        cancel();
+        context.onMutation({}, (event) => {
+          if (event.stories.length === 0 || event.stories.some((story) => story.storyType === 'body')) cancel();
+        });
+        return cancel;
+      },
+    }),
+    bind(target: NoteRunFormatTarget): void {
+      cancel();
+      host = target;
+    },
+    dispose(): void {
+      cancel();
+      host = null;
+    },
+  };
 }
