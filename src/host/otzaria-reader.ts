@@ -278,6 +278,8 @@ function isResolvedRefHit(value: unknown): value is ResolvedRefHit {
  *
  * `source` נשלח רק כשהקישור נושא אותו (קישור שהועתק מהקורא לספר אישי או
  * ממסד מצורף): הוא מה שמבדיל בין ספר אישי לרשמי שקיבלו אותו `id`.
+ * במסד מצורף הפענוח משמר גם את ה-slug ב-UID. שולחים אז את ה-UID בלי
+ * `id`: אם המסד אינו זמין, המאחז עלול ליפול מ-UID חסר ל-id של מסד אחר.
  *
  * `markText`/`markSection` הם `m`/`mark` של קישור „עם הדגשה” מתפריט הקורא.
  * מאחז שמכיר אותם מדגיש כמו ב-deep link; מאחז ישן קורא מהארגומנטים רק את
@@ -293,7 +295,7 @@ export async function openOtzariaLink(target: OtzariaLinkTarget): Promise<Reader
   try {
     data = await call<unknown>('reader.openBook', {
       ...(target.uid ? { bookUid: target.uid } : {}),
-      id: target.id,
+      ...(target.source === 'attached' && target.uid ? {} : { id: target.id }),
       index: target.index,
       type: target.kind === 'pdf' ? 'pdf' : 'text',
       ...(target.source ? { source: target.source } : {}),

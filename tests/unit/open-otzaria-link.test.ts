@@ -101,12 +101,47 @@ describe('openOtzariaLink', () => {
     await openOtzariaLink(target!);
 
     expect(callMock.mock.calls[0]![1]).toMatchObject({
-      id: 42,
+      bookUid: 'db:my-lib:42',
       index: 7,
       source: 'attached',
       markText: 'ויאמר',
     });
+    expect(callMock.mock.calls[0]![1]).not.toHaveProperty('id');
   });
+
+  /**
+   * חוזה _findPluginBook: UID נבדק ראשון, אבל UID חסר נופל ל-id+type+source.
+   * מסד A חסר אסור שיפתח את B, גם כש-B הוא המועמד היחיד עם אותו id.
+   */
+  it.each(['book', 'pdf'] as const)(
+    '%s: פותר מסד מסוים בין מזהים חופפים ומסרב כשהמסד חסר',
+    async (kind) => {
+      const type = kind === 'pdf' ? 'pdf' : 'text';
+      const books = [
+        { uid: 'id:42', id: 42, type, source: 'library' },
+        { uid: 'db:B:42', id: 42, type, source: 'attached' },
+        { uid: 'db:A:42', id: 42, type, source: 'attached' },
+      ];
+      let opened: string | undefined;
+      callMock.mockImplementation(async (_method, args) => {
+        const byUid = books.find((book) => book.uid === args.bookUid);
+        const candidates = books.filter((book) =>
+          book.id === args.id && book.type === args.type && book.source === args.source,
+        );
+        const found = byUid ?? (candidates.length === 1 ? candidates[0] : undefined);
+        opened = found?.uid;
+        return !!found;
+      });
+      const target = parseOtzariaLink(`otzaria://open/${kind}/42?source=db%3AA&index=7&mark`)!;
+
+      expect((await openOtzariaLink(target)).ok).toBe(true);
+      expect(opened).toBe('db:A:42');
+      books.pop();
+      expect((await openOtzariaLink(target)).ok).toBe(false);
+      expect(opened).toBeUndefined();
+      expect(callMock.mock.calls[callMock.mock.calls.length - 1]![1]).not.toHaveProperty('id');
+    },
+  );
 
   it('PDF נשלח עם type של pdf', async () => {
     await openOtzariaLink({ kind: 'pdf', id: 7, index: 3 });

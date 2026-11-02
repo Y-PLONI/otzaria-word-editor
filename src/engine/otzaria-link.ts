@@ -36,12 +36,23 @@ export type OtzariaLinkTarget =
  * אותו אצל המאחז כש-`uid` אינו נפתר. ערך שהראוטר אינו מכיר — גם `undefined`,
  * ואז ההתנהגות היא זו שלפני השדה.
  */
-function linkSource(raw: string | null): OtzariaBookSource | undefined {
-  const value = raw?.trim().toLowerCase();
+function linkSource(
+  raw: string | null,
+  id: number,
+): { source: OtzariaBookSource; uid?: string } | undefined {
+  const trimmed = raw?.trim() ?? '';
+  const value = trimmed.toLowerCase();
   if (!value) return undefined;
-  if (value === 'official') return 'library';
-  if (value === 'user') return 'user';
-  if (value.startsWith('db:') && value.length > 3) return 'attached';
+  if (value === 'official') return { source: 'library' };
+  if (value === 'user') return { source: 'user' };
+  if (value.startsWith('db:')) {
+    // BookSource.isValidSlug: אין לשנות את רישיות ה-slug. מסדים שונים
+    // חולקים id, ולכן `attached` לבדו אינו זהות מספקת (BookIdentity.keyOf).
+    const slug = trimmed.slice(3);
+    if (/^[\p{L}\p{N}._-]{1,64}$/u.test(slug)) {
+      return { source: 'attached', uid: `db:${slug}:${id}` };
+    }
+  }
   return undefined;
 }
 
@@ -78,13 +89,13 @@ export function parseOtzariaLink(href: string): OtzariaLinkTarget | null {
 
   // `uid` הוא המזהה היציב של הספר (ראו at-mention.ts:buildRefHref). קישור
   // ישן נכתב בלעדיו, ולכן הוא אופציונלי ולא תנאי לפענוח.
-  const uid = url.searchParams.get('uid')?.trim();
-  const source = linkSource(url.searchParams.get('source'));
+  const identity = linkSource(url.searchParams.get('source'), id);
+  const uid = url.searchParams.get('uid')?.trim() || identity?.uid;
   const base = {
     id,
     index,
     ...(uid ? { uid } : {}),
-    ...(source ? { source } : {}),
+    ...(identity ? { source: identity.source } : {}),
   };
   if (kind === 'pdf') return { kind, ...base };
 

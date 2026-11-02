@@ -75,7 +75,9 @@ describe('parseOtzariaLink', () => {
     });
     expect(
       parseOtzariaLink('otzaria://open/book/42?source=db%3Amy-lib&index=7&m=%D7%90'),
-    ).toEqual({ kind: 'book', id: 42, index: 7, source: 'attached', markText: 'א' });
+    ).toEqual({
+      kind: 'book', id: 42, index: 7, source: 'attached', uid: 'db:my-lib:42', markText: 'א',
+    });
     expect(parseOtzariaLink('otzaria://open/book/42?source=official')).toMatchObject({
       source: 'library',
     });
@@ -86,6 +88,33 @@ describe('parseOtzariaLink', () => {
       source: 'user',
     });
   });
+
+  it('משמר את זהות המסד ואת רישיות ה-slug גם ל-PDF', () => {
+    expect(parseOtzariaLink('otzaria://open/book/42?source=DB%3AA')).toMatchObject({
+      source: 'attached', uid: 'db:A:42',
+    });
+    expect(parseOtzariaLink('otzaria://open/pdf/42?source=db%3AB')).toMatchObject({
+      source: 'attached', uid: 'db:B:42',
+    });
+    expect(parseOtzariaLink('otzaria://open/book/42?source=db%3A%D7%AA%D7%95%D7%A8%D7%94')).toMatchObject({
+      uid: 'db:תורה:42',
+    });
+  });
+
+  it('uid מפורש שומר על הקדימות של הזהות היציבה', () => {
+    expect(parseOtzariaLink('otzaria://open/book/42?source=db%3AA&uid=db%3AB%3A42')).toMatchObject({
+      uid: 'db:B:42', source: 'attached',
+    });
+  });
+
+  it.each(['db:', 'db:a/b', 'db:a:b', `db:${'a'.repeat(65)}`])(
+    'source עם slug לא חוקי אינו נשלח: %s',
+    (source) => {
+      const target = parseOtzariaLink(`otzaria://open/book/42?source=${encodeURIComponent(source)}`);
+      expect(target).not.toHaveProperty('source');
+      expect(target).not.toHaveProperty('uid');
+    },
+  );
 
   it('בלי source, או עם ערך שהראוטר אינו מכיר, השדה אינו נוצר', () => {
     expect(parseOtzariaLink('otzaria://open/book/42?index=7')).not.toHaveProperty('source');
