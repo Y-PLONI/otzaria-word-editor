@@ -20,6 +20,7 @@ vi.mock('../../src/host/otzaria-client', () => ({
 }));
 
 const { openOtzariaLink } = await import('../../src/host/otzaria-reader');
+const { parseOtzariaLink } = await import('../../src/engine/otzaria-link');
 
 beforeEach(() => {
   callMock.mockReset();
@@ -51,6 +52,96 @@ describe('openOtzariaLink', () => {
 
     expect(callMock.mock.calls[0]![1]).not.toHaveProperty('bookUid');
   });
+
+  /** Otzaria#3822: קישור „עם הדגשה” מתפריט הקורא נפתח בלי ההדגשה. */
+  it('מעביר markText, markSection ו-source מהקישור', async () => {
+    await openOtzariaLink({
+      kind: 'book',
+      id: 42,
+      index: 7,
+      source: 'user',
+      markText: 'ויאמר',
+      markSection: true,
+    });
+
+    expect(callMock).toHaveBeenCalledWith('reader.openBook', {
+      id: 42,
+      index: 7,
+      type: 'text',
+      source: 'user',
+      markText: 'ויאמר',
+      markSection: true,
+      navigateToPositionIfReused: true,
+    });
+  });
+
+  it('קישור בלי הדגשה ובלי source אינו שולח את השדות כלל', async () => {
+    await openOtzariaLink({ kind: 'book', id: 42, index: 7 });
+
+    const args = callMock.mock.calls[0]![1];
+    expect(args).not.toHaveProperty('markText');
+    expect(args).not.toHaveProperty('markSection');
+    expect(args).not.toHaveProperty('source');
+  });
+
+  it('PDF נשלח עם source אבל בלי שדות הדגשה', async () => {
+    await openOtzariaLink({ kind: 'pdf', id: 7, index: 3, source: 'attached' });
+
+    const args = callMock.mock.calls[0]![1];
+    expect(args).toMatchObject({ type: 'pdf', source: 'attached' });
+    expect(args).not.toHaveProperty('markText');
+    expect(args).not.toHaveProperty('markSection');
+  });
+
+  /** הצינור כולו: href מהקורא → פענוח → הארגומנטים שהמאחז מקבל. */
+  it('href של „העתק קישור עם הדגשת הטקסט” מגיע למאחז עם ההדגשה', async () => {
+    const target = parseOtzariaLink(
+      'otzaria://open/book/42?source=db%3Amy-lib&index=7&m=%D7%95%D7%99%D7%90%D7%9E%D7%A8',
+    );
+    await openOtzariaLink(target!);
+
+    expect(callMock.mock.calls[0]![1]).toMatchObject({
+      bookUid: 'db:my-lib:42',
+      index: 7,
+      source: 'attached',
+      markText: 'ויאמר',
+    });
+    expect(callMock.mock.calls[0]![1]).not.toHaveProperty('id');
+  });
+
+  /**
+   * חוזה _findPluginBook: UID נבדק ראשון, אבל UID חסר נופל ל-id+type+source.
+   * מסד A חסר אסור שיפתח את B, גם כש-B הוא המועמד היחיד עם אותו id.
+   */
+  it.each(['book', 'pdf'] as const)(
+    '%s: פותר מסד מסוים בין מזהים חופפים ומסרב כשהמסד חסר',
+    async (kind) => {
+      const type = kind === 'pdf' ? 'pdf' : 'text';
+      const books = [
+        { uid: 'id:42', id: 42, type, source: 'library' },
+        { uid: 'db:B:42', id: 42, type, source: 'attached' },
+        { uid: 'db:A:42', id: 42, type, source: 'attached' },
+      ];
+      let opened: string | undefined;
+      callMock.mockImplementation(async (_method, args) => {
+        const byUid = books.find((book) => book.uid === args.bookUid);
+        const candidates = books.filter((book) =>
+          book.id === args.id && book.type === args.type && book.source === args.source,
+        );
+        const found = byUid ?? (candidates.length === 1 ? candidates[0] : undefined);
+        opened = found?.uid;
+        return !!found;
+      });
+      const target = parseOtzariaLink(`otzaria://open/${kind}/42?source=db%3AA&index=7&mark`)!;
+
+      expect((await openOtzariaLink(target)).ok).toBe(true);
+      expect(opened).toBe('db:A:42');
+      books.pop();
+      expect((await openOtzariaLink(target)).ok).toBe(false);
+      expect(opened).toBeUndefined();
+      expect(callMock.mock.calls[callMock.mock.calls.length - 1]![1]).not.toHaveProperty('id');
+    },
+  );
 
   it('PDF נשלח עם type של pdf', async () => {
     await openOtzariaLink({ kind: 'pdf', id: 7, index: 3 });
