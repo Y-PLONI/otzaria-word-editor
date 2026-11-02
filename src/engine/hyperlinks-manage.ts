@@ -21,7 +21,6 @@
 import type { SuperDoc } from 'superdoc';
 import type { CommandOutcome } from './command-adapter';
 import { receiptFailureText, thrownText, type DocReceipt } from './document-api';
-import { removeBlankHyperlinks } from './hyperlink-blanks';
 
 const UNAVAILABLE_TEXT = 'אינו זמין בגרסה זו';
 
@@ -57,7 +56,9 @@ interface HyperlinksApiShape {
   selection?: {
     current?: () => MaybePromise<SelectionInfoLike | undefined>;
   };
-  insert?: (input: { value: string; type: 'text'; target?: unknown }) => MaybePromise<DocReceipt>;
+  clipboard?: {
+    insert?: (input: Record<string, unknown>) => MaybePromise<DocReceipt>;
+  };
   hyperlinks?: {
     list?: (input?: Record<string, unknown>) => MaybePromise<unknown>;
     wrap?: (input: Record<string, unknown>) => MaybePromise<DocReceipt>;
@@ -212,103 +213,78 @@ function readCaretPoint(
 }
 
 /**
- * „הוסף קישור” בסמן, בלי טווח מסומן: כתיבת הטקסט ב-`doc.insert` ואז
- * `hyperlinks.wrap` עליו — **ולא** פקודת `link` של המנוע.
- *
- * הפקודה של המנוע הולכת במסלול הזה ל-`hyperlinks.insert`, וזו נדחית
- * ב-`INVALID_CONTEXT / hyperlink-nested-unsupported` בכל פסקה שכבר יש בה
- * קישור, גם הרחק ממנו. נמדד בדיאלוג עצמו: הקישור הראשון בפסקה נכתב, השני
- * נכשל — „קישור אחד עובד, השני לא”. היא גם אינה מזיזה את הסמן, כך שמה
- * שמוקלד אחריה נדחף לפני הקישור. אזכור „@” נתקל באותם שני דברים ופתר אותם
- * באותה דרך (at-mention-overlay.ts).
- *
- * `null` = אין כאן סמן יחיד שאפשר לכתוב בו; הקורא נופל לפקודת המנוע.
+ * Insert a complete inline hyperlink in one public clipboard transaction.
+ * `hyperlinks.insert` rejects even a distant second link in the same paragraph
+ * on 2.23. `doc.insert` + `hyperlinks.wrap` works, but creates two Undo entries
+ * and needs a compensating delete on failure. A v2.2 clipboard fragment carries
+ * the hyperlink itself; match-destination preserves authored run properties.
+ * It also works beside empty hyperlink remnants without a document-wide scan.
+ * Rich inbound content rejects otzaria: URLs; keep those on the native link
+ * command, so the supported custom-link workflow keeps its original behavior.
+ * `null` means this is not a single caret (or the API is unavailable).
  */
 export async function insertHyperlinkAtCaret(
   host: HyperlinksTarget,
   input: { href: string; text?: string; at: unknown },
 ): Promise<CommandOutcome | null> {
   const failedAction = 'הוספת הקישור נכשלה';
-
   const doc = docOf(host);
-  const insert = doc?.insert;
-  const wrap = doc?.hyperlinks?.wrap;
+  const clipboard = doc?.clipboard;
+  const insert = clipboard?.insert;
   const caret = readCaretPoint(input.at);
-  if (!doc || typeof insert !== 'function' || typeof wrap !== 'function' || !caret) return null;
+  if (typeof insert !== 'function' || !caret) return null;
+  if (!/^(?:https?:|mailto:)/i.test(input.href)) return null;
 
-  // בלי טקסט להצגה הכתובת עצמה היא הטקסט — כמו ב-Word.
   const text = input.text?.trim() || input.href;
   const { blockId, offset, story } = caret;
   const point = (at: number) => ({ kind: 'text', blockId, offset: at, ...(story ? { story } : {}) });
-  const over = (start: number, end: number) => ({
+  const over = (at: number) => ({
     kind: 'selection',
-    start: point(start),
-    end: point(end),
+    start: point(at),
+    end: point(at),
     ...(story ? { story } : {}),
   });
-
-  // צומת קישור ריק ששרד מחיקה חוסם את העטיפה באותו בלוק. ראו hyperlink-blanks.ts.
-  await removeBlankHyperlinks(doc, { blockId });
-
-  let written: DocReceipt;
+  // v2.2 is the public clipboard schema that supports inline hyperlinks.
+  // runs must equal the text projection of inlines, including hyperlink text.
+  let receipt: DocReceipt;
   try {
-    written = await insert.call(doc, { value: text, type: 'text', target: over(offset, offset) });
-  } catch (error) {
-    return { ok: false, message: thrownText(failedAction, error), reason: 'threw' };
-  }
-  if (written?.success === false) {
-    return { ok: false, message: receiptFailureText(failedAction, written), reason: written.failure?.code };
-  }
-
-  // היסטי המנוע הם יחידות UTF-16, כמו `String.length` (נמדד ב-at-mention-overlay.ts).
-  const end = offset + text.length;
-
-  const placeCaret = (at: number): void => {
-    const selection = (host as HyperlinksHost | null | undefined)?.ui?.selection;
-    try {
-      selection?.apply?.call(selection, over(at, at));
-    } catch (error) {
-      // מיקום הסמן אינו שווה הודעת שגיאה.
-      console.warn('[otzaria-word] קישור: הצבת הסמן נכשלה', error);
-    }
-  };
-
-  /**
-   * הטקסט נכתב אך אינו קישור — מוחקים אותו, כדי שהכשל לא ישאיר שארית במסמך,
-   * ומחזירים את הסמן למקומו: נמדד שאחרי המחיקה אין למנוע בחירה כלל.
-   */
-  const undoText = async (): Promise<void> => {
-    try {
-      await insert.call(doc, { value: '', type: 'text', target: over(offset, end) });
-    } catch (error) {
-      console.warn('[otzaria-word] קישור: מחיקת הטקסט אחרי עטיפה שנכשלה נכשלה', error);
-    }
-    placeCaret(offset);
-  };
-
-  let wrapped: DocReceipt;
-  try {
-    wrapped = await wrap.call(doc.hyperlinks, {
-      target: { kind: 'text', blockId, range: { start: offset, end }, ...(story ? { story } : {}) },
-      link: { destination: { href: input.href } },
+    receipt = await insert.call(clipboard, {
+      fragment: {
+        kind: 'superdoc.clipboard.fragment',
+        version: 'v2.2',
+        blocks: [{
+          kind: 'paragraph',
+          runs: [{ text }],
+          inlines: [{
+            kind: 'hyperlink',
+            target: { kind: 'external', url: input.href },
+            inlines: [{ kind: 'text', text }],
+          }],
+        }],
+      },
+      formattingMode: 'match-destination',
+      target: over(offset),
     });
   } catch (error) {
-    await undoText();
     return { ok: false, message: thrownText(failedAction, error), reason: 'threw' };
   }
-  if (wrapped?.success === false) {
-    await undoText();
+  if (receipt?.success === false) {
     return {
       ok: false,
-      message: isHyperlinkOverlapFailure(wrapped)
+      message: isHyperlinkOverlapFailure(receipt)
         ? `${failedAction}: אי אפשר להוסיף קישור בתוך קישור קיים`
-        : receiptFailureText(failedAction, wrapped),
-      reason: wrapped.failure?.code,
+        : receiptFailureText(failedAction, receipt),
+      reason: receipt.failure?.code,
     };
   }
 
-  // הסמן אחרי הקישור, כדי שההקלדה הבאה תמשיך ממנו ולא תידחף לפניו.
-  placeCaret(end);
+  const selection = (host as HyperlinksHost | null | undefined)?.ui?.selection;
+  try {
+    // Engine text offsets use UTF-16 code units, like String.length.
+    selection?.apply?.call(selection, over(offset + text.length));
+  } catch (error) {
+    console.warn('[otzaria-word] קישור: הצבת הסמן נכשלה', error);
+  }
   return { ok: true };
 }
 

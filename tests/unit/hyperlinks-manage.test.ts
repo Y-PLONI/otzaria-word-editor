@@ -7,6 +7,7 @@
  * קישור" הוא המצב המבוקש); ועריכה מדווחת אמת כשהעטיפה נכשלת אחרי הסרה.
  */
 import { describe, expect, it, vi } from 'vitest';
+import type { DocReceipt } from '../../src/engine/document-api';
 import {
   editHyperlink,
   insertHyperlinkAtCaret,
@@ -166,63 +167,72 @@ describe('editHyperlink', () => {
 });
 
 describe('insertHyperlinkAtCaret', () => {
-  const caret = (offset: number) => ({
+  const caret = (offset: number, story?: unknown) => ({
     kind: 'selection',
     start: { kind: 'text', blockId: 'b1', offset },
     end: { kind: 'text', blockId: 'b1', offset },
+    ...(story ? { story } : {}),
   });
 
-  function caretHost(options: { wrap?: () => unknown } = {}) {
-    const { doc, calls } = fakeDoc(options);
-    const inserts: unknown[] = [];
-    (doc as { insert: unknown }).insert = vi.fn(async (input: unknown) => {
-      inserts.push(input);
-      return { success: true };
-    });
+  function caretHost(result: DocReceipt = { success: true }) {
+    const insert = vi.fn(async (_input: Record<string, unknown>) => result);
     const apply = vi.fn();
-    return { host: { activeEditor: { doc }, ui: { selection: { apply } } }, calls, inserts, apply };
+    const list = vi.fn();
+    return { host: { activeEditor: { doc: { clipboard: { insert }, hyperlinks: { list } } }, ui: { selection: { apply } } }, insert, apply, list };
   }
 
-  it('כותב טקסט ועוטף אותו — לא hyperlinks.insert, שנדחה בפסקה שיש בה קישור', async () => {
-    const { host, calls, inserts, apply } = caretHost();
-
-    const outcome = await insertHyperlinkAtCaret(host, { href: 'https://b.org/', text: 'שני', at: caret(10) });
-
-    expect(outcome).toEqual({ ok: true });
-    expect(inserts).toEqual([{ value: 'שני', type: 'text', target: caret(10) }]);
-    expect(calls.get('wrap')).toEqual([
-      { target: { kind: 'text', blockId: 'b1', range: { start: 10, end: 13 } }, link: { destination: { href: 'https://b.org/' } } },
-    ]);
-    // הסמן אחרי הקישור, ולא לפניו.
+  it('inserts the link and text in one transaction, without scanning all hyperlinks', async () => {
+    const { host, insert, apply, list } = caretHost();
+    expect(await insertHyperlinkAtCaret(host, { href: 'https://b.org/', text: 'שני', at: caret(10) })).toEqual({ ok: true });
+    expect(insert).toHaveBeenCalledExactlyOnceWith({
+      fragment: { kind: 'superdoc.clipboard.fragment', version: 'v2.2', blocks: [{
+        kind: 'paragraph', runs: [{ text: 'שני' }],
+        inlines: [{ kind: 'hyperlink', target: { kind: 'external', url: 'https://b.org/' }, inlines: [{ kind: 'text', text: 'שני' }] }],
+      }] },
+      formattingMode: 'match-destination', target: caret(10),
+    });
+    expect(list).not.toHaveBeenCalled();
     expect(apply).toHaveBeenLastCalledWith(caret(13));
   });
 
-  it('בלי טקסט להצגה — הכתובת היא הטקסט', async () => {
-    const { host, inserts } = caretHost();
-
-    await insertHyperlinkAtCaret(host, { href: 'https://a.org/', at: caret(0) });
-
-    expect(inserts[0]).toMatchObject({ value: 'https://a.org/' });
+  it('uses the href when display text is empty and preserves story/UTF-16 offsets', async () => {
+    const { host, insert, apply } = caretHost();
+    const story = { kind: 'story', storyType: 'footnote', noteId: '1' };
+    await insertHyperlinkAtCaret(host, { href: 'https://a.org/', text: '  ', at: caret(0, story) });
+    expect(insert.mock.calls[0]).toEqual([expect.objectContaining({ fragment: expect.objectContaining({ blocks: [expect.objectContaining({ runs: [{ text: 'https://a.org/' }] })] }) })]);
+    await insertHyperlinkAtCaret(host, { href: 'https://a.org/', text: 'א😀', at: caret(4, story) });
+    expect(apply).toHaveBeenLastCalledWith({ ...caret(7, story), start: { kind: 'text', blockId: 'b1', offset: 7, story }, end: { kind: 'text', blockId: 'b1', offset: 7, story } });
   });
 
-  it('עטיפה שנדחתה בתוך קישור — הטקסט נמחק, הסמן חוזר, וההודעה בעברית', async () => {
-    const { host, inserts, apply } = caretHost({
-      wrap: () => ({ success: false, failure: { code: 'INVALID_TARGET', message: 'hyperlink-nested-unsupported' } }),
-    });
-
+  it('reports rejection without a compensating document edit or moving the caret', async () => {
+    const { host, insert, apply } = caretHost({ success: false, failure: { code: 'INVALID_TARGET', message: 'hyperlink-nested-unsupported' } });
     const outcome = await insertHyperlinkAtCaret(host, { href: 'https://c.org/', text: 'abc', at: caret(4) });
-
     expect(outcome).toMatchObject({ ok: false, message: expect.stringContaining('בתוך קישור קיים') });
-    expect(inserts[1]).toEqual({ value: '', type: 'text', target: { ...caret(4), end: { kind: 'text', blockId: 'b1', offset: 7 } } });
-    expect(apply).toHaveBeenLastCalledWith(caret(4));
+    expect(insert).toHaveBeenCalledTimes(1);
+    expect(apply).not.toHaveBeenCalled();
   });
 
-  it('בחירה שאינה סמן יחיד — null, והקורא נופל לפקודת המנוע', async () => {
-    const { host, inserts } = caretHost();
-    const range = { ...caret(0), end: { kind: 'text', blockId: 'b1', offset: 3 } };
+  it('reports exceptions without another edit', async () => {
+    const { host, insert, apply } = caretHost();
+    insert.mockRejectedValueOnce(new Error('unavailable'));
+    expect(await insertHyperlinkAtCaret(host, { href: 'https://a.org/', at: caret(0) })).toMatchObject({ ok: false, reason: 'threw' });
+    expect(insert).toHaveBeenCalledTimes(1);
+    expect(apply).not.toHaveBeenCalled();
+  });
 
+  it('keeps custom otzaria links on the native command because rich inbound rejects them', async () => {
+    const { host, insert, apply } = caretHost();
+    expect(await insertHyperlinkAtCaret(host, { href: 'otzaria://open/book/42?index=7', at: caret(0) })).toBeNull();
+    expect(insert).not.toHaveBeenCalled();
+    expect(apply).not.toHaveBeenCalled();
+  });
+
+  it('leaves noncollapsed selections and unavailable APIs to the native command', async () => {
+    const { host, insert } = caretHost();
+    const range = { ...caret(0), end: { kind: 'text', blockId: 'b1', offset: 3 } };
     expect(await insertHyperlinkAtCaret(host, { href: 'https://a.org/', at: range })).toBeNull();
     expect(await insertHyperlinkAtCaret(host, { href: 'https://a.org/', at: null })).toBeNull();
-    expect(inserts).toHaveLength(0);
+    expect(await insertHyperlinkAtCaret({ activeEditor: { doc: {} } }, { href: 'https://a.org/', at: caret(0) })).toBeNull();
+    expect(insert).not.toHaveBeenCalled();
   });
 });
