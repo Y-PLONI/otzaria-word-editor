@@ -34,7 +34,7 @@ class FakeSuperDoc {
 
 const createSuperDocUI = vi.fn();
 
-vi.mock('superdoc', () => ({ SuperDoc: FakeSuperDoc }));
+vi.mock('superdoc', () => ({ SuperDoc: FakeSuperDoc, defineSuperDocExtension: (extension: unknown) => extension }));
 vi.mock('superdoc/ui', () => ({ createSuperDocUI }));
 vi.mock('superdoc/style.css', () => ({}));
 

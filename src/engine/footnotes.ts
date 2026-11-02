@@ -104,6 +104,7 @@
 import type { SuperDoc } from 'superdoc';
 import type { CommandOutcome } from './command-adapter';
 import { receiptFailureText, thrownText, type DocReceipt, type MaybePromise } from './document-api';
+import { captureNoteAnchor, carryFormatPastNote, type NoteRunFormatTarget } from './footnote-run-format';
 
 export type NoteType = 'footnote' | 'endnote';
 
@@ -135,7 +136,7 @@ interface DiscoveryPage<T> {
 
 export interface FootnotesDocumentApi {
   footnotes?: {
-    insert?: (input: { type: NoteType; content: string }) => MaybePromise<DocReceipt>;
+    insert?: (input: { type: NoteType; content: string }) => MaybePromise<DocReceipt & { footnote?: NoteAddress }>;
     list?: (query?: {
       type?: NoteType;
       limit?: number;
@@ -181,7 +182,10 @@ export async function insertNote(
     return { ok: false, message: `${failedAction}: אינו זמין בגרסה זו`, reason: 'command-unsupported' };
   }
 
-  let receipt: DocReceipt;
+  // לפני ההכנסה: אחריה הסמן כבר בתוך ההערה. ראו footnote-run-format.ts.
+  const anchor = await captureNoteAnchor(host as NoteRunFormatTarget);
+
+  let receipt: DocReceipt & { footnote?: NoteAddress };
   try {
     receipt = await insert({ type, content: '' });
   } catch (error) {
@@ -192,6 +196,9 @@ export async function insertNote(
     return { ok: false, message: receiptFailureText(failedAction, receipt), reason: receipt.failure?.code };
   }
 
+  if (anchor && typeof receipt?.footnote?.noteId === 'string') {
+    carryFormatPastNote(host as NoteRunFormatTarget, anchor, { noteId: receipt.footnote.noteId, type });
+  }
   return { ok: true };
 }
 
