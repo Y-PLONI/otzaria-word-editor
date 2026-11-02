@@ -220,6 +220,49 @@ describe('insertHyperlinkAtCaret', () => {
     expect(apply).not.toHaveBeenCalled();
   });
 
+  it('awaits asynchronous caret placement before completing the insertion', async () => {
+    const { host, insert, apply } = caretHost();
+    let finish!: (result: { ok: boolean }) => void;
+    apply.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+    let finished = false;
+    const pending = insertHyperlinkAtCaret(host, { href: 'https://a.org/', text: 'abc', at: caret(4) }).then((outcome) => {
+      finished = true;
+      return outcome;
+    });
+    await vi.waitFor(() => expect(apply).toHaveBeenCalled());
+    expect(finished).toBe(false);
+    finish({ ok: true });
+    await expect(pending).resolves.toEqual({ ok: true });
+    expect(insert).toHaveBeenCalledTimes(1);
+  });
+
+  it('logs a rejected caret target while keeping the successful insertion outcome', async () => {
+    const { host, insert, apply } = caretHost();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      apply.mockReturnValueOnce({ ok: false, reason: 'target-unresolved' });
+      await expect(insertHyperlinkAtCaret(host, { href: 'https://a.org/', text: 'abc', at: caret(4) })).resolves.toEqual({ ok: true });
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('הצבת הסמן נדחתה'), 'target-unresolved');
+      expect(insert).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('handles asynchronous caret rejection without retrying the insertion', async () => {
+    const { host, insert, apply } = caretHost();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const error = new Error('selection unavailable');
+    try {
+      apply.mockRejectedValueOnce(error);
+      await expect(insertHyperlinkAtCaret(host, { href: 'https://a.org/', text: 'abc', at: caret(4) })).resolves.toEqual({ ok: true });
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('הצבת הסמן נכשלה'), error);
+      expect(insert).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('keeps custom otzaria links on the native command because rich inbound rejects them', async () => {
     const { host, insert, apply } = caretHost();
     expect(await insertHyperlinkAtCaret(host, { href: 'otzaria://open/book/42?index=7', at: caret(0) })).toBeNull();

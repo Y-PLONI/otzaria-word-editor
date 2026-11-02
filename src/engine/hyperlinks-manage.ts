@@ -71,7 +71,7 @@ export interface HyperlinksHost {
   ui?: {
     selection?: {
       /** מציבה סמן. אותה ידית ש-at-mention-overlay.ts מציב בה את הסמן אחרי קישור. */
-      apply?: (target: Record<string, unknown>) => unknown;
+      apply?: (target: Record<string, unknown>) => MaybePromise<{ ok?: boolean; reason?: string } | undefined>;
     } | null;
   } | null;
 }
@@ -281,7 +281,11 @@ export async function insertHyperlinkAtCaret(
   const selection = (host as HyperlinksHost | null | undefined)?.ui?.selection;
   try {
     // Engine text offsets use UTF-16 code units, like String.length.
-    selection?.apply?.call(selection, over(offset + text.length));
+    const result = await selection?.apply?.call(selection, over(offset + text.length));
+    // The link already exists: a selection failure must not invite reinsertion.
+    if (result?.ok === false) {
+      console.warn('[otzaria-word] קישור: הצבת הסמן נדחתה', result.reason);
+    }
   } catch (error) {
     console.warn('[otzaria-word] קישור: הצבת הסמן נכשלה', error);
   }
