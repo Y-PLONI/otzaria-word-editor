@@ -65,6 +65,7 @@ import {
 } from './at-mention';
 import { isCaretFollowScroll } from './caret-visibility';
 import { removeBlankHyperlinks, type HyperlinkBlanksDoc } from './hyperlink-blanks';
+import { isHyperlinkOverlapFailure } from './hyperlinks-manage';
 import { resolveRef } from '../host/otzaria-reader';
 
 /** כתובת טווח טקסט, כפי ש-`hyperlinks.wrap`/`insert` מקבלים אותה. */
@@ -149,21 +150,6 @@ function pointAt(blockId: string, offset: number, story: unknown): SelectionPoin
   const point: SelectionPointLike = { kind: 'text', blockId, offset };
   if (story !== undefined && story !== null) point.story = story;
   return point;
-}
-
-/**
- * „הטווח נוגע בקישור קיים”, בכל הצורות שהמנוע מדווח בהן.
- *
- * הבדיקה היא על ההודעה ולא על הקוד בלבד, וזה נמדד: הקוד שחזר הוא
- * `INVALID_CONTEXT` (ומ-`wrap` — `INVALID_TARGET`), בעוד
- * `hyperlink-nested-unsupported` הוא **ההודעה**. בדיקה על הקוד לבדו לא
- * התאימה מעולם, ולכן המשתמש קיבל בשורת המצב את המחרוזת האנגלית הגולמית
- * במקום את ההודעה בעברית.
- */
-function isOverlapFailure(receipt: DocReceipt | null | undefined): boolean {
-  const failure = receipt?.failure;
-  const text = `${failure?.code ?? ''} ${failure?.message ?? ''}`;
-  return /hyperlink-nested-unsupported/i.test(text) || /overlap.*existing hyperlink/i.test(text);
 }
 
 interface Seed {
@@ -663,7 +649,7 @@ export function installAtMention(
     }
     if (receipt?.success === false) {
       report(
-        isOverlapFailure(receipt)
+        isHyperlinkOverlapFailure(receipt)
           ? 'אי אפשר להוסיף קישור בתוך קישור קיים'
           : (receipt.failure?.message ?? 'הוספת הקישור נכשלה'),
         true,

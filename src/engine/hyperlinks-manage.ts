@@ -56,6 +56,9 @@ interface HyperlinksApiShape {
   selection?: {
     current?: () => MaybePromise<SelectionInfoLike | undefined>;
   };
+  clipboard?: {
+    insert?: (input: Record<string, unknown>) => MaybePromise<DocReceipt>;
+  };
   hyperlinks?: {
     list?: (input?: Record<string, unknown>) => MaybePromise<unknown>;
     wrap?: (input: Record<string, unknown>) => MaybePromise<DocReceipt>;
@@ -65,6 +68,12 @@ interface HyperlinksApiShape {
 
 export interface HyperlinksHost {
   activeEditor?: { doc?: HyperlinksApiShape | null } | null;
+  ui?: {
+    selection?: {
+      /** מציבה סמן. אותה ידית ש-at-mention-overlay.ts מציב בה את הסמן אחרי קישור. */
+      apply?: (target: Record<string, unknown>) => MaybePromise<{ ok?: boolean; reason?: string } | undefined>;
+    } | null;
+  } | null;
 }
 
 export type HyperlinksTarget = SuperDoc | HyperlinksHost | null | undefined;
@@ -168,6 +177,119 @@ export async function listHyperlinks(host: HyperlinksTarget): Promise<HyperlinkI
   } catch {
     return null;
   }
+}
+
+/**
+ * „הטווח נוגע בקישור קיים”, בכל הצורות שהמנוע מדווח בהן.
+ *
+ * הבדיקה היא על ההודעה ולא על הקוד בלבד, וזה נמדד: הקוד שחזר הוא
+ * `INVALID_CONTEXT` (ומ-`wrap` — `INVALID_TARGET`), בעוד
+ * `hyperlink-nested-unsupported` הוא **ההודעה**. בדיקה על הקוד לבדו לא
+ * התאימה מעולם, ולכן המשתמש קיבל בשורת המצב את המחרוזת האנגלית הגולמית
+ * במקום את ההודעה בעברית. משותפת לאזכור „@” ולדיאלוג הקישור.
+ */
+export function isHyperlinkOverlapFailure(receipt: DocReceipt | null | undefined): boolean {
+  const failure = receipt?.failure;
+  const text = `${failure?.code ?? ''} ${failure?.message ?? ''}`;
+  return /hyperlink-nested-unsupported/i.test(text) || /overlap.*existing hyperlink/i.test(text);
+}
+
+/** סמן יחיד בבלוק טקסט, מתוך `selectionTarget`. `null` לכל צורה אחרת. */
+function readCaretPoint(
+  target: unknown,
+): { blockId: string; offset: number; story: unknown } | null {
+  const t = target as {
+    kind?: string;
+    story?: unknown;
+    start?: { kind?: string; blockId?: unknown; offset?: unknown; story?: unknown };
+    end?: { kind?: string; blockId?: unknown; offset?: unknown };
+  } | null;
+  if (!t || t.kind !== 'selection') return null;
+  const { start, end } = t;
+  if (start?.kind !== 'text' || end?.kind !== 'text') return null;
+  if (typeof start.blockId !== 'string' || start.blockId !== end.blockId) return null;
+  if (typeof start.offset !== 'number' || start.offset !== end.offset) return null;
+  return { blockId: start.blockId, offset: start.offset, story: t.story ?? start.story ?? null };
+}
+
+/**
+ * Insert a complete inline hyperlink in one public clipboard transaction.
+ * `hyperlinks.insert` rejects even a distant second link in the same paragraph
+ * on 2.23. `doc.insert` + `hyperlinks.wrap` works, but creates two Undo entries
+ * and needs a compensating delete on failure. A v2.2 clipboard fragment carries
+ * the hyperlink itself; match-destination preserves authored run properties.
+ * It also works beside empty hyperlink remnants without a document-wide scan.
+ * Rich inbound content rejects otzaria: URLs; keep those on the native link
+ * command, so the supported custom-link workflow keeps its original behavior.
+ * `null` means this is not a single caret (or the API is unavailable).
+ */
+export async function insertHyperlinkAtCaret(
+  host: HyperlinksTarget,
+  input: { href: string; text?: string; at: unknown },
+): Promise<CommandOutcome | null> {
+  const failedAction = 'הוספת הקישור נכשלה';
+  const doc = docOf(host);
+  const clipboard = doc?.clipboard;
+  const insert = clipboard?.insert;
+  const caret = readCaretPoint(input.at);
+  if (typeof insert !== 'function' || !caret) return null;
+  if (!/^(?:https?:|mailto:)/i.test(input.href)) return null;
+
+  const text = input.text?.trim() || input.href;
+  const { blockId, offset, story } = caret;
+  const point = (at: number) => ({ kind: 'text', blockId, offset: at, ...(story ? { story } : {}) });
+  const over = (at: number) => ({
+    kind: 'selection',
+    start: point(at),
+    end: point(at),
+    ...(story ? { story } : {}),
+  });
+  // v2.2 is the public clipboard schema that supports inline hyperlinks.
+  // runs must equal the text projection of inlines, including hyperlink text.
+  let receipt: DocReceipt;
+  try {
+    receipt = await insert.call(clipboard, {
+      fragment: {
+        kind: 'superdoc.clipboard.fragment',
+        version: 'v2.2',
+        blocks: [{
+          kind: 'paragraph',
+          runs: [{ text }],
+          inlines: [{
+            kind: 'hyperlink',
+            target: { kind: 'external', url: input.href },
+            inlines: [{ kind: 'text', text }],
+          }],
+        }],
+      },
+      formattingMode: 'match-destination',
+      target: over(offset),
+    });
+  } catch (error) {
+    return { ok: false, message: thrownText(failedAction, error), reason: 'threw' };
+  }
+  if (receipt?.success === false) {
+    return {
+      ok: false,
+      message: isHyperlinkOverlapFailure(receipt)
+        ? `${failedAction}: אי אפשר להוסיף קישור בתוך קישור קיים`
+        : receiptFailureText(failedAction, receipt),
+      reason: receipt.failure?.code,
+    };
+  }
+
+  const selection = (host as HyperlinksHost | null | undefined)?.ui?.selection;
+  try {
+    // Engine text offsets use UTF-16 code units, like String.length.
+    const result = await selection?.apply?.call(selection, over(offset + text.length));
+    // The link already exists: a selection failure must not invite reinsertion.
+    if (result?.ok === false) {
+      console.warn('[otzaria-word] קישור: הצבת הסמן נדחתה', result.reason);
+    }
+  } catch (error) {
+    console.warn('[otzaria-word] קישור: הצבת הסמן נכשלה', error);
+  }
+  return { ok: true };
 }
 
 /** „הסר קישור" על הטווח המסומן. TARGET_NOT_FOUND = כבר אין קישור = הצלחה. */

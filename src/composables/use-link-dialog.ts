@@ -23,6 +23,12 @@ export interface LinkDialogDeps {
   readSelection: () => Promise<DocSelectionSnapshot>;
   /** מריץ את פקודת `link` עם ה-payload. */
   runLink: (payload: unknown) => void;
+  /**
+   * כותב קישור בסמן, כשאין טווח מסומן. `null` = אין סמן שאפשר לכתוב בו,
+   * ואז הדיאלוג נופל ל-`runLink`. ראו `insertHyperlinkAtCaret` למה פקודת
+   * המנוע אינה המסלול כאן.
+   */
+  insertAtCaret?: (link: { href: string; text?: string; at: unknown }) => Promise<CommandOutcome | null>;
   /** מדווח כשל שלא הגיע מהפקודה עצמה. */
   report: (outcome: CommandOutcome, commandId: string) => void;
 }
@@ -78,7 +84,23 @@ export function createLinkDialog(deps: LinkDialogDeps): LinkDialogState {
     }
 
     isOpen.value = false;
+
+    if (!snapshot.hasRange && snapshot.selectionTarget && deps.insertAtCaret) {
+      void runAtCaret(payload, snapshot.selectionTarget);
+      return;
+    }
     deps.runLink(payload);
+  }
+
+  async function runAtCaret(payload: { href: string; text?: string }, at: unknown): Promise<void> {
+    let outcome: CommandOutcome | null;
+    try {
+      outcome = await deps.insertAtCaret!({ href: payload.href, text: payload.text, at });
+    } catch (error) {
+      outcome = { ok: false, message: error instanceof Error ? error.message : 'הוספת הקישור נכשלה', reason: 'threw' };
+    }
+    if (outcome === null) deps.runLink(payload);
+    else deps.report(outcome, 'link');
   }
 
   return { isOpen, selection, open, close, submit };
