@@ -329,6 +329,12 @@ const EN: Readonly<Record<string, string>> = {
   'יום/חודש/שנה, בלי שעה': 'Day/Month/Year, without time',
   'שעה בלבד': 'Time Only',
   'שעה בלבד, בלי תאריך': 'Time only, without date',
+  'הכנסת התאריך העברי והשעה במקום הסמן, כטקסט שאינו מתעדכן':
+    'Insert the Hebrew date and time at the cursor, as text that does not update',
+  'תאריך עברי ושעה, כטקסט קבוע': 'Hebrew date and time, as fixed text',
+  'תאריך עברי, בלי שעה': 'Hebrew date, without time',
+  'לוח עברי': 'Hebrew Calendar',
+  'לוח לועזי': 'Gregorian Calendar',
   'עדכן שדות': 'Update Fields',
   'חישוב מחדש של כל השדות במסמך, כמו F9 ב-Word':
     'Recalculate all fields in the document, like F9 in Word',

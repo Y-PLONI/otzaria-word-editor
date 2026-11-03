@@ -194,6 +194,7 @@
         :tooltip="dateTooltip"
         :disabled="!can('canInsertField')"
         :items="dateItems"
+        @open="dateNow = new Date()"
         @action="onInsertDate"
         @select="onDateAction"
       />
@@ -355,6 +356,15 @@ import {
   rebuildAllFields,
   type FieldsState,
 } from '../../../engine/fields';
+import {
+  DATE_CALENDAR_SETTING,
+  DEFAULT_DATE_CALENDAR,
+  formatHebrewDate,
+  insertHebrewDate,
+  parseDateCalendar,
+  type DateCalendar,
+} from '../../../engine/hebrew-date';
+import { loadSetting, saveSetting } from '../../../host/settings';
 import {
   emptyBookmarksState,
   insertBookmark,
@@ -808,20 +818,74 @@ const pageNumberItems = [
 ];
 
 /**
- * ה-tooltip אומר שהשדה מתעדכן, כי זה כל ההבדל בינו לבין הקלדת התאריך, ואומר
- * את הפורמט במפורש — הוא `dd/MM/yyyy HH:mm` ולא „הפורמט של המסמך”, כי המתג נשלח
- * בקוד השדה ונמדד כמפורש במנוע. ראו engine/fields.ts.
+ * הלוח של „תאריך ושעה”: עברי כברירת מחדל, לועזי בבחירה מהתפריט. העדפה של
+ * התוכנה ולא של המסמך, ולכן נזכרת בין הפעלות (host/settings.ts).
+ *
+ * בלוח העברי התאריך נכתב כטקסט קבוע, בלועזי כשדה שמתעדכן — ראו
+ * engine/hebrew-date.ts.
+ */
+const dateCalendar = ref<DateCalendar>(DEFAULT_DATE_CALENDAR);
+void loadSetting(DATE_CALENDAR_SETTING, DEFAULT_DATE_CALENDAR, parseDateCalendar).then((saved) => {
+  dateCalendar.value = saved;
+});
+
+function setDateCalendar(calendar: DateCalendar): void {
+  dateCalendar.value = calendar;
+  void saveSetting(DATE_CALENDAR_SETTING, calendar);
+}
+
+/** „היום” של הדוגמאות בתפריט — מתרענן בכל פתיחה, כדי שתפריט שנפתח אחרי חצות לא יציג את אתמול. */
+const dateNow = ref(new Date());
+
+function gregorianExample(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}`;
+}
+
+/**
+ * ה-tooltip אומר את מה שייכתב: בלועזי — שדה שמתעדכן, ובפורמט המפורש
+ * `dd/MM/yyyy HH:mm` (המתג נשלח בקוד השדה, ראו engine/fields.ts); בעברי —
+ * טקסט שאינו מתעדכן, כי זה ההבדל שהמשתמש צריך לדעת.
  */
 const dateTooltip = computed(() =>
-  tip('canInsertField', 'הכנסת שדה תאריך ושעה שמתעדכן, בפורמט יום/חודש/שנה שעה:דקות')
+  dateCalendar.value === 'hebrew'
+    ? tip('canInsertField', 'הכנסת התאריך העברי והשעה במקום הסמן, כטקסט שאינו מתעדכן')
+    : tip('canInsertField', 'הכנסת שדה תאריך ושעה שמתעדכן, בפורמט יום/חודש/שנה שעה:דקות')
 );
 
-/** תפריט החץ של „תאריך ושעה”: אותו שדה, בשלוש ברירות מתג. */
-const dateItems = [
-  { id: 'date-time', label: 'תאריך ושעה', hint: 'יום/חודש/שנה ושעה' },
-  { id: 'date-only', label: 'תאריך בלבד', hint: 'יום/חודש/שנה, בלי שעה' },
-  { id: 'time-only', label: 'שעה בלבד', hint: 'שעה בלבד, בלי תאריך' },
-];
+/**
+ * תפריט החץ של „תאריך ושעה”: שלוש ברירות תוכן, ומתחת לקו — הלוח. הלוח הוא
+ * בחירה מתמשכת ולא פעולה, ולכן פריטי רדיו (`checked`) עם דוגמה של היום.
+ */
+const dateItems = computed(() => {
+  const hebrew = dateCalendar.value === 'hebrew';
+  return [
+    {
+      id: 'date-time',
+      label: 'תאריך ושעה',
+      hint: hebrew ? 'תאריך עברי ושעה, כטקסט קבוע' : 'יום/חודש/שנה ושעה',
+    },
+    {
+      id: 'date-only',
+      label: 'תאריך בלבד',
+      hint: hebrew ? 'תאריך עברי, בלי שעה' : 'יום/חודש/שנה, בלי שעה',
+    },
+    { id: 'time-only', label: 'שעה בלבד', hint: 'שעה בלבד, בלי תאריך' },
+    {
+      id: 'calendar-hebrew',
+      label: 'לוח עברי',
+      hint: formatHebrewDate(dateNow.value),
+      checked: hebrew,
+      separatorBefore: true,
+    },
+    {
+      id: 'calendar-gregorian',
+      label: 'לוח לועזי',
+      hint: gregorianExample(dateNow.value),
+      checked: !hebrew,
+    },
+  ];
+});
 
 const rebuildTooltip = computed(() =>
   tip(
@@ -854,13 +918,26 @@ function onPageNumberAction(action: string): void {
 }
 
 function onInsertDate(): void {
+  if (dateCalendar.value === 'hebrew') {
+    void insertHebrewDate(superdoc.value, true).then((outcome) => report(outcome, 'date-hebrew'));
+    return;
+  }
   void runFields('field-date', insertDate(superdoc.value));
 }
 
-/** בחירה בתפריט החץ. „תאריך ושעה” מזוהה עם לחיצת הגוף — אותה פעולה בדיוק. */
+/**
+ * בחירה בתפריט החץ. „תאריך ושעה” מזוהה עם לחיצת הגוף — אותה פעולה בדיוק.
+ * „שעה בלבד” אינה תלויה בלוח ונשארת שדה בשניהם.
+ */
 function onDateAction(action: string): void {
+  if (action === 'calendar-hebrew') return setDateCalendar('hebrew');
+  if (action === 'calendar-gregorian') return setDateCalendar('gregorian');
   if (action === 'date-time') return onInsertDate();
   const host = superdoc.value;
+  if (action === 'date-only' && dateCalendar.value === 'hebrew') {
+    void insertHebrewDate(host, false).then((outcome) => report(outcome, 'date-hebrew-only'));
+    return;
+  }
   void runFields(
     action === 'date-only' ? 'field-date-only' : 'field-time-only',
     action === 'date-only' ? insertDateOnly(host) : insertTimeOnly(host)
