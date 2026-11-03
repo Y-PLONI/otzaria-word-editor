@@ -28,6 +28,12 @@ export interface PasteRunMarks {
   fontSizePt?: number;
   fontSizeCsPt?: number;
   fontFamily?: string;
+  /**
+   * גופן הכתב המורכב של היעד, כשהוא שונה מ-`fontFamily`. פנימי בלבד: לחוזה
+   * של המנוע יש גופן אחד לריצה, ולכן הריצה נחתכת לפי כתב (`scriptSegments`)
+   * והשדה אינו יוצא מהמודול.
+   */
+  fontFamilyCs?: string;
   verticalAlign?: 'baseline' | 'superscript' | 'subscript';
 }
 
@@ -186,19 +192,62 @@ function withoutKeys<T extends Record<string, unknown>>(object: T, keys: readonl
   return copy as T;
 }
 
-function rewriteText<T extends PasteText>(run: T, rewrite: Rewrite): T {
-  const marks = rewrite.marks(run.marks);
-  const { marks: _source, ...rest } = run;
-  return (Object.keys(marks).length > 0 ? { ...rest, marks } : rest) as T;
+/* ------------------------------------------------------------------ */
+/* יעד שהגופן או הגודל שלו שונים בין עברית ללטינית                       */
+/* ------------------------------------------------------------------ */
+
+/** אותיות שנכתבות במחסנית הכתב המורכב: עברית, ערבית וצורות ההצגה שלהן. */
+const COMPLEX_LETTER = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/u;
+const LETTER = /\p{L}/u;
+
+/**
+ * הטקסט בקטעים לפי כתב. תו ניטרלי (רווח, פיסוק, ספרה) מצטרף לקטע שלפניו —
+ * „שלום, world” הוא „שלום, ” ו-„world” — ובתחילת הריצה לקטע הראשון שאחריו.
+ * ריצה בלי אף אות נחשבת עברית: ב-RTL ספרות ופיסוק נקראים מהמחסנית המורכבת.
+ */
+export function scriptSegments(text: string): { text: string; complex: boolean }[] {
+  const segments: { text: string; complex: boolean | null }[] = [];
+  for (const char of text) {
+    const complex = COMPLEX_LETTER.test(char) ? true : LETTER.test(char) ? false : null;
+    const last = segments[segments.length - 1];
+    if (last && (complex === null || last.complex === complex)) last.text += char;
+    else if (last && last.complex === null) { last.text += char; last.complex = complex; }
+    else segments.push({ text: char, complex });
+  }
+  return segments.map((segment) => ({ text: segment.text, complex: segment.complex !== false }));
 }
 
-function rewriteInline(inline: PasteInline, rewrite: Rewrite): PasteInline {
+/** הסימנים של קטע אחד: גופן וגודל אחידים מהערוץ של הכתב שלו. */
+function scriptMarks(marks: PasteRunMarks, complex: boolean): PasteRunMarks {
+  const { fontFamilyCs, ...rest } = marks;
+  const family = complex ? fontFamilyCs ?? marks.fontFamily : marks.fontFamily;
+  const size = complex ? marks.fontSizeCsPt ?? marks.fontSizePt : marks.fontSizePt ?? marks.fontSizeCsPt;
+  return {
+    ...rest,
+    ...(family !== undefined ? { fontFamily: family } : {}),
+    ...(size !== undefined ? { fontSizePt: size, fontSizeCsPt: size } : {}),
+  };
+}
+
+function rewriteText<T extends PasteText>(run: T, rewrite: Rewrite): T[] {
+  const marks = rewrite.marks(run.marks);
+  const { marks: _source, ...rest } = run;
+  const split = (marks.fontFamilyCs !== undefined && marks.fontFamilyCs !== marks.fontFamily) ||
+    (marks.fontSizeCsPt !== undefined && marks.fontSizePt !== undefined && marks.fontSizeCsPt !== marks.fontSizePt);
+  if (!split || typeof run.text !== 'string') {
+    const { fontFamilyCs: _cs, ...uniform } = marks;
+    return [(Object.keys(uniform).length > 0 ? { ...rest, marks: uniform } : rest) as T];
+  }
+  return scriptSegments(run.text).map((segment) => ({ ...rest, text: segment.text, marks: scriptMarks(marks, segment.complex) }) as T);
+}
+
+function rewriteInline(inline: PasteInline, rewrite: Rewrite): PasteInline[] {
   if (inline.kind === 'text') return rewriteText(inline as PasteText & { kind: 'text' }, rewrite);
   if (inline.kind === 'hyperlink' || inline.kind === 'sdt') {
     const link = inline as { kind: 'hyperlink' | 'sdt'; inlines: readonly PasteInline[] };
-    return { ...link, inlines: (link.inlines ?? []).map((inner) => rewriteInline(inner, rewrite)) };
+    return [{ ...link, inlines: (link.inlines ?? []).flatMap((inner) => rewriteInline(inner, rewrite)) }];
   }
-  return inline;
+  return [inline];
 }
 
 /**
@@ -213,9 +262,9 @@ function rewriteParagraph(block: PasteParagraph, rewrite: Rewrite): PasteParagra
   return {
     ...base,
     kind: 'paragraph',
-    runs: (block.runs ?? []).map((run) => rewriteText(run, rewrite)),
+    runs: (block.runs ?? []).flatMap((run) => rewriteText(run, rewrite)),
     ...(Array.isArray(block.inlines)
-      ? { inlines: block.inlines.map((inline) => rewriteInline(inline, rewrite)) }
+      ? { inlines: block.inlines.flatMap((inline) => rewriteInline(inline, rewrite)) }
       : {}),
   };
 }

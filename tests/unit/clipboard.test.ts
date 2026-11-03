@@ -1448,14 +1448,32 @@ describe('paste destination safety', () => {
     expect(clipboard.read).not.toHaveBeenCalled();
     expect(calls).toEqual([]);
   });
-  it('refuses unsupported script fonts before inserting', async () => {
+  it('gives Hebrew and Latin their own destination font and size when the two differ', async () => {
     const { host, doc, calls } = fakeDoc();
     host.ui = { selection: selectionSurface({ status: 'ready', empty: true, selectionTarget: CARET as never }) };
     doc.info = () => ({ revision: '1' });
-    doc.selection = { extractOoxml: () => ({ dependencies: destinationDependencies, fragment: { xml: '<w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="David"/></w:rPr><w:t>x</w:t></w:r>' } }) };
+    doc.selection = { extractOoxml: () => ({ dependencies: destinationDependencies, fragment: { xml: '<w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="David"/><w:szCs w:val="28"/><w:rtl/></w:rPr><w:t>x</w:t></w:r>' } }) };
+    doc.clipboard!.parse = () => ({ success: true, plan: { fragment: { blocks: [{ kind: 'paragraph', runs: [{ text: 'שלום abc' }] }] }, diagnostics: [] } });
+    const outcome = await pasteFromClipboard(host, { mode: 'merge', payload: enginePayload('שלום abc') });
+    expect(outcome.ok).toBe(true);
+    const insert = calls.find((call) => call.op === 'clipboard.insert')?.input as { plan: { fragment: { blocks: { runs: { text: string; marks: Record<string, unknown> }[] }[] } } };
+    expect(insert.plan.fragment.blocks[0]!.runs.map((run) => [run.text, run.marks.fontFamily, run.marks.fontSizePt, run.marks.fontSizeCsPt])).toEqual([
+      ['שלום ', 'David', 14, 14],
+      ['abc', 'Arial', 12, 12],
+    ]);
+    expect(JSON.stringify(insert)).not.toContain('fontFamilyCs');
+  });
+  it('refuses unsupported script fonts before inserting, and logs why', async () => {
+    const { host, doc, calls } = fakeDoc();
+    host.ui = { selection: selectionSurface({ status: 'ready', empty: true, selectionTarget: CARET as never }) };
+    doc.info = () => ({ revision: '1' });
+    doc.selection = { extractOoxml: () => ({ dependencies: destinationDependencies, fragment: { xml: '<w:r><w:rPr><w:rFonts w:asciiTheme="minorHAnsi" w:hAnsi="Arial" w:cs="David"/></w:rPr><w:t>x</w:t></w:r>' } }) };
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
     const outcome = await pasteFromClipboard(host, { mode: 'merge', payload: enginePayload('x') });
     expect(outcome.ok).toBe(false);
     expect(calls.some((call) => call.op === 'clipboard.insert')).toBe(false);
+    expect(errors).toHaveBeenCalledWith(expect.stringContaining('Direct theme font unsupported'));
+    errors.mockRestore();
   });
   it('refuses an async paste if the document changes while parsing with the same selection', async () => {
     const { host, doc, calls } = fakeDoc();

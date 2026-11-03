@@ -1160,18 +1160,29 @@ async function readDestination(
       if (!packageRead.contentBase64) throw error;
       marks = await marksFromEmptyDocument(packageRead.contentBase64, sample.start.kind === 'text' ? sample.start.blockId : '');
     }
-    // A scalar toolbar size cannot tell a pending uniform override apart from
-    // either channel of an inherited split size. Fail before writing in that case.
-    if (marks.fontSizePt === undefined || marks.fontSizeCsPt === undefined || marks.fontSizePt !== marks.fontSizeCsPt) throw new Error('Split destination sizes');
+    if (marks.fontSizePt === undefined || marks.fontSizeCsPt === undefined) throw new Error('Destination size unavailable');
     if (marks.bold !== undefined && marks.boldCs !== undefined && marks.bold !== marks.boldCs) throw new Error('Split destination bold state');
     if (marks.italic !== undefined && marks.italicCs !== undefined && marks.italic !== marks.italicCs) throw new Error('Split destination italic state');
     if (marks.highlight && caret.highlight == null) throw new Error('Pending highlight cancellation unsupported');
     if (marks.boldCs !== undefined) marks.boldCs = caret.bold;
     if (marks.italicCs !== undefined) marks.italicCs = caret.italic;
-    if (caret.fontFamily) marks.fontFamily = caret.fontFamily;
-    if (caret.fontSizePt) marks.fontSizePt = marks.fontSizeCsPt = caret.fontSizePt;
+    // The toolbar shows one scalar. When Latin and Hebrew differ, a toolbar value
+    // equal to either channel is that channel and not a pending choice; the
+    // rewrite then gives each script its own (paste-formatting `scriptSegments`).
+    // A value matching neither was chosen at the caret and wins for both.
+    const families = [marks.fontFamily, marks.fontFamilyCs ?? marks.fontFamily].map((family) => family?.toLowerCase());
+    if (caret.fontFamily && !families.includes(caret.fontFamily.toLowerCase())) {
+      marks.fontFamily = caret.fontFamily;
+      delete marks.fontFamilyCs;
+    } else if (caret.fontFamily && marks.fontFamilyCs === undefined) marks.fontFamily = caret.fontFamily;
+    if (caret.fontSizePt && (marks.fontSizePt === marks.fontSizeCsPt || ![marks.fontSizePt, marks.fontSizeCsPt].includes(caret.fontSizePt))) {
+      marks.fontSizePt = marks.fontSizeCsPt = caret.fontSizePt;
+    }
     return { ok: true, marks: { ...marks, ...destinationMarks(caret) }, revision };
-  } catch {
+  } catch (error) {
+    // כל הסירובים מגיעים לאותה הודעה למשתמש; הסיבה עצמה נרשמת ל-console.error,
+    // ומשם „דיווח על באג” מצרף אותה (host/recent-errors.ts).
+    console.error(`[otzaria-word] מיזוג עיצוב נדחה: ${error instanceof Error ? error.message : String(error)}`);
     return { ok: false, outcome: { ok: false, reason: 'paste-destination-unsupported', message: 'ההדבקה לא בוצעה: אי אפשר לשמר בבטחה את עיצוב התווים בנקודה זו. אפשר להשתמש בשמירה על עיצוב המקור.' } };
   }
 }

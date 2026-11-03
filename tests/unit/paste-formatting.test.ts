@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   destinationMarks,
   mergeFragment,
+  scriptSegments,
   textOnlyFragment,
   type PasteFragment,
 } from '../../src/engine/paste-formatting';
@@ -221,5 +222,27 @@ describe('destinationMarks — explicit destination states', () => {
     expect(JSON.stringify(output)).toContain('keep-me');
     expect(JSON.stringify(output)).toContain('"bold":true');
     expect(JSON.stringify(textOnlyFragment(source, { bold: false }))).not.toContain('"bold":true');
+  });
+});
+
+describe('scriptSegments', () => {
+  it('splits Hebrew from Latin and attaches neutrals to the preceding script', () => {
+    expect(scriptSegments('שלום, world 12 עוד')).toEqual([
+      { text: 'שלום, ', complex: true },
+      { text: 'world 12 ', complex: false },
+      { text: 'עוד', complex: true },
+    ]);
+  });
+  it('gives leading neutrals to the first letter after them, and letterless text to Hebrew', () => {
+    expect(scriptSegments('(abc) א')).toEqual([{ text: '(abc) ', complex: false }, { text: 'א', complex: true }]);
+    expect(scriptSegments('12.')).toEqual([{ text: '12.', complex: true }]);
+  });
+  it('splits a merged run per script so each script keeps its own destination font', () => {
+    const fragment = { blocks: [{ kind: 'paragraph', runs: [{ text: 'דף lamed', marks: { bold: true } }] }] };
+    const merged = mergeFragment(fragment, { fontFamily: 'Times New Roman', fontFamilyCs: 'David', fontSizePt: 12, fontSizeCsPt: 14 });
+    expect((merged.blocks[0] as { runs: unknown[] }).runs).toEqual([
+      { text: 'דף ', marks: { fontFamily: 'David', fontSizePt: 14, fontSizeCsPt: 14 } },
+      { text: 'lamed', marks: { fontFamily: 'Times New Roman', fontSizePt: 12, fontSizeCsPt: 12 } },
+    ]);
   });
 });

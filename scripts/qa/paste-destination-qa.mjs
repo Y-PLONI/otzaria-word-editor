@@ -120,9 +120,11 @@ try {
   const splitSeed = await app.js(`(async()=>{const sd=window.__qa.sd(),d=sd.activeEditor.doc;const receipt=await d.format.apply({target:window.__guardRange,inline:{rFonts:{ascii:'Arial',hAnsi:'Arial',cs:'David'}}});if(receipt.success!==true)throw new Error(JSON.stringify(receipt));await sd.ui.selection.apply(window.__guardCaret);return (await d.info()).revision})()`);
   await app.sleep(1200);
   await menu('שמירת טקסט בלבד');
-  assert.equal(await app.js(`(async()=> (await window.__qa.sd().activeEditor.doc.info()).revision)()`), splitSeed);
-  assert.match(await app.js(`window.__qa.status().text`), /ההדבקה לא בוצעה/);
-  console.log('PASS split Latin/CS destination font is refused before mutation');
+  assert.notEqual(await app.js(`(async()=> (await window.__qa.sd().activeEditor.doc.info()).revision)()`), splitSeed);
+  assert.doesNotMatch(await app.js(`window.__qa.status().text`) ?? '', /ההדבקה לא בוצעה/);
+  const splitRun = [...(await app.docx())['word/document.xml'].matchAll(/<w:r>(?:<w:rPr>(.*?)<\/w:rPr>)?<w:t(?: [^>]*)?>([^<]*)<\/w:t><\/w:r>/g)].filter((run) => run[2].includes('BASELINE')).pop();
+  assert.match(splitRun[1], /w:ascii="Arial"/, 'Latin text takes the Latin channel of a split destination');
+  console.log('PASS split Latin/CS destination: Latin text pasted with the Latin font');
 } catch (error) {
   console.error('QA STATE', await app.js(`JSON.stringify({selection:window.__qa.sd().ui.selection.getSnapshot(),events:window.__pasteEvents,native:window.__nativeEvents,focus:document.hasFocus(),active:document.activeElement?.outerHTML.slice(0,400),viewport:{w:innerWidth,h:innerHeight},status:window.__qa.status()})`));
   console.error('QA ERRORS', await app.log());
