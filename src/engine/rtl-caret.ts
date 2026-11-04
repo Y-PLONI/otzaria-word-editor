@@ -9,10 +9,8 @@
  * מקש, שתי התנהגויות הפוכות, באותו מסמך. ‏`Shift+חץ` יורש את הסתירה, ובגבול
  * בין פסקה „חזותית” ל„לוגית” הסמן מקפץ בין השתיים ואינו חולף.
  *
- * ‏**`Shift+חץ` נשאר למנוע** — לא כי הוא תקין, אלא כי התצלום הסינכרוני אינו
- * מוסר בחירה שאינה מכווצת, ולכן אין מאיפה להמשיך בהקשה הבאה. הפירוט
- * ב-`isHorizontalArrow`, ושם גם המדידה שהפריכה את הנימוק שנכתב כאן קודם
- * („בחירה שנכתבת דרך ה-API אינה מצוירת” — היא כן).
+ * וכך גם בחירה: בפסקה „לוגית” `Shift+שמאל` הרחיב ימינה, וחץ רגיל על בחירה
+ * קיימת קרס לקצה ההפוך. ההסבר ב„בחירה” שלמטה.
  *
  * מדוד ומתועד ב-`docs/engine-gaps.md` („חצים אופקיים בעברית”), ודווח למעלה
  * כ-[#3996](https://github.com/superdoc/docx-editor/issues/3996). הקוד שמזיז
@@ -128,7 +126,32 @@
  * מילה, ומפת התיבות כאן אינה יודעת עליהן דבר. המחיר הוא סתירה חדשה: באותו
  * פריט רשימה `ArrowRight` יזוז ימינה בעוד `Ctrl+ArrowRight` יקפוץ מילה
  * שמאלה (לפני המודול הזה שניהם זזו שמאלה). מתועד ב-`docs/engine-gaps.md`.
- * ו-`Shift+חץ` — ההסבר ב-`isHorizontalArrow`.
+ *
+ * ## בחירה
+ *
+ * נמדד (4.11.2026, superdoc 2.23.0, `scripts/qa/rtl-selection-arrow-probe.mjs`)
+ * מהיסט 9 ב„פרק 12 בספר הזה”: `Shift+שמאל` נתן 8..9, כלומר **ימינה** על המסך,
+ * ו-`Shift+ימין` נתן 9..10; ובחירה 6..9 שנגמרה ב`חץ ימין` קרסה ל-9, הקצה
+ * השמאלי. בפסקה עברית נקייה כל אלה תקינים — אותה סתירה בדיוק כמו בסמן.
+ *
+ * מה שעמד בדרך היה הקריאה: התצלום הסינכרוני מחזיר `selectionTarget: null` לכל
+ * טווח, והמנוע מנרמל `start`/`end` לסדר המסמך. שתי הידיות שפותרות את זה:
+ *
+ *   • **בחירה שאנחנו בונים — זוכרים.** העוגן והראש מוחזקים ב-`HeldSelection`,
+ *     וההקשה הבאה ממשיכה מהראש שנזכר בלי לשאול את המנוע. „נשכח” בכל מקש אחר
+ *     ובכל לחיצת עכבר, בכל מקום בדף — אלה המסלולים שמשנים בחירה.
+ *   • **בחירה שלא בנינו** (עכבר, `Shift+End`, `Ctrl+A`). `getSelectionAnchorRect()`
+ *     סינכרוני ומחזיר את מלבן הבחירה גם כשהתצלום `null`, ולכן ההכרעה אם ההקשה
+ *     שלנו נופלת בתוך ה-keydown; את הקצוות קוראים פעם אחת מ-`doc.selection
+ *     .current()`, והקשות שמגיעות בינתיים ממתינות בתור. הראש הוא סוף הבחירה,
+ *     אלא אם העכבר נגרר אחורה (`dragWentBackward`).
+ *     תמונה אינה מגיעה לכאן: לחיצה עליה נותנת סמן מכווץ ולא בחירה (נמדד).
+ *
+ * מה שנשאר למנוע: `Shift+חץ` בשורה לטינית כשהבחירה לא התחילה אצלנו, וכל מה
+ * שלמעלה כ„נשאר למנוע”. שני גבולות שנשארו: אחרי `Shift+Home` או
+ * ‏`Ctrl+Shift+חץ` הראש נחשב סוף הבחירה גם כשהוא בתחילתה, כי אלה אינם משאירים
+ * עקבות; וקריסה בחץ רגיל הולכת לפי הכיוון הלוגי של השורה, ולכן קצה שיושב בתוך
+ * אי ספרות אינו הקצה המצויר.
  *
  * ## פסקה ריקה
  *
@@ -187,11 +210,14 @@ import {
   findFragment,
   isEmptyRange,
   lineAt,
+  lineDirectionUnder,
   linesOf,
   neighbourOf,
   readLineChars,
   type CaretSlot,
+  type SelectionRect,
 } from './painted-lines';
+import { readDocSelection, type SelectionDocumentApi } from './doc-selection';
 
 /**
  * החריץ הקרוב ביותר בכיוון המבוקש **על המסך**, או `null` כשאין כזה בשורה.
@@ -243,23 +269,14 @@ export function movesForward(toRight: boolean, lineRtl: boolean): boolean {
 }
 
 /**
- * האם ההקשה היא חץ אופקי „נקי” — בלי Ctrl/Meta/Alt, **ובלי Shift**.
+ * האם ההקשה היא חץ אופקי — בלי Ctrl/Meta/Alt, עם Shift או בלעדיו.
  *
- * ‏`Shift+חץ` אינו שלנו, ולא מפני שהוא תקין: הוא יורש בדיוק את אותה סתירה
- * (בפסקה הבחירה מתרחבת אחורה, ברשימה קדימה). הוא אינו שלנו מפני ש**אין
- * מאיפה לקרוא את ראש הבחירה בהקשה הבאה** —
- *
- *   • ‏`readLiveSelectionSyncSnapshot()` מחזיר `selectionTarget: null` לכל
- *     בחירה שאינה מכווצת — גם לזו שהמנוע עצמו יצר. זהו מקור הקריאה היחיד
- *     שרץ **בתוך** ה-keydown; ‏`doc.selection.current()` א-סינכרוני, ולכן
- *     ההקשה השנייה ברצף לא תדע מאיפה להמשיך.
- *   • המנוע מנרמל `start`/`end` לסדר המסמך, ולכן גם כיוון הבחירה אובד.
- *
- * ‏**מה שנכתב כאן קודם היה שגוי, ותוקן ממדידה.** הנימוק הקודם היה „בחירה
- * שאינה מכווצת אינה מצוירת כלל אחרי כתיבה דרך `setSelectionTarget`”. הוא
- * נסמך על חיפוש **אלמנט** ששמו מכיל `selection`, וזו אינה שאלה על פיקסלים:
- * אותו חיפוש מחזיר ריק גם כשהמנוע עצמו מצייר את הבחירה. נמדד מחדש
- * ב-17.9.2026 (superdoc 2.15.0) בצילום מלבן הפסקה והשוואת בתים —
+ * ‏**מה שנכתב כאן קודם היה שגוי, ותוקן ממדידה** — פעמיים. הנימוק הראשון
+ * להשארת `Shift+חץ` למנוע היה „בחירה שאינה מכווצת אינה מצוירת כלל אחרי כתיבה
+ * דרך `setSelectionTarget`”. הוא נסמך על חיפוש **אלמנט** ששמו מכיל `selection`,
+ * וזו אינה שאלה על פיקסלים: אותו חיפוש מחזיר ריק גם כשהמנוע עצמו מצייר את
+ * הבחירה. נמדד מחדש ב-17.9.2026 (superdoc 2.15.0) בצילום מלבן הפסקה והשוואת
+ * בתים —
  *
  *   | מה נעשה                              | התמונה |
  *   |--------------------------------------|--------|
@@ -268,8 +285,9 @@ export function movesForward(toRight: boolean, lineRtl: boolean): boolean {
  *   | ‏`Shift+End` — כתיבה דרך ה-API        | השתנתה |
  *   | כתיבה ידנית של טווח 2..8 דרך ה-API   | השתנתה |
  *
- * כלומר טווח שנכתב דרך ה-API **כן** מצויר, ו-`rtl-line-end.ts` אינו כותב
- * בחירה בלתי-נראית. מה שנשאר חוסם הוא התצלום הסינכרוני שלמעלה.
+ * כלומר טווח שנכתב דרך ה-API **כן** מצויר. והנימוק השני, „אין מאיפה לקרוא את
+ * ראש הבחירה בהקשה הבאה”, נכון לגבי התצלום אבל לא חוסם — ראו „בחירה” בראש
+ * הקובץ.
  */
 export function isHorizontalArrow(
   event: Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey'> &
@@ -281,7 +299,7 @@ export function isHorizontalArrow(
   // סמן — כלומר שובר את ההרכבה. התקן של הריפו ב-`src/ui/shortcuts/match.ts`:
   // דפדפן שאינו מציב `isComposing` מדווח `keyCode === 229`.
   if (event.isComposing === true || event.keyCode === 229) return false;
-  return !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey;
+  return !event.ctrlKey && !event.metaKey && !event.altKey;
 }
 
 /* ------------------------------------------------------------------ */
@@ -310,7 +328,9 @@ interface LiveSelectionSnapshot {
 export interface RtlCaretEditor {
   host?: {
     readLiveSelectionSyncSnapshot?: () => LiveSelectionSnapshot | null | undefined;
+    getSelectionAnchorRect?: () => SelectionRect | null | undefined;
   } | null;
+  doc?: SelectionDocumentApi | null;
   authoring?: {
     setSelectionTarget?: (input: {
       target: {
@@ -343,16 +363,81 @@ export interface RtlCaretHandle {
 /** ההקשה שלנו, אבל אין לאן לזוז — נבלעת. */
 export const STAY = 'stay' as const;
 
-/** היעד, וה-fragment שהוא יושב בו. */
+/** היעד, והשורה וה-fragment שהוא יושב בהם. */
 interface Target {
   fragment: Element;
+  line: Element;
   slot: CaretSlot;
+}
+
+/** מקום במסמך: הכתובת של המנוע, ה-pm להשוואת סדר, והיכן הוא מצויר. */
+interface Spot {
+  blockId: string;
+  offset: number;
+  pm: number;
+  x: number;
+  y: number;
+  rtl: boolean;
+}
+
+/** בחירה שאנחנו מחזיקים — ההסבר ב„בחירה” בראש הקובץ. */
+interface HeldSelection {
+  anchor: Pick<Spot, 'blockId' | 'offset' | 'pm'>;
+  head: Spot;
+  story: unknown;
+  coordinateSpace: string | undefined;
+}
+
+/** המקשים שאינם פעולה בפני עצמם: `Shift` שנלחץ שוב אינו סוף הבחירה. */
+const MODIFIER_KEYS = new Set(['Shift', 'Control', 'Alt', 'Meta']);
+
+/** פחות מזה בין לחיצה לשחרור — אותה שורה. */
+const SAME_LINE_PX = 8;
+
+const middleOf = (el: Element): number => {
+  const rect = el.getBoundingClientRect();
+  return (rect.top + rect.bottom) / 2;
+};
+
+const isTextPoint = (
+  point: TextPoint | null | undefined,
+): point is TextPoint & { blockId: string; offset: number } =>
+  point?.kind === 'text' && typeof point.blockId === 'string' && typeof point.offset === 'number';
+
+/**
+ * האם גרירת העכבר הלכה נגד סדר המסמך, ולכן ראש הבחירה בתחילתה.
+ *
+ * המנוע מנרמל את הקצוות, ולכן זה הדבר היחיד שנשאר מהכיוון. שורה אחרת מוכרעת
+ * לפי y, ובאותה שורה אחורה בעברית הוא ימינה.
+ */
+export function dragWentBackward(dx: number, dy: number, lineRtl: boolean): boolean {
+  if (Math.abs(dy) > SAME_LINE_PX) return dy < 0;
+  return lineRtl ? dx > 0 : dx < 0;
+}
+
+/** היכן מצויר היסט. בתפר אין לו חריץ, והקרוב ביותר בסדר המסמך מייצג אותו. */
+function paintedSpot(host: HTMLElement, blockId: string, offset: number, y: number): Spot | null {
+  const home = findFragment(host, blockId, offset, y);
+  if (!home) return null;
+  const lines = linesOf(home.fragment);
+  const line = lines[lineAt(lines, home.caretPm, y)];
+  if (!line) return null;
+  const rtl = line.getAttribute('dir') === 'rtl';
+  const chars = readLineChars(line);
+  const slots = chars ? caretSlots(chars, rtl) : [emptyLineSlot(line, rtl)];
+  let nearest: CaretSlot | null = null;
+  for (const slot of slots) {
+    if (!slot) continue;
+    if (!nearest || Math.abs(slot.pm - home.caretPm) < Math.abs(nearest.pm - home.caretPm)) nearest = slot;
+  }
+  return nearest ? { blockId, offset, pm: home.caretPm, x: nearest.x, y: middleOf(line), rtl } : null;
 }
 
 /**
  * השכן החזותי של הסמן: בתוך השורה, ואם אין — בשורה או בפסקה הסמוכה.
  *
- * `null` פירושו „לא שלנו”, וההקשה ממשיכה למנוע.
+ * `null` פירושו „לא שלנו”, וההקשה ממשיכה למנוע. `ownLatin` — בחירה שכבר
+ * מוחזקת כאן ממשיכה דרך שורה לטינית: המנוע אינו יודע איזה קצה הוא הראש.
  */
 export function findTarget(
   host: HTMLElement,
@@ -361,6 +446,7 @@ export function findTarget(
   caretX: number,
   caretY: number,
   toRight: boolean,
+  ownLatin = false,
 ): Target | typeof STAY | null {
   const lines = linesOf(fragment);
   const index = lineAt(lines, caretPm, caretY);
@@ -368,7 +454,8 @@ export function findTarget(
 
   const line = lines[index]!;
   // שורה לטינית — המנוע נמדד תקין בה (17/17), ואין מה לתקן.
-  if (line.getAttribute('dir') !== 'rtl') return null;
+  const lineRtl = line.getAttribute('dir') === 'rtl';
+  if (!lineRtl && !ownLatin) return null;
 
   /*
    * פסקה ריקה אינה „אין מיפוי” אלא שורה בלי חריצים פנימיים: אין בה תו לעבור,
@@ -379,19 +466,19 @@ export function findTarget(
   const chars = readLineChars(line);
   if (!chars && !isEmptyRange(line)) return null;
 
-  const inside = chars ? visualTarget(caretSlots(chars, true), caretX, toRight) : null;
-  if (inside) return { fragment, slot: inside };
+  const inside = chars ? visualTarget(caretSlots(chars, lineRtl), caretX, toRight) : null;
+  if (inside) return { fragment, line, slot: inside };
 
   /* קצה השורה. „ימינה” בשורה עברית הוא אחורה לוגית, ולכן הוא מוביל לשורה
      שמעליה — ואל **סופה**, שהוא קצה שמאל שלה. */
-  const forward = movesForward(toRight, true);
+  const forward = movesForward(toRight, lineRtl);
   const neighbour = lines[index + (forward ? 1 : -1)];
   if (neighbour) {
     const nextChars = readLineChars(neighbour);
     if (!nextChars) return null;
     const rtl = neighbour.getAttribute('dir') === 'rtl';
     const slot = edgeSlot(caretSlots(nextChars, rtl), forward, caretPm);
-    return slot ? { fragment, slot } : null;
+    return slot ? { fragment, line: neighbour, slot } : null;
   }
 
   /* קצה הפסקה. השכן הוא הבלוק הבא **באותו מכל ציור** — כותרת עליונה או תא
@@ -413,7 +500,7 @@ export function findTarget(
     const cellChars = readLineChars(cellLine);
     if (!cellChars) return null;
     const slot = edgeSlot(caretSlots(cellChars, cellLine.getAttribute('dir') === 'rtl'), forward, caretPm);
-    return slot ? { fragment: cell, slot } : null;
+    return slot ? { fragment: cell, line: cellLine, slot } : null;
   }
 
   const siblingLines = linesOf(sibling);
@@ -425,16 +512,167 @@ export function findTarget(
   const slot = edgeChars
     ? edgeSlot(caretSlots(edgeChars, rtl), forward, caretPm)
     : emptyLineSlot(edgeLine, rtl);
-  return slot ? { fragment: sibling, slot } : null;
+  return slot ? { fragment: sibling, line: edgeLine, slot } : null;
 }
 
 /* ------------------------------------------------------------------ */
 /* היירוט                                                               */
 /* ------------------------------------------------------------------ */
 
-/** מתקין את היירוט. אין לו מצב, והוא נפרק עם המסמך. */
+/** מתקין את היירוט. המצב שלו הוא הבחירה המוחזקת, והוא נפרק עם המסמך. */
 export function installRtlVisualArrows({ host, superdoc }: RtlCaretOptions): RtlCaretHandle {
   if (!host) return { dispose() {} };
+
+  let held: HeldSelection | null = null;
+  let pressedAt: { x: number; y: number } | null = null;
+  let drag: { dx: number; dy: number } | null = null;
+  /** קריאת הקצוות שבדרך, והקשות שממתינות לה. */
+  let reading: Promise<void> | null = null;
+  /** כל „שכחה” מבטלת קריאה שבדרך: התשובה שלה מתארת בחירה שכבר אינה. */
+  let generation = 0;
+
+  const forget = (): void => {
+    held = null;
+    drag = null;
+    reading = null;
+    generation += 1;
+  };
+
+  /* ה-`story` מגיע מהתצלום — נמדד שהוא קיים גם על ה-target וגם על הקצה.
+     ברירת מחדל מומצאת הייתה נכתבת למנוע בלי שנמדד אי פעם שהיא הנכונה.
+
+     בלי try/catch ובלי `.catch`: נמדד מה הכתובת הפסולה ביותר עושה — כתיבה
+     ל-`blockId` שאינו קיים **אינה זורקת ואינה דוחה**, אלא מחזירה הבטחה
+     שנפתרת ב-`{ok:false, reason:'target-not-mounted'}`. זה ערוץ הכשל של
+     המנוע, ואין לו מה לעשות כאן: ההקשה כבר נבלעה, והסמן פשוט נשאר. */
+  const write = (
+    start: TextPoint,
+    end: TextPoint,
+    story: unknown,
+    coordinateSpace: string | undefined,
+  ): void => {
+    const editor = superdoc?.activeEditor;
+    void editor?.authoring?.setSelectionTarget?.call(editor.authoring, {
+      target: {
+        kind: 'selection',
+        start,
+        end,
+        story,
+        ...(typeof coordinateSpace === 'string' ? { coordinateSpace } : {}),
+      },
+      focus: true,
+    });
+  };
+
+  /** השכן החזותי של מקום, ככתובת שאפשר לכתוב. `null` כשאינו שלנו. */
+  const aim = (
+    from: Pick<Spot, 'blockId' | 'offset' | 'x' | 'y'>,
+    toRight: boolean,
+    ownLatin: boolean,
+  ): Spot | typeof STAY | null => {
+    const home = findFragment(host, from.blockId, from.offset, from.y);
+    if (!home) return null;
+
+    const target = findTarget(host, home.fragment, home.caretPm, from.x, from.y, toRight, ownLatin);
+    if (!target || target === STAY) return target;
+
+    // צמצום טיפוס: כל ארבעת המסלולים ב-`findTarget` מחזירים fragment שנבחר
+    // **לפי** התכונה הזאת, ולכן היא קיימת; `getAttribute` עדיין מחזיר null.
+    const blockId = blockIdOf(target.fragment);
+    if (!blockId) return null;
+
+    /* ‏`NaN` כשהחלק הראשון של הפסקה אינו מצויר — היעד הוא המשך של פסקה
+       שהתחילה בעמוד שהמנוע לא צייר (נמדד: 3 עמודים מתוך 25), ואז אין מיפוי
+       מ-pm להיסט. כמו בכל „אין מיפוי” כאן, ההקשה נמסרת למנוע. */
+    const offset = target.slot.pm - blockStart(host, blockId);
+    if (!Number.isFinite(offset)) return null;
+
+    return {
+      blockId,
+      offset,
+      pm: target.slot.pm,
+      x: target.slot.x,
+      y: middleOf(target.line),
+      rtl: target.line.getAttribute('dir') === 'rtl',
+    };
+  };
+
+  const pointOf = (spot: Pick<Spot, 'blockId' | 'offset'>, story: unknown): TextPoint => ({
+    kind: 'text',
+    blockId: spot.blockId,
+    offset: spot.offset,
+    story,
+  });
+
+  /** כותב בחירה בסדר המסמך: המנוע מנרמל ממילא, ואין סיבה לסמוך על זה בין פסקאות. */
+  const writeHeld = (selection: HeldSelection): void => {
+    const { anchor, head, story, coordinateSpace } = selection;
+    const a = pointOf(anchor, story);
+    const b = pointOf(head, story);
+    if (head.pm < anchor.pm) write(b, a, story, coordinateSpace);
+    else write(a, b, story, coordinateSpace);
+  };
+
+  /** הקשה על בחירה מוחזקת. `false` — ההקשה אינה שלנו. */
+  const stepHeld = (selection: HeldSelection, toRight: boolean, extending: boolean): boolean => {
+    const { anchor, head, story, coordinateSpace } = selection;
+
+    if (!extending) {
+      const toEnd = movesForward(toRight, head.rtl);
+      const point = pointOf(toEnd === head.pm < anchor.pm ? anchor : head, story);
+      write(point, point, story, coordinateSpace);
+      held = null;
+      return true;
+    }
+
+    const next = aim(head, toRight, true);
+    if (!next) return false;
+    if (next === STAY) return true;
+    selection.head = next;
+    writeHeld(selection);
+    return true;
+  };
+
+  /** הבחירה לא נבנתה כאן: קוראים את הקצוות, ומשם זו אותה הקשה. */
+  const readThenStep = async (
+    rect: SelectionRect,
+    toRight: boolean,
+    extending: boolean,
+  ): Promise<void> => {
+    const mine = generation;
+    const gesture = drag;
+    const { selectionTarget } = await readDocSelection(superdoc);
+    if (mine !== generation) return;
+
+    const range = selectionTarget as NonNullable<LiveSelectionSnapshot['selectionTarget']> | null;
+    const start = range?.start;
+    const end = range?.end;
+    if (!start || !end) return;
+    const story = range?.story ?? end.story;
+    const coordinateSpace = range?.coordinateSpace;
+
+    if (!extending) {
+      const point = movesForward(toRight, true) ? end : start;
+      write(point, point, story, coordinateSpace);
+      return;
+    }
+    if (!isTextPoint(start) || !isTextPoint(end)) return;
+
+    const backward = gesture ? dragWentBackward(gesture.dx, gesture.dy, true) : false;
+    const [anchor, tip] = backward ? [end, start] : [start, end];
+    const head = paintedSpot(host, tip.blockId, tip.offset, backward ? rect.top : rect.bottom);
+    if (!head) return;
+    /* עוגן שאינו מצויר הוא רחוק, ואז מספיק לדעת באיזה צד הוא. */
+    const base = blockStart(host, anchor.blockId);
+    const pm = Number.isFinite(base) ? base + anchor.offset : backward ? Infinity : -Infinity;
+    held = {
+      anchor: { blockId: anchor.blockId, offset: anchor.offset, pm },
+      head,
+      story,
+      coordinateSpace,
+    };
+    stepHeld(held, toRight, true);
+  };
 
   const onKeyDown = (event: KeyboardEvent): void => {
     if (!isHorizontalArrow(event)) return;
@@ -444,54 +682,67 @@ export function installRtlVisualArrows({ host, superdoc }: RtlCaretOptions): Rtl
     const readSnapshot = editor?.host?.readLiveSelectionSyncSnapshot;
     if (typeof setSelectionTarget !== 'function' || typeof readSnapshot !== 'function') return;
 
-    /* בלי try/catch: נמדד (17.9.2026, superdoc 2.15.0) שהקריאה אינה זורקת —
-       מאות קריאות בסמן מכווץ, בבחירה שאינה מכווצת ואחרי כתיבה. מה שהיא כן
-       עושה הוא להחזיר `selectionTarget: null`, וזה מטופל למטה. */
-    const snapshot: LiveSelectionSnapshot | null | undefined = readSnapshot.call(editor?.host);
-
-    const selection = snapshot?.selectionTarget;
-    const head = selection?.end;
-    if (!head || head.kind !== 'text' || typeof head.blockId !== 'string') return;
-    if (typeof head.offset !== 'number') return;
-
-    const caretRect = host.querySelector(CARET_SELECTOR)?.getBoundingClientRect();
-    if (!caretRect) return;
-    const caretY = (caretRect.top + caretRect.bottom) / 2;
-
-    const home = findFragment(host, head.blockId, head.offset, caretY);
-    if (!home) return;
-
-    const target = findTarget(
-      host,
-      home.fragment,
-      home.caretPm,
-      caretRect.left,
-      caretY,
-      event.key === 'ArrowRight',
-    );
-    if (!target) return;
-
+    const toRight = event.key === 'ArrowRight';
+    const extending = event.shiftKey;
     const swallow = (): void => {
       // מכאן ואילך זה שלנו: המנוע לא יראה את ההקשה.
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation();
     };
+
+    if (reading) {
+      swallow();
+      const mine = generation;
+      reading = reading.then(() => {
+        if (mine === generation && held) stepHeld(held, toRight, extending);
+      });
+      return;
+    }
+
+    /* עוגן וראש באותו מקום הם סמן: חץ רגיל אינו „קריסה” אלא תנועה רגילה. */
+    if (held && !extending && held.anchor.pm === held.head.pm) held = null;
+    if (held) {
+      if (stepHeld(held, toRight, extending)) swallow();
+      else held = null;
+      return;
+    }
+
+    /* בלי try/catch: נמדד (17.9.2026, superdoc 2.15.0) שהקריאה אינה זורקת —
+       מאות קריאות בסמן מכווץ, בבחירה שאינה מכווצת ואחרי כתיבה. מה שהיא כן
+       עושה הוא להחזיר `selectionTarget: null`, וזה מטופל למטה. */
+    const snapshot: LiveSelectionSnapshot | null | undefined = readSnapshot.call(editor?.host);
+
+    const selection = snapshot?.selectionTarget;
+    if (!selection) {
+      const rect = editor?.host?.getSelectionAnchorRect?.call(editor.host);
+      if (!rect || lineDirectionUnder(host, rect) !== true) return;
+      swallow();
+      const mine = generation;
+      reading = readThenStep(rect, toRight, extending).finally(() => {
+        if (mine === generation) reading = null;
+      });
+      return;
+    }
+
+    const head = selection.end;
+    if (!isTextPoint(head)) return;
+
+    const caretRect = host.querySelector(CARET_SELECTOR)?.getBoundingClientRect();
+    if (!caretRect) return;
+    const caretY = (caretRect.top + caretRect.bottom) / 2;
+
+    const target = aim(
+      { blockId: head.blockId, offset: head.offset, x: caretRect.left, y: caretY },
+      toRight,
+      false,
+    );
+    if (!target) return;
+
     if (target === STAY) {
       swallow();
       return;
     }
-
-    // צמצום טיפוס: כל ארבעת המסלולים ב-`findTarget` מחזירים fragment שנבחר
-    // **לפי** התכונה הזאת, ולכן היא קיימת; `getAttribute` עדיין מחזיר null.
-    const blockId = blockIdOf(target.fragment);
-    if (!blockId) return;
-
-    /* ‏`NaN` כשהחלק הראשון של הפסקה אינו מצויר — היעד הוא המשך של פסקה
-       שהתחילה בעמוד שהמנוע לא צייר (נמדד: 3 עמודים מתוך 25), ואז אין מיפוי
-       מ-pm להיסט. כמו בכל „אין מיפוי” כאן, ההקשה נמסרת למנוע. */
-    const offset = target.slot.pm - blockStart(host, blockId);
-    if (!Number.isFinite(offset)) return;
 
     /*
      * היעד הוא ההיסט שהסמן כבר עליו — ואז בולעים ולא מוסרים.
@@ -523,42 +774,57 @@ export function installRtlVisualArrows({ host, superdoc }: RtlCaretOptions): Rtl
      * כלומר הענף נשאר מה שהוא: גידור לפיגור ציור שנמדד בלחיצת עכבר, ולא
      * חסם על מהירות התנועה.
      */
-    if (blockId === head.blockId && offset === head.offset) {
+    if (target.blockId === head.blockId && target.offset === head.offset) {
       swallow();
       return;
     }
 
     swallow();
 
-    // ה-`story` מגיע מהתצלום — נמדד שהוא קיים גם על ה-target וגם על הקצה.
-    // ברירת מחדל מומצאת הייתה נכתבת למנוע בלי שנמדד אי פעם שהיא הנכונה.
-    const story = selection?.story ?? head.story;
-    const coordinateSpace = selection?.coordinateSpace;
-    const point: TextPoint = { kind: 'text', blockId, offset, story };
+    const story = selection.story ?? head.story;
+    const coordinateSpace = selection.coordinateSpace;
 
-    /*
-     * בלי try/catch ובלי `.catch`: נמדד מה הכתובת הפסולה ביותר עושה — כתיבה
-     * ל-`blockId` שאינו קיים **אינה זורקת ואינה דוחה**, אלא מחזירה הבטחה
-     * שנפתרת ב-`{ok:false, reason:'target-not-mounted'}`. זה ערוץ הכשל של
-     * המנוע, ואין לו מה לעשות כאן: ההקשה כבר נבלעה, והסמן פשוט נשאר.
-     */
-    void setSelectionTarget.call(editor?.authoring, {
-      target: {
-        kind: 'selection',
-        start: point,
-        end: point,
+    if (extending) {
+      const pm = blockStart(host, head.blockId) + head.offset;
+      held = {
+        anchor: { blockId: head.blockId, offset: head.offset, pm },
+        head: target,
         story,
-        ...(typeof coordinateSpace === 'string' ? { coordinateSpace } : {}),
-      },
-      focus: true,
-    });
+        coordinateSpace,
+      };
+      writeHeld(held);
+      return;
+    }
+
+    const point = pointOf(target, story);
+    write(point, point, story, coordinateSpace);
+  };
+
+  /* על ה-`window` מאותה סיבה בדיוק כמו ב-`rtl-vertical-caret.ts`: כדי לא להיות
+     תלויים בסדר ההתקנה, ומפני שגם מקש בדיאלוג ולחיצה ברצועה מזיזים בחירה. */
+  const onAnyKeyDown = (event: KeyboardEvent): void => {
+    if (!isHorizontalArrow(event) && !MODIFIER_KEYS.has(event.key)) forget();
+  };
+  const onPointerDown = (event: PointerEvent): void => {
+    forget();
+    pressedAt = { x: event.clientX, y: event.clientY };
+  };
+  const onPointerUp = (event: PointerEvent): void => {
+    if (pressedAt) drag = { dx: event.clientX - pressedAt.x, dy: event.clientY - pressedAt.y };
+    pressedAt = null;
   };
 
   host.addEventListener('keydown', onKeyDown, true);
+  window.addEventListener('keydown', onAnyKeyDown, true);
+  window.addEventListener('pointerdown', onPointerDown, true);
+  window.addEventListener('pointerup', onPointerUp, true);
 
   return {
     dispose() {
       host.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('keydown', onAnyKeyDown, true);
+      window.removeEventListener('pointerdown', onPointerDown, true);
+      window.removeEventListener('pointerup', onPointerUp, true);
     },
   };
 }

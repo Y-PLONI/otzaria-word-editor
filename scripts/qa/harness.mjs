@@ -364,6 +364,17 @@ function makeApi(cdp) {
       throw new Error(`הסמן לא הגיע ל${name} — נחת על ${at}`);
     },
 
+    /** גרירת עכבר אמיתית בין שתי נקודות. */
+    async drag(fromX, fromY, toX, toY) {
+      await mouse('mouseMoved', fromX, fromY, { button: 'none', buttons: 0 });
+      await mouse('mousePressed', fromX, fromY);
+      await sleep(60);
+      await mouse('mouseMoved', toX, toY, { buttons: 1 });
+      await sleep(60);
+      await mouse('mouseReleased', toX, toY);
+      await sleep(500);
+    },
+
     /** בוחרת את השורה כולה: לחיצה בתחילתה וגרירה לסופה. */
     async selectLine(lineIndex = 0) {
       const rect = JSON.parse(await js(`JSON.stringify(window.__qa.lineRect(${lineIndex}))`));

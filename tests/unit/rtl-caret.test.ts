@@ -29,6 +29,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   edgeSlot,
   installRtlVisualArrows,
+  dragWentBackward,
   isHorizontalArrow,
   movesForward,
   visualTarget,
@@ -473,6 +474,17 @@ describe('movesForward', () => {
   });
 });
 
+describe('dragWentBackward', () => {
+  it('שורה אחרת מוכרעת לפי y, באותה שורה לפי כיוון השורה', () => {
+    expect(dragWentBackward(0, -30, true)).toBe(true);
+    expect(dragWentBackward(0, 30, true)).toBe(false);
+    expect(dragWentBackward(40, 2, true), 'בעברית ימינה הוא אחורה').toBe(true);
+    expect(dragWentBackward(-40, 2, true)).toBe(false);
+    expect(dragWentBackward(-40, 2, false)).toBe(true);
+    expect(dragWentBackward(0, 0, true), 'לחיצה כפולה אינה גרירה').toBe(false);
+  });
+});
+
 describe('edgeSlot', () => {
   const slots = caretSlots(CLEAN, true);
 
@@ -504,13 +516,8 @@ describe('isHorizontalArrow', () => {
     expect(isHorizontalArrow(key({ key: 'ArrowLeft' }))).toBe(true);
   });
 
-  it('Shift+חץ נשאר למנוע — אין מאיפה לקרוא את ראש הבחירה בהקשה הבאה', () => {
-    // הנימוק שהיה כאן („בחירה שנכתבת דרך ה-API אינה מצוירת”) נמדד כשגוי:
-    // צילום מלבן הפסקה מראה שהיא כן מצוירת, גם ב-`Shift+End` שעובר דרך
-    // `rtl-line-end.ts`. מה שחוסם הוא `readLiveSelectionSyncSnapshot()`,
-    // שמחזיר `selectionTarget: null` לכל בחירה שאינה מכווצת — גם לזו שהמנוע
-    // עצמו יצר. הפירוט ב-`isHorizontalArrow`.
-    expect(isHorizontalArrow(key({ shiftKey: true }))).toBe(false);
+  it('Shift+חץ הוא שלנו — גם הוא יורש את הסתירה של המנוע', () => {
+    expect(isHorizontalArrow(key({ shiftKey: true }))).toBe(true);
   });
 
   it('Ctrl/Alt/Meta הם קפיצת מילה — לא שלנו', () => {
@@ -876,16 +883,104 @@ describe('installRtlVisualArrows', () => {
     handle.dispose();
   });
 
-  it('Shift+חץ אינו נגזל — הבחירה נשארת של המנוע', () => {
-    const state = setup();
-    const { host, line, superdoc, setSelectionTarget } = state;
+  it('Shift+חץ: העוגן נשאר, והראש נע לשכן החזותי', () => {
+    const { host, line, superdoc, setSelectionTarget } = setup();
     const handle = installRtlVisualArrows({ host, superdoc });
 
-    const event = press(line, 'ArrowRight', { shiftKey: true });
+    expect(press(line, 'ArrowRight', { shiftKey: true }).defaultPrevented).toBe(true);
 
-    expect(event.defaultPrevented).toBe(false);
+    // ימינה בעברית הוא אחורה, ולכן הראש לפני העוגן והכתיבה בסדר המסמך.
+    expect(written(setSelectionTarget).target.start.offset).toBe(6);
+    expect(written(setSelectionTarget).target.end.offset).toBe(9);
+    handle.dispose();
+  });
+
+  it('Shift+חץ שני ממשיך מהראש שנזכר, גם כשהתצלום כבר אינו מוסר בחירה', () => {
+    const { host, line, superdoc, setSelectionTarget } = setup();
+    const handle = installRtlVisualArrows({ host, superdoc });
+    press(line, 'ArrowRight', { shiftKey: true });
+    superdoc.activeEditor!.host!.readLiveSelectionSyncSnapshot = () => ({ selectionTarget: null });
+
+    press(line, 'ArrowRight', { shiftKey: true });
+
+    const second = setSelectionTarget.mock.calls[1]![0];
+    expect(second.target.end.offset, 'העוגן לא זז').toBe(9);
+    // היסט 6 בתוך האי הלטיני, ושם ימינה הוא קדימה.
+    expect(second.target.start.offset, 'הראש התקדם').toBe(7);
+    handle.dispose();
+  });
+
+  it('חץ רגיל על בחירה שנבנתה כאן קורס לקצה שבכיוון המקש', () => {
+    const { host, line, superdoc, setSelectionTarget } = setup();
+    const handle = installRtlVisualArrows({ host, superdoc });
+    press(line, 'ArrowLeft', { shiftKey: true });
+    setSelectionTarget.mockClear();
+
+    // הראש משמאל לעוגן; ימין הוא חזרה אל העוגן, היסט 9.
+    press(line, 'ArrowRight');
+
+    expect(written(setSelectionTarget).target.start.offset).toBe(9);
+    expect(written(setSelectionTarget).target.end.offset).toBe(9);
+    handle.dispose();
+  });
+
+  it('מקש אחר ולחיצת עכבר שוכחים את הבחירה — אבל Shift לבדו לא', () => {
+    const { host, line, superdoc, setSelectionTarget } = setup();
+    const handle = installRtlVisualArrows({ host, superdoc });
+
+    press(line, 'ArrowLeft', { shiftKey: true });
+    press(line, 'Shift', { shiftKey: true });
+    press(line, 'ArrowLeft', { shiftKey: true });
+    expect(setSelectionTarget.mock.calls[1]![0].target.start.offset, 'העוגן נזכר').toBe(9);
+
+    setSelectionTarget.mockClear();
+    press(line, 'End');
+    press(line, 'ArrowRight');
+    expect(written(setSelectionTarget).target.start.offset, 'סמן מהתצלום ולא קריסה').toBe(6);
+    handle.dispose();
+  });
+
+  it('בחירה שלא נבנתה כאן בעברית: הקצוות נקראים, וההקשות בינתיים ממתינות', async () => {
+    const { host, line, superdoc, setSelectionTarget } = setup();
+    const story = { kind: 'story', storyType: 'body' };
+    const point = (offset: number) => ({ kind: 'text', blockId: 'p1', offset, story });
+    line.getBoundingClientRect = () =>
+      ({ left: 900, right: 1100, top: 0, bottom: 20 }) as DOMRect;
+    const editor = superdoc.activeEditor!;
+    editor.host!.readLiveSelectionSyncSnapshot = () => ({ selectionTarget: null });
+    editor.host!.getSelectionAnchorRect = () => ({ left: 960, right: 1000, top: 5, bottom: 15 });
+    editor.doc = {
+      selection: {
+        current: async () => ({
+          empty: false,
+          target: { segments: [{ blockId: 'p1', range: { start: 4, end: 9 } }] },
+          selectionTarget: { kind: 'selection', start: point(4), end: point(9), story },
+        }),
+      },
+    };
+    const handle = installRtlVisualArrows({ host, superdoc });
+
+    const first = press(line, 'ArrowLeft', { shiftKey: true });
+    const queued = press(line, 'ArrowLeft', { shiftKey: true });
+    expect(first.defaultPrevented, 'ההכרעה נופלת סינכרונית').toBe(true);
+    expect(queued.defaultPrevented).toBe(true);
+
+    await vi.waitFor(() => expect(setSelectionTarget).toHaveBeenCalledTimes(2));
+    const last = setSelectionTarget.mock.calls[1]![0];
+    expect(last.target.start.offset, 'העוגן הוא תחילת הבחירה').toBe(4);
+    expect(last.target.end.offset, 'שתי ההקשות נספרו').toBeGreaterThan(9);
+    handle.dispose();
+  });
+
+  it('בחירה שלא נבנתה כאן בלי שורה עברית מתחתיה נשארת למנוע', () => {
+    const { host, line, superdoc, setSelectionTarget } = setup();
+    const editor = superdoc.activeEditor!;
+    editor.host!.readLiveSelectionSyncSnapshot = () => ({ selectionTarget: null });
+    editor.host!.getSelectionAnchorRect = () => ({ left: 1, right: 2, top: 900, bottom: 910 });
+    const handle = installRtlVisualArrows({ host, superdoc });
+
+    expect(press(line, 'ArrowRight').defaultPrevented).toBe(false);
     expect(setSelectionTarget).not.toHaveBeenCalled();
-    expectAlive(state, line);
     handle.dispose();
   });
 

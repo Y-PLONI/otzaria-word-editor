@@ -480,6 +480,30 @@ export function lineAt(lines: readonly Element[], caretPm: number, caretY: numbe
   return best;
 }
 
+/** מלבן הבחירה ש-`getSelectionAnchorRect()` מחזיר, בקואורדינטות המסך. */
+export interface SelectionRect {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
+
+/**
+ * כיוון השורה שמתחת למלבן: `true` לעברית, `false` ללטינית, `null` כשאין שם
+ * שורה של פסקה בגוף הזרימה — תא טבלה, למשל, שפסקאותיו בלי טווח משלהן.
+ */
+export function lineDirectionUnder(host: HTMLElement, rect: SelectionRect): boolean | null {
+  for (const fragment of Array.from(host.querySelectorAll(FRAGMENT_SELECTOR))) {
+    for (const line of linesOf(fragment)) {
+      const box = line.getBoundingClientRect();
+      if (box.bottom < rect.top || box.top > rect.bottom) continue;
+      if (box.right < rect.left || box.left > rect.right) continue;
+      return line.getAttribute('dir') === 'rtl';
+    }
+  }
+  return null;
+}
+
 /**
  * האם שני בלוקים סמוכים הם באמת שכנים **במסמך**, ולא רק ברשימת הבורר.
  *

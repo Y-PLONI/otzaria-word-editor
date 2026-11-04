@@ -20,8 +20,9 @@
  * ככיוון: שם x קופץ לקצה השני מעצם הפריסה. „מלכודת” — חזרה לאותו (בלוק,
  * היסט) אחרי ביקור בשני — נמדדת בנפרד, כי זה ה„נתקע” שדווח.
  *
- * ‏`Shift+חץ` נבדק לבעלות ולא לכיוון: הוא נשאר של המנוע (ההסבר ב-
- * `isHorizontalArrow`), והשורות שלו מוודאות שהבחירה עדיין נוצרת.
+ * בחירה נמדדת באותה שיטה: אין בה סמן מצויר, ולכן המדד הוא **מלבן הבחירה**
+ * (`getSelectionAnchorRect`) מול ה-x של העוגן. `Shift+שמאל` מרחיב משמאל לעוגן,
+ * ו`שמאל` על בחירה קורס לקצה השמאלי שלה. ההיסטים הם מודל פנימי גם כאן.
  *
  * ושני דברים שהאינוריאנטה שלמעלה אינה רואה, ולכן נבדקים בנפרד:
  *   - **תקיעה בתוך הבלוק.** ליד ספרה או אות לטינית בודדת הסמן קפץ בין שני
@@ -223,7 +224,8 @@ const asyncSelection = () =>
         return JSON.stringify({
           empty: info ? info.empty : null,
           start: seg && seg.range ? seg.range.start : null,
-          end: seg && seg.range ? seg.range.end : null
+          end: seg && seg.range ? seg.range.end : null,
+          blocks: info && info.target && info.target.segments ? info.target.segments.length : 0
         });
       } catch (e) { return JSON.stringify({ error: String(e).slice(0, 60) }); }
     })()`)
@@ -304,6 +306,17 @@ async function caretMid(find) {
   }
   return state;
 }
+
+/** מלבן הבחירה כפי שהמנוע מודד אותו, ו-`null` כשאין טווח. */
+const selectionRect = async () =>
+  JSON.parse(
+    await app.js(`(function(){
+      var ed = window.__otzariaEditor.superdoc.activeEditor;
+      var r = ed.host.getSelectionAnchorRect();
+      if (!r || !r.width) return 'null';
+      return JSON.stringify({ left: Math.round(r.left * 10) / 10, right: Math.round(r.right * 10) / 10 });
+    })()`),
+  );
 
 async function walk(key, times, { shift = false } = {}) {
   const vk = key === 'ArrowRight' ? 39 : 37;
@@ -612,31 +625,192 @@ try {
     }
   }
 
-  /* -------- Shift+חץ נשאר של המנוע -------- */
-  /*
-   * לא בודקים כאן כיוון אלא **בעלות**. נמדד ב-`shift-arrow-probe.mjs` שבחירה
-   * שנכתבת דרך `authoring.setSelectionTarget` קיימת אך אינה מצוירת כלל,
-   * ושהתצלום הסינכרוני אינו מתאר טווחים — ולכן היירוט אינו נוגע ב-Shift.
-   * השורות האלה שומרות על ההימנעות הזאת: המנוע חייב עדיין ליצור בחירה.
-   */
-  for (const c of CASES.filter((x) => /רגילה|ממוספרת|לטינית$/.test(x.label))) {
+  /* -------- בחירה: לאיזה צד של העוגן היא גדלה -------- */
+  const near = (a, b) => Math.abs(a - b) < 2.5;
+  const shiftLeft = (n) => walk('ArrowLeft', n, { shift: true });
+  const shiftRight = (n) => walk('ArrowRight', n, { shift: true });
+  /* טאב אינו כאן: `getSelectionAnchorRect` מחזיר בשורה עם טאב מלבן שאינו על
+     השורה (נמדד: 51..385 לשורה ב-578..653), אף שההיסטים נכונים. הוא נבדק למטה
+     בהיסטים. */
+  const SELECTION_CASES = CASES.filter((x) =>
+    /רגילה|ממוספרת|תבליטים|ספרות|עם לטינית|הזחה/.test(x.label),
+  );
+
+  /* עוגן על תפר מצויר בבית שהמנוע בחר, וכתיבתו חזרה מציירת אותו בבית השני
+     (ראו „שני דברים שהמדידה מצאה” ב-`rtl-caret.ts`). באמצע „עברית עם לטינית”
+     הלחיצה נוחתת על תפר כזה, ולכן הולכים ממנו לעברית לפני שמודדים. */
+  const anchorAt = async (find) => {
+    await caretMid(find);
+    await walk('ArrowLeft', 2);
+    return caretState();
+  };
+
+  for (const c of SELECTION_CASES) {
     try {
-      await caretMid(c.find);
+      const { x: anchor } = await anchorAt(c.find);
+      await shiftLeft(3);
+      const left = await selectionRect();
+      console.log(`\n== ${c.label} — עוגן ${anchor}, Shift+Left×3: ${JSON.stringify(left)}`);
+      if (left && left.left < anchor - 1 && near(left.right, anchor)) {
+        report.pass(`${c.label} — Shift+שמאל מרחיב שמאלה`);
+      } else {
+        report.fail(`${c.label} — Shift+שמאל מרחיב שמאלה`, `עוגן ${anchor}, בחירה ${JSON.stringify(left)}`);
+      }
+
+      await app.press('ArrowRight', 'ArrowRight', 39);
+      await app.sleep(300);
+      const right = await caretState();
+      if (left && near(right.x, left.right)) {
+        report.pass(`${c.label} — ימין קורס לקצה הימני`);
+      } else {
+        report.fail(`${c.label} — ימין קורס לקצה הימני`, `x=${right.x}, בחירה ${JSON.stringify(left)}`);
+      }
+
+      await anchorAt(c.find);
+      await shiftRight(3);
+      const grown = await selectionRect();
+      console.log(`   Shift+Right×3: ${JSON.stringify(grown)}`);
+      if (grown && grown.right > anchor + 1 && near(grown.left, anchor)) {
+        report.pass(`${c.label} — Shift+ימין מרחיב ימינה`);
+      } else {
+        report.fail(`${c.label} — Shift+ימין מרחיב ימינה`, `עוגן ${anchor}, בחירה ${JSON.stringify(grown)}`);
+      }
+
+      await app.press('ArrowLeft', 'ArrowLeft', 37);
+      await app.sleep(300);
+      const leftEdge = await caretState();
+      if (grown && near(leftEdge.x, grown.left)) {
+        report.pass(`${c.label} — שמאל קורס לקצה השמאלי`);
+      } else {
+        report.fail(`${c.label} — שמאל קורס לקצה השמאלי`, `x=${leftEdge.x}, בחירה ${JSON.stringify(grown)}`);
+      }
+
+      /* חזרה דרך העוגן: הראש חולף אותו, והעוגן עצמו אינו זז. */
+      await anchorAt(c.find);
+      await shiftLeft(2);
+      await shiftRight(4);
+      const passed = await selectionRect();
+      if (passed && passed.right > anchor + 1 && near(passed.left, anchor)) {
+        report.pass(`${c.label} — הראש חולף את העוגן`);
+      } else {
+        report.fail(`${c.label} — הראש חולף את העוגן`, `עוגן ${anchor}, בחירה ${JSON.stringify(passed)}`);
+      }
     } catch (error) {
-      report.stuck(`${c.label} — Shift`, String(error.message || error).slice(0, 90));
-      continue;
+      report.stuck(`${c.label} — בחירה`, String(error.message || error).slice(0, 90));
     }
-    await walk('ArrowRight', 3, { shift: true });
-    const selection = await asyncSelection();
-    console.log(`\n== ${c.label} — Shift+ArrowRight: ${JSON.stringify(selection)}`);
-    const width = typeof selection.end === 'number' ? selection.end - selection.start : 0;
-    if (selection.error) {
-      report.stuck(`${c.label} — Shift נשאר למנוע`, selection.error);
-    } else if (selection.empty === false && width > 0) {
-      report.pass(`${c.label} — Shift נשאר למנוע`, `נבחרו ${width} תווים`);
-    } else {
-      report.fail(`${c.label} — Shift נשאר למנוע`, `לא נוצרה בחירה (${JSON.stringify(selection)})`);
+  }
+
+  /* -------- בחירה בעכבר, ואז מקלדת -------- */
+  /*
+   * התצלום הסינכרוני אינו מוסר אותה ואיננו יודעים מי הראש, ולכן זה מסלול נפרד
+   * לגמרי: מלבן סינכרוני להכרעה, קריאה א-סינכרונית לקצוות, והכיוון מהגרירה.
+   */
+  const LIST = 'מספור ראשון ברשימה';
+  const textSpan = async (find) => JSON.parse(await app.js(`(function(){
+    var frags = document.querySelectorAll('.superdoc-fragment');
+    for (var i = 0; i < frags.length; i++) {
+      if ((frags[i].textContent || '').indexOf(${JSON.stringify(find)}) < 0) continue;
+      var r = frags[i].querySelector('.superdoc-text-run').getBoundingClientRect();
+      return JSON.stringify({ left: r.left, right: r.right, y: (r.top + r.bottom) / 2 });
     }
+    return 'null';
+  })()`));
+
+  for (const [label, fromRight] of [['עם סדר המסמך', true], ['נגד סדר המסמך', false]]) {
+    try {
+      const span = await textSpan(LIST);
+      const third = (span.right - span.left) / 3;
+      const [from, to] = fromRight
+        ? [span.right - third, span.left + third]
+        : [span.left + third, span.right - third];
+      await app.drag(from, span.y, to, span.y);
+      const before = await selectionRect();
+      await shiftLeft(1);
+      const after = await selectionRect();
+      console.log(`\n== גרירה ${label}: ${JSON.stringify(before)} → ${JSON.stringify(after)}`);
+      /* ‏`Shift+שמאל` מזיז את הראש שמאלה: בגרירה עם הסדר הראש בשמאל והבחירה
+         גדלה, ובגרירה נגדו הראש בימין והיא קטנה. הקצה הרחוק נשאר בשני המקרים. */
+      const ok = before && after && (fromRight
+        ? after.left < before.left - 1 && near(after.right, before.right)
+        : after.right < before.right - 1 && near(after.left, before.left));
+      if (ok) report.pass(`גרירה ${label} — Shift+שמאל מזיז את הראש`);
+      else report.fail(`גרירה ${label} — Shift+שמאל מזיז את הראש`, `${JSON.stringify(before)} → ${JSON.stringify(after)}`);
+
+      await app.drag(from, span.y, to, span.y);
+      const dragged = await selectionRect();
+      await app.press('ArrowRight', 'ArrowRight', 39);
+      await app.sleep(300);
+      const edge = await caretState();
+      if (dragged && near(edge.x, dragged.right)) report.pass(`גרירה ${label} — ימין קורס לקצה הימני`);
+      else report.fail(`גרירה ${label} — ימין קורס לקצה הימני`, `x=${edge.x}, ${JSON.stringify(dragged)}`);
+    } catch (error) {
+      report.stuck(`גרירה ${label}`, String(error.message || error).slice(0, 90));
+    }
+  }
+
+  /* -------- מעבר פסקאות, החזקה, והחלפת הבחירה -------- */
+  try {
+    await caretEdge('מספור ראשון ברשימה', 'right');
+    await shiftRight(2);
+    const across = await asyncSelection();
+    console.log(`\n== Shift+ימין מעבר לפסקה: ${JSON.stringify(across)}`);
+    if (across.blocks === 2) report.pass('Shift+ימין עובר לפסקה הקודמת');
+    else report.fail('Shift+ימין עובר לפסקה הקודמת', JSON.stringify(across));
+
+    /* עברית נקייה: שם כל הקשה היא היסט אחד, ואין תפרים שמדולגים. */
+    await caretMid('אבגדהוז ראשון גדול');
+    for (let i = 0; i < 6; i += 1) await app.press('ArrowLeft', 'ArrowLeft', 37, 8);
+    await app.sleep(500);
+    const heldKey = await asyncSelection();
+    console.log(`== שש Shift+שמאל ברצף: ${JSON.stringify(heldKey)}`);
+    if (heldKey.end - heldKey.start === 6) report.pass('הקשות רצופות אינן הולכות לאיבוד');
+    else report.fail('הקשות רצופות אינן הולכות לאיבוד', JSON.stringify(heldKey));
+
+    /* טאב: לפי היסטים — ימינה בשורה עברית הוא אחורה. */
+    await caretMid('קודם');
+    const tabFrom = await caretState();
+    await shiftRight(2);
+    const tabbed = await asyncSelection();
+    console.log(`== טאב: מהיסט ${tabFrom.off}, ${JSON.stringify(tabbed)}`);
+    if (tabbed.end === tabFrom.off && tabbed.start < tabFrom.off) report.pass('פסקה עם טאב — Shift+ימין נע אחורה');
+    else report.fail('פסקה עם טאב — Shift+ימין נע אחורה', `${tabFrom.off} ${JSON.stringify(tabbed)}`);
+
+    await caretMid('סעיף 3 בחוק הזה');
+    await shiftLeft(3);
+    await app.type('ש');
+    await app.sleep(600);
+    const typed = await app.js(`(function(){
+      var f = Array.from(document.querySelectorAll('.superdoc-fragment')).find(function (el) { return (el.textContent || '').indexOf('סעיף') >= 0; });
+      return f ? f.textContent : '';
+    })()`);
+    console.log(`== הקלדה על בחירה: ${typed}`);
+    if (typed.length === 'סעיף 3 בחוק הזה'.length - 2) report.pass('הקלדה מחליפה בחירה שנכתבה כאן');
+    else report.fail('הקלדה מחליפה בחירה שנכתבה כאן', typed);
+  } catch (error) {
+    report.stuck('מעבר פסקאות והחזקה', String(error.message || error).slice(0, 90));
+  }
+
+  /* -------- מה שנשאר למנוע -------- */
+  try {
+    await caretMid('plain latin paragraph');
+    const before = await caretState();
+    await shiftRight(3);
+    const latin = await selectionRect();
+    console.log(`\n== לטינית: עוגן ${before.x}, ${JSON.stringify(latin)}`);
+    if (latin && latin.right > before.x + 1) report.pass('שורה לטינית — Shift+ימין מרחיב ימינה');
+    else report.fail('שורה לטינית — Shift+ימין מרחיב ימינה', JSON.stringify(latin));
+
+    const cell = await textSpan('תוך התא');
+    await app.drag(cell.right - 4, cell.y, cell.left + 4, cell.y);
+    const selected = await asyncSelection();
+    await app.press('ArrowLeft', 'ArrowLeft', 37);
+    await app.sleep(300);
+    const collapsed = await asyncSelection();
+    console.log(`== תא טבלה: ${JSON.stringify(selected)} → ${JSON.stringify(collapsed)}`);
+    if (selected.empty === false && collapsed.empty === true) report.pass('תא טבלה — חץ על בחירה אינו אובד');
+    else report.fail('תא טבלה — חץ על בחירה אינו אובד', `${JSON.stringify(selected)} → ${JSON.stringify(collapsed)}`);
+  } catch (error) {
+    report.stuck('מה שנשאר למנוע', String(error.message || error).slice(0, 90));
   }
 } catch (error) {
   console.error(error);
