@@ -246,3 +246,60 @@ describe('scriptSegments', () => {
     ]);
   });
 });
+
+describe('destination script context across source boundaries', () => {
+  const destination = { fontFamily: 'Times New Roman', fontFamilyCs: 'David', fontSizePt: 12, fontSizeCsPt: 14 };
+  const summary = (runs: any[]) => runs.map((run) => [run.text, run.marks.fontFamily, run.marks.fontSizePt]);
+
+  it.each([mergeFragment, textOnlyFragment])('%s keeps numeric runs with the preceding Latin script', (rewrite) => {
+    const source = { blocks: [{ kind: 'paragraph', runs: [{ text: 'abc ' }, { text: '123', marks: { color: '#FF0000' } }] }] };
+    const before = structuredClone(source);
+    const result = rewrite(source, destination);
+    expect(summary(result.blocks[0]!.runs)).toEqual([['abc ', 'Times New Roman', 12], ['123', 'Times New Roman', 12]]);
+    expect(source).toEqual(before);
+  });
+
+  it('looks ahead across leading neutral runs and resets at each paragraph', () => {
+    const source = { blocks: [
+      { kind: 'paragraph', runs: [{ text: '123 ' }, { text: 'abc' }] },
+      { kind: 'paragraph', runs: [{ text: '456 ' }, { text: 'שלום' }] },
+      { kind: 'paragraph', runs: [{ text: '789.' }] },
+    ] };
+    const result = mergeFragment(source, destination);
+    expect(result.blocks.map((block) => summary(block.runs))).toEqual([
+      [['123 ', 'Times New Roman', 12], ['abc', 'Times New Roman', 12]],
+      [['456 ', 'David', 14], ['שלום', 'David', 14]],
+      [['789.', 'David', 14]],
+    ]);
+  });
+
+  it('carries script through hyperlinks and nested controls while retaining local emphasis', () => {
+    const source = { blocks: [{ kind: 'paragraph', runs: [{ text: 'abc ' }, { text: '123' }, { text: ' שלום' }, { text: '456' }], inlines: [
+      { kind: 'text', text: 'abc ' },
+      { kind: 'hyperlink', target: { kind: 'external', url: 'https://example.com' }, inlines: [
+        { kind: 'sdt', tag: 'nested', inlines: [{ kind: 'text', text: '123', marks: { bold: true } }] },
+        { kind: 'text', text: ' שלום' },
+      ] },
+      { kind: 'text', text: '456' },
+    ] }] };
+    const result = mergeFragment(source, destination);
+    const paragraph = result.blocks[0]!;
+    const inlines = paragraph.inlines as any[];
+    expect(summary(paragraph.runs)).toEqual([['abc ', 'Times New Roman', 12], ['123', 'Times New Roman', 12], [' ', 'Times New Roman', 12], ['שלום', 'David', 14], ['456', 'David', 14]]);
+    const link = inlines[1];
+    expect(link.target).toEqual(source.blocks[0]!.inlines[1]!.target);
+    expect(link.inlines[0].tag).toBe('nested');
+    expect(summary(link.inlines[0].inlines)).toEqual([['123', 'Times New Roman', 12]]);
+    expect(link.inlines[0].inlines[0].marks.bold).toBe(true);
+    expect(summary([inlines[2]])).toEqual([['456', 'David', 14]]);
+  });
+
+  it('looks ahead through nested inline wrappers for leading numeric content', () => {
+    const source = { blocks: [{ kind: 'paragraph', runs: [], inlines: [
+      { kind: 'text', text: '123 ' },
+      { kind: 'sdt', inlines: [{ kind: 'hyperlink', inlines: [{ kind: 'text', text: 'abc' }] }] },
+    ] }] };
+    const result = mergeFragment(source, destination);
+    expect(summary([result.blocks[0]!.inlines[0]])).toEqual([['123 ', 'Times New Roman', 12]]);
+  });
+});

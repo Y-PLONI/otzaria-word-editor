@@ -1107,6 +1107,8 @@ function readCaretFormat(host: ClipboardHostTarget, empty: boolean) {
     commands = undefined;
   }
 
+  // Keep each command's value and active flag from the same synchronous read.
+  const states = new Map<string, ReturnType<FormatReadingSource['getState']>>();
   const source: FormatReadingSource = {
     has: (id) => {
       try {
@@ -1116,15 +1118,27 @@ function readCaretFormat(host: ClipboardHostTarget, empty: boolean) {
       }
     },
     getState: (id) => {
+      const cached = states.get(id);
+      if (cached) return cached;
       try {
-        return (commands?.get?.(id)?.getState?.() ?? {}) as ReturnType<FormatReadingSource['getState']>;
+        const state = (commands?.get?.(id)?.getState?.() ?? {}) as ReturnType<FormatReadingSource['getState']>;
+        states.set(id, state);
+        return state;
       } catch {
         return {} as ReturnType<FormatReadingSource['getState']>;
       }
     },
   };
 
-  return readFormat(source, { empty, settled: true });
+  const format = readFormat(source, { empty, settled: true });
+  // In SuperDoc 2.23 these value commands have no active mark. Their active
+  // state comes from a pending caret pick, whereas projected run values are
+  // inactive. Read through the public command surface, not the host's store.
+  return {
+    ...format,
+    pendingFontFamily: states.get('font-family')?.active === true,
+    pendingFontSize: states.get('font-size')?.active === true,
+  };
 }
 
 type DestinationRead = { ok: true; marks: PasteRunMarks; revision: string } | { ok: false; outcome: CommandOutcome };
@@ -1166,16 +1180,15 @@ async function readDestination(
     if (marks.highlight && caret.highlight == null) throw new Error('Pending highlight cancellation unsupported');
     if (marks.boldCs !== undefined) marks.boldCs = caret.bold;
     if (marks.italicCs !== undefined) marks.italicCs = caret.italic;
-    // The toolbar shows one scalar. When Latin and Hebrew differ, a toolbar value
-    // equal to either channel is that channel and not a pending choice; the
-    // rewrite then gives each script its own (paste-formatting `scriptSegments`).
-    // A value matching neither was chosen at the caret and wins for both.
+    // A pending pick applies to both scripts, even when it equals one inherited
+    // channel. Otherwise preserve split channels when the toolbar projects one
+    // of them; an unrelated scalar still overrides both.
     const families = [marks.fontFamily, marks.fontFamilyCs ?? marks.fontFamily].map((family) => family?.toLowerCase());
-    if (caret.fontFamily && !families.includes(caret.fontFamily.toLowerCase())) {
+    if (caret.fontFamily && (caret.pendingFontFamily || !families.includes(caret.fontFamily.toLowerCase()))) {
       marks.fontFamily = caret.fontFamily;
       delete marks.fontFamilyCs;
     } else if (caret.fontFamily && marks.fontFamilyCs === undefined) marks.fontFamily = caret.fontFamily;
-    if (caret.fontSizePt && (marks.fontSizePt === marks.fontSizeCsPt || ![marks.fontSizePt, marks.fontSizeCsPt].includes(caret.fontSizePt))) {
+    if (caret.fontSizePt && (caret.pendingFontSize || marks.fontSizePt === marks.fontSizeCsPt || ![marks.fontSizePt, marks.fontSizeCsPt].includes(caret.fontSizePt))) {
       marks.fontSizePt = marks.fontSizeCsPt = caret.fontSizePt;
     }
     return { ok: true, marks: { ...marks, ...destinationMarks(caret) }, revision };

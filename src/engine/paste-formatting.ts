@@ -200,21 +200,49 @@ function withoutKeys<T extends Record<string, unknown>>(object: T, keys: readonl
 const COMPLEX_LETTER = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/u;
 const LETTER = /\p{L}/u;
 
+interface ScriptContext { complex: boolean | null; runs: Iterable<PasteText> }
+
+const characterScript = (char: string): boolean | null => COMPLEX_LETTER.test(char) ? true : LETTER.test(char) ? false : null;
+
+/** Leading neutrals use the first letter anywhere in this paragraph, including
+ * later source runs or links. A paragraph without letters keeps the CS fallback.
+ */
+function scriptContext(runs: Iterable<PasteText>): ScriptContext {
+  return { complex: null, runs };
+}
+
+function firstScript(runs: Iterable<PasteText>): boolean {
+  for (const run of runs) {
+    if (typeof run.text !== 'string') continue;
+    for (const char of run.text) {
+      const complex = characterScript(char);
+      if (complex !== null) return complex;
+    }
+  }
+  return true;
+}
+
 /**
  * הטקסט בקטעים לפי כתב. תו ניטרלי (רווח, פיסוק, ספרה) מצטרף לקטע שלפניו —
  * „שלום, world” הוא „שלום, ” ו-„world” — ובתחילת הריצה לקטע הראשון שאחריו.
  * ריצה בלי אף אות נחשבת עברית: ב-RTL ספרות ופיסוק נקראים מהמחסנית המורכבת.
  */
 export function scriptSegments(text: string): { text: string; complex: boolean }[] {
-  const segments: { text: string; complex: boolean | null }[] = [];
+  return splitScriptSegments(text, scriptContext([{ text }]));
+}
+
+function splitScriptSegments(text: string, context: ScriptContext): { text: string; complex: boolean }[] {
+  // Resolve lookahead only when the destination actually needs splitting.
+  context.complex ??= firstScript(context.runs);
+  const segments: { text: string; complex: boolean }[] = [];
   for (const char of text) {
-    const complex = COMPLEX_LETTER.test(char) ? true : LETTER.test(char) ? false : null;
+    const complex: boolean = characterScript(char) ?? context.complex;
+    context.complex = complex;
     const last = segments[segments.length - 1];
-    if (last && (complex === null || last.complex === complex)) last.text += char;
-    else if (last && last.complex === null) { last.text += char; last.complex = complex; }
+    if (last && last.complex === complex) last.text += char;
     else segments.push({ text: char, complex });
   }
-  return segments.map((segment) => ({ text: segment.text, complex: segment.complex !== false }));
+  return segments;
 }
 
 /** הסימנים של קטע אחד: גופן וגודל אחידים מהערוץ של הכתב שלו. */
@@ -229,7 +257,7 @@ function scriptMarks(marks: PasteRunMarks, complex: boolean): PasteRunMarks {
   };
 }
 
-function rewriteText<T extends PasteText>(run: T, rewrite: Rewrite): T[] {
+function rewriteText<T extends PasteText>(run: T, rewrite: Rewrite, context: ScriptContext): T[] {
   const marks = rewrite.marks(run.marks);
   const { marks: _source, ...rest } = run;
   const split = (marks.fontFamilyCs !== undefined && marks.fontFamilyCs !== marks.fontFamily) ||
@@ -238,14 +266,14 @@ function rewriteText<T extends PasteText>(run: T, rewrite: Rewrite): T[] {
     const { fontFamilyCs: _cs, ...uniform } = marks;
     return [(Object.keys(uniform).length > 0 ? { ...rest, marks: uniform } : rest) as T];
   }
-  return scriptSegments(run.text).map((segment) => ({ ...rest, text: segment.text, marks: scriptMarks(marks, segment.complex) }) as T);
+  return splitScriptSegments(run.text, context).map((segment) => ({ ...rest, text: segment.text, marks: scriptMarks(marks, segment.complex) }) as T);
 }
 
-function rewriteInline(inline: PasteInline, rewrite: Rewrite): PasteInline[] {
-  if (inline.kind === 'text') return rewriteText(inline as PasteText & { kind: 'text' }, rewrite);
+function rewriteInline(inline: PasteInline, rewrite: Rewrite, context: ScriptContext): PasteInline[] {
+  if (inline.kind === 'text') return rewriteText(inline as PasteText & { kind: 'text' }, rewrite, context);
   if (inline.kind === 'hyperlink' || inline.kind === 'sdt') {
     const link = inline as { kind: 'hyperlink' | 'sdt'; inlines: readonly PasteInline[] };
-    return [{ ...link, inlines: (link.inlines ?? []).flatMap((inner) => rewriteInline(inner, rewrite)) }];
+    return [{ ...link, inlines: (link.inlines ?? []).flatMap((inner) => rewriteInline(inner, rewrite, context)) }];
   }
   return [inline];
 }
@@ -259,12 +287,16 @@ function rewriteInline(inline: PasteInline, rewrite: Rewrite): PasteInline[] {
 function rewriteParagraph(block: PasteParagraph, rewrite: Rewrite): PasteParagraph {
   const dropped = [...PARAGRAPH_FORMATTING, ...(rewrite.keepLists ? [] : LIST_FIELDS), 'level'];
   const base = withoutKeys(block, dropped);
+  // The two representations describe the same paragraph independently. Source
+  // formatting and wrapper boundaries must not reset the preceding script.
+  const runContext = scriptContext(block.runs ?? []);
+  const inlineContext = scriptContext(textRuns([block]));
   return {
     ...base,
     kind: 'paragraph',
-    runs: (block.runs ?? []).flatMap((run) => rewriteText(run, rewrite)),
+    runs: (block.runs ?? []).flatMap((run) => rewriteText(run, rewrite, runContext)),
     ...(Array.isArray(block.inlines)
-      ? { inlines: block.inlines.flatMap((inline) => rewriteInline(inline, rewrite)) }
+      ? { inlines: block.inlines.flatMap((inline) => rewriteInline(inline, rewrite, inlineContext)) }
       : {}),
   };
 }

@@ -1463,6 +1463,38 @@ describe('paste destination safety', () => {
     ]);
     expect(JSON.stringify(insert)).not.toContain('fontFamilyCs');
   });
+  it.each([
+    { name: 'projected CS values preserve both channels', family: 'David', size: '14', fontPending: false, sizePending: false, expected: [['שלום ', 'David', 14], ['abc', 'Arial', 12]] },
+    { name: 'pending CS values override both channels', family: 'David', size: '14', fontPending: true, sizePending: true, expected: [['שלום abc', 'David', 14]] },
+    { name: 'pending Latin values override both channels', family: 'Arial', size: '12', fontPending: true, sizePending: true, expected: [['שלום abc', 'Arial', 12]] },
+    { name: 'a pending family leaves projected sizes split', family: 'David', size: '14', fontPending: true, sizePending: false, expected: [['שלום ', 'David', 14], ['abc', 'David', 12]] },
+    { name: 'a pending size leaves projected families split', family: 'David', size: '14', fontPending: false, sizePending: true, expected: [['שלום ', 'David', 14], ['abc', 'Arial', 14]] },
+  ])('$name', async ({ family, size, fontPending, sizePending, expected }) => {
+    const { host, doc, calls } = fakeDoc();
+    const states = {
+      'font-family': vi.fn(() => ({ value: family, active: fontPending })),
+      'font-size': vi.fn(() => ({ value: size, active: sizePending })),
+    };
+    host.ui = {
+      selection: selectionSurface({ status: 'ready', empty: true, selectionTarget: CARET as never }),
+      commands: {
+        has: (id) => id in states,
+        get: (id) => ({ getState: states[id as keyof typeof states] }),
+      },
+    };
+    doc.info = () => ({ revision: '1' });
+    doc.selection = { extractOoxml: () => ({ dependencies: destinationDependencies, fragment: { xml: '<w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="David"/><w:szCs w:val="28"/></w:rPr><w:t>x</w:t></w:r>' } }) };
+    doc.clipboard!.parse = () => ({ success: true, plan: { fragment: { blocks: [{ kind: 'paragraph', runs: [{ text: 'שלום abc' }] }] }, diagnostics: [] } });
+
+    expect((await pasteFromClipboard(host, { mode: 'merge', payload: enginePayload('שלום abc') })).ok).toBe(true);
+    const insert = calls.find((call) => call.op === 'clipboard.insert')!.input as { plan: { fragment: { blocks: { runs: { text: string; marks: { fontFamily: string; fontSizePt: number; fontSizeCsPt: number } }[] }[] } } };
+    const runs = insert.plan.fragment.blocks[0]!.runs;
+    expect(runs.map((run) => [run.text, run.marks.fontFamily, run.marks.fontSizePt])).toEqual(expected);
+    expect(runs.every((run) => run.marks.fontSizePt === run.marks.fontSizeCsPt)).toBe(true);
+    // A second getter read could pair a pending flag with another caret value.
+    expect(states['font-family']).toHaveBeenCalledTimes(1);
+    expect(states['font-size']).toHaveBeenCalledTimes(1);
+  });
   it('refuses unsupported script fonts before inserting, and logs why', async () => {
     const { host, doc, calls } = fakeDoc();
     host.ui = { selection: selectionSurface({ status: 'ready', empty: true, selectionTarget: CARET as never }) };
