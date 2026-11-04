@@ -120,9 +120,42 @@ try {
   const splitSeed = await app.js(`(async()=>{const sd=window.__qa.sd(),d=sd.activeEditor.doc;const receipt=await d.format.apply({target:window.__guardRange,inline:{rFonts:{ascii:'Arial',hAnsi:'Arial',cs:'David'}}});if(receipt.success!==true)throw new Error(JSON.stringify(receipt));await sd.ui.selection.apply(window.__guardCaret);return (await d.info()).revision})()`);
   await app.sleep(1200);
   await menu('שמירת טקסט בלבד');
-  assert.equal(await app.js(`(async()=> (await window.__qa.sd().activeEditor.doc.info()).revision)()`), splitSeed);
-  assert.match(await app.js(`window.__qa.status().text`), /ההדבקה לא בוצעה/);
-  console.log('PASS split Latin/CS destination font is refused before mutation');
+  assert.notEqual(await app.js(`(async()=> (await window.__qa.sd().activeEditor.doc.info()).revision)()`), splitSeed);
+  assert.doesNotMatch(await app.js(`window.__qa.status().text`) ?? '', /ההדבקה לא בוצעה/);
+  const splitRun = [...(await app.docx())['word/document.xml'].matchAll(/<w:r>(?:<w:rPr>(.*?)<\/w:rPr>)?<w:t(?: [^>]*)?>([^<]*)<\/w:t><\/w:r>/g)].filter((run) => run[2].includes('BASELINE')).pop();
+  assert.match(splitRun[1], /w:ascii="Arial"/, 'Latin text takes the Latin channel of a split destination');
+  console.log('PASS split Latin/CS destination: Latin text pasted with the Latin font');
+
+  async function splitDestination(seed = true) {
+    const capture = await app.js(`(async()=>{const sd=window.__qa.sd(),d=sd.activeEditor.doc;if(${seed}){const r=await d.format.apply({target:window.__guardRange,inline:{rFonts:{ascii:'Arial',hAnsi:'Arial',cs:'David'},fontSize:12,fontSizeCs:14,color:'000000'}});if(r.success!==true)throw new Error(JSON.stringify(r));}const selection=await sd.ui.selection.apply(window.__guardCaret);if(selection.ok!==true)throw new Error(JSON.stringify(selection));return (await d.selection.extractOoxml({at:window.__guardRange})).fragment.xml})()`);
+    assert.match(capture, /<w:sz w:val="24"/);
+    assert.match(capture, /<w:szCs w:val="28"/);
+    await app.sleep(1200);
+  }
+  await splitDestination();
+  await app.js(`(async()=>{const c=window.__qa.sd().ui.commands;await c.executeAsync('font-family','David');await c.executeAsync('font-size',14)})()`);
+  const pending = JSON.parse(await app.js(`JSON.stringify({font:window.__qa.sd().ui.commands.get('font-family').getState(),size:window.__qa.sd().ui.commands.get('font-size').getState()})`));
+  assert.equal(pending.font.value, 'David');
+  assert.equal(pending.font.active, true);
+  assert.equal(String(pending.size.value), '14');
+  assert.equal(pending.size.active, true);
+  await clipboard('PENDING-PICK');
+  await menu('שמירת טקסט בלבד');
+  const pendingRun = [...(await app.docx())['word/document.xml'].matchAll(/<w:r>(?:<w:rPr>(.*?)<\/w:rPr>)?<w:t(?: [^>]*)?>([^<]*)<\/w:t><\/w:r>/g)].find((run) => run[2].includes('PENDING-PICK'));
+  assert(pendingRun);
+  assert.match(pendingRun[1], /w:ascii="David"/);
+  assert.match(pendingRun[1], /<w:sz w:val="28"/);
+  console.log('PASS pending David14 equal to CS channel overrides Latin Arial12');
+
+  await splitDestination(false);
+  await app.js(`navigator.clipboard.write([new ClipboardItem({'text/html':new Blob(['<p>abc <span style="color:#00ff00">9876</span></p>'],{type:'text/html'}),'text/plain':new Blob(['abc 9876'],{type:'text/plain'})})])`);
+  await menu('מיזוג עיצוב');
+  const numberRun = [...(await app.docx())['word/document.xml'].matchAll(/<w:r>(?:<w:rPr>(.*?)<\/w:rPr>)?<w:t(?: [^>]*)?>([^<]*)<\/w:t><\/w:r>/g)].find((run) => run[2].includes('9876'));
+  assert(numberRun);
+  assert.match(numberRun[1], /w:ascii="Arial"/);
+  assert.match(numberRun[1], /<w:sz w:val="24"/);
+  assert.doesNotMatch(numberRun[1], /<w:color w:val="00FF00"/);
+  console.log('PASS numeric HTML span inherits preceding Latin script after source color is dropped');
 } catch (error) {
   console.error('QA STATE', await app.js(`JSON.stringify({selection:window.__qa.sd().ui.selection.getSnapshot(),events:window.__pasteEvents,native:window.__nativeEvents,focus:document.hasFocus(),active:document.activeElement?.outerHTML.slice(0,400),viewport:{w:innerWidth,h:innerHeight},status:window.__qa.status()})`));
   console.error('QA ERRORS', await app.log());

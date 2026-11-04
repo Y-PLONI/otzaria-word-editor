@@ -28,6 +28,12 @@ export interface PasteRunMarks {
   fontSizePt?: number;
   fontSizeCsPt?: number;
   fontFamily?: string;
+  /**
+   * גופן הכתב המורכב של היעד, כשהוא שונה מ-`fontFamily`. פנימי בלבד: לחוזה
+   * של המנוע יש גופן אחד לריצה, ולכן הריצה נחתכת לפי כתב (`scriptSegments`)
+   * והשדה אינו יוצא מהמודול.
+   */
+  fontFamilyCs?: string;
   verticalAlign?: 'baseline' | 'superscript' | 'subscript';
 }
 
@@ -186,19 +192,90 @@ function withoutKeys<T extends Record<string, unknown>>(object: T, keys: readonl
   return copy as T;
 }
 
-function rewriteText<T extends PasteText>(run: T, rewrite: Rewrite): T {
-  const marks = rewrite.marks(run.marks);
-  const { marks: _source, ...rest } = run;
-  return (Object.keys(marks).length > 0 ? { ...rest, marks } : rest) as T;
+/* ------------------------------------------------------------------ */
+/* יעד שהגופן או הגודל שלו שונים בין עברית ללטינית                       */
+/* ------------------------------------------------------------------ */
+
+/** אותיות שנכתבות במחסנית הכתב המורכב: עברית, ערבית וצורות ההצגה שלהן. */
+const COMPLEX_LETTER = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/u;
+const LETTER = /\p{L}/u;
+
+interface ScriptContext { complex: boolean | null; runs: Iterable<PasteText> }
+
+const characterScript = (char: string): boolean | null => COMPLEX_LETTER.test(char) ? true : LETTER.test(char) ? false : null;
+
+/** Leading neutrals use the first letter anywhere in this paragraph, including
+ * later source runs or links. A paragraph without letters keeps the CS fallback.
+ */
+function scriptContext(runs: Iterable<PasteText>): ScriptContext {
+  return { complex: null, runs };
 }
 
-function rewriteInline(inline: PasteInline, rewrite: Rewrite): PasteInline {
-  if (inline.kind === 'text') return rewriteText(inline as PasteText & { kind: 'text' }, rewrite);
+function firstScript(runs: Iterable<PasteText>): boolean {
+  for (const run of runs) {
+    if (typeof run.text !== 'string') continue;
+    for (const char of run.text) {
+      const complex = characterScript(char);
+      if (complex !== null) return complex;
+    }
+  }
+  return true;
+}
+
+/**
+ * הטקסט בקטעים לפי כתב. תו ניטרלי (רווח, פיסוק, ספרה) מצטרף לקטע שלפניו —
+ * „שלום, world” הוא „שלום, ” ו-„world” — ובתחילת הריצה לקטע הראשון שאחריו.
+ * ריצה בלי אף אות נחשבת עברית: ב-RTL ספרות ופיסוק נקראים מהמחסנית המורכבת.
+ */
+export function scriptSegments(text: string): { text: string; complex: boolean }[] {
+  return splitScriptSegments(text, scriptContext([{ text }]));
+}
+
+function splitScriptSegments(text: string, context: ScriptContext): { text: string; complex: boolean }[] {
+  // Resolve lookahead only when the destination actually needs splitting.
+  context.complex ??= firstScript(context.runs);
+  const segments: { text: string; complex: boolean }[] = [];
+  for (const char of text) {
+    const complex: boolean = characterScript(char) ?? context.complex;
+    context.complex = complex;
+    const last = segments[segments.length - 1];
+    if (last && last.complex === complex) last.text += char;
+    else segments.push({ text: char, complex });
+  }
+  return segments;
+}
+
+/** הסימנים של קטע אחד: גופן וגודל אחידים מהערוץ של הכתב שלו. */
+function scriptMarks(marks: PasteRunMarks, complex: boolean): PasteRunMarks {
+  const { fontFamilyCs, ...rest } = marks;
+  const family = complex ? fontFamilyCs ?? marks.fontFamily : marks.fontFamily;
+  const size = complex ? marks.fontSizeCsPt ?? marks.fontSizePt : marks.fontSizePt ?? marks.fontSizeCsPt;
+  return {
+    ...rest,
+    ...(family !== undefined ? { fontFamily: family } : {}),
+    ...(size !== undefined ? { fontSizePt: size, fontSizeCsPt: size } : {}),
+  };
+}
+
+function rewriteText<T extends PasteText>(run: T, rewrite: Rewrite, context: ScriptContext): T[] {
+  const marks = rewrite.marks(run.marks);
+  const { marks: _source, ...rest } = run;
+  const split = (marks.fontFamilyCs !== undefined && marks.fontFamilyCs !== marks.fontFamily) ||
+    (marks.fontSizeCsPt !== undefined && marks.fontSizePt !== undefined && marks.fontSizeCsPt !== marks.fontSizePt);
+  if (!split || typeof run.text !== 'string') {
+    const { fontFamilyCs: _cs, ...uniform } = marks;
+    return [(Object.keys(uniform).length > 0 ? { ...rest, marks: uniform } : rest) as T];
+  }
+  return splitScriptSegments(run.text, context).map((segment) => ({ ...rest, text: segment.text, marks: scriptMarks(marks, segment.complex) }) as T);
+}
+
+function rewriteInline(inline: PasteInline, rewrite: Rewrite, context: ScriptContext): PasteInline[] {
+  if (inline.kind === 'text') return rewriteText(inline as PasteText & { kind: 'text' }, rewrite, context);
   if (inline.kind === 'hyperlink' || inline.kind === 'sdt') {
     const link = inline as { kind: 'hyperlink' | 'sdt'; inlines: readonly PasteInline[] };
-    return { ...link, inlines: (link.inlines ?? []).map((inner) => rewriteInline(inner, rewrite)) };
+    return [{ ...link, inlines: (link.inlines ?? []).flatMap((inner) => rewriteInline(inner, rewrite, context)) }];
   }
-  return inline;
+  return [inline];
 }
 
 /**
@@ -210,12 +287,16 @@ function rewriteInline(inline: PasteInline, rewrite: Rewrite): PasteInline {
 function rewriteParagraph(block: PasteParagraph, rewrite: Rewrite): PasteParagraph {
   const dropped = [...PARAGRAPH_FORMATTING, ...(rewrite.keepLists ? [] : LIST_FIELDS), 'level'];
   const base = withoutKeys(block, dropped);
+  // The two representations describe the same paragraph independently. Source
+  // formatting and wrapper boundaries must not reset the preceding script.
+  const runContext = scriptContext(block.runs ?? []);
+  const inlineContext = scriptContext(textRuns([block]));
   return {
     ...base,
     kind: 'paragraph',
-    runs: (block.runs ?? []).map((run) => rewriteText(run, rewrite)),
+    runs: (block.runs ?? []).flatMap((run) => rewriteText(run, rewrite, runContext)),
     ...(Array.isArray(block.inlines)
-      ? { inlines: block.inlines.map((inline) => rewriteInline(inline, rewrite)) }
+      ? { inlines: block.inlines.flatMap((inline) => rewriteInline(inline, rewrite, inlineContext)) }
       : {}),
   };
 }

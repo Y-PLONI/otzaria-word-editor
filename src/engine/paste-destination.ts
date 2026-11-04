@@ -82,6 +82,9 @@ export function marksFromDestinationCapture(capture: DestinationCapture): PasteR
   const root = parseXml(`<capture ${bindings}>${capture.fragment.xml}</capture>`);
   for (const xml of capture.context?.xml ?? []) {
     const context = parseXml(`<capture ${bindings}>${xml}</capture>`);
+    // The paragraph mark's own run properties (`pPr/rPr`, `<w:rtl/>` in every
+    // Hebrew Word paragraph) format the mark only, never text inserted mid-run.
+    for (const mark of Array.from(context.getElementsByTagNameNS(W, 'pPr')).flatMap((pPr) => elements(pPr, 'rPr'))) mark.remove();
     if (['tblPr', 'tblGrid', 'tcPr', 'numPr', 'rPr'].some((name) => context.getElementsByTagNameNS(W, name).length)) {
       throw new Error('Structural destination formatting unsupported');
     }
@@ -89,7 +92,9 @@ export function marksFromDestinationCapture(capture: DestinationCapture): PasteR
   const run = root.getElementsByTagNameNS(W, 'r')[0];
   if (!run) throw new Error('Destination run unavailable');
   const props = elements(run, 'rPr')[0];
-  const supported = new Set(['rFonts', 'b', 'bCs', 'i', 'iCs', 'sz', 'szCs', 'color', 'highlight', 'u', 'strike', 'caps', 'smallCaps', 'vertAlign', 'lang']);
+  // `rtl` declares direction, `kern`/`noProof`/`ligatures` are
+  // typography and proofing: none is appearance that merge must carry over.
+  const supported = new Set(['rFonts', 'b', 'bCs', 'i', 'iCs', 'sz', 'szCs', 'color', 'highlight', 'u', 'strike', 'caps', 'smallCaps', 'vertAlign', 'lang', 'rtl', 'kern', 'noProof', 'ligatures']);
   if (props && Array.from(props.children).some((node) => !supported.has(node.localName))) throw new Error('Authored destination formatting unsupported');
   const directHighlight = props && elements(props, 'highlight')[0];
   if (attr(directHighlight, 'val') === 'none') throw new Error('Explicit highlight cancellation unsupported');
@@ -101,7 +106,8 @@ export function marksFromDestinationCapture(capture: DestinationCapture): PasteR
   const directFonts = props && elements(props, 'rFonts')[0];
   if (directFonts) {
     const direct = Object.fromEntries(Array.from(directFonts.attributes).filter((item) => item.namespaceURI === W).map((item) => [item.localName, item.value]));
-    if (Object.keys(direct).some((key) => /theme$/i.test(key) || key === 'eastAsia' || key === 'hint')) throw new Error('Direct theme font unsupported');
+    // `hint` and the East Asian channel never select a Hebrew or Latin font.
+    if (Object.keys(direct).some((key) => /theme$/i.test(key) && key !== 'eastAsiaTheme')) throw new Error('Direct theme font unsupported');
     for (const channel of ['ascii', 'hAnsi', 'cs']) {
       if (direct[channel]) {
         inherited[channel] = direct[channel]!;
@@ -110,12 +116,16 @@ export function marksFromDestinationCapture(capture: DestinationCapture): PasteR
       }
     }
   }
-  const families = ['ascii', 'hAnsi', 'cs'].map((channel) => inherited[channel]);
-  if (families.some((value) => !value) || new Set(families.map((value) => value!.toLowerCase())).size !== 1 ||
+  // Latin and Hebrew may differ (Times New Roman + David is the common Word
+  // pairing): the rewrite gives each script segment its own family. The two
+  // Latin channels, and theme fonts, still cannot be represented.
+  const [ascii, hAnsi, cs] = ['ascii', 'hAnsi', 'cs'].map((channel) => inherited[channel]);
+  if (!ascii || !hAnsi || !cs || ascii.toLowerCase() !== hAnsi.toLowerCase() ||
       ['asciiTheme', 'hAnsiTheme', 'csTheme', 'cstheme'].some((key) => inherited[key])) {
     throw new Error('Destination font channels cannot be captured faithfully');
   }
-  marks.fontFamily = families[0];
+  marks.fontFamily = ascii;
+  if (cs.toLowerCase() !== ascii.toLowerCase()) marks.fontFamilyCs = cs;
   const highlight = attr(directHighlight, 'val') ?? inherited.highlight;
   if (highlight && highlight !== 'none') marks.highlight = highlight;
   for (const [xmlName, key] of [['sz', 'fontSizePt'], ['szCs', 'fontSizeCsPt']] as const) {

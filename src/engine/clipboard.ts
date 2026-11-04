@@ -1107,6 +1107,8 @@ function readCaretFormat(host: ClipboardHostTarget, empty: boolean) {
     commands = undefined;
   }
 
+  // Keep each command's value and active flag from the same synchronous read.
+  const states = new Map<string, ReturnType<FormatReadingSource['getState']>>();
   const source: FormatReadingSource = {
     has: (id) => {
       try {
@@ -1116,15 +1118,27 @@ function readCaretFormat(host: ClipboardHostTarget, empty: boolean) {
       }
     },
     getState: (id) => {
+      const cached = states.get(id);
+      if (cached) return cached;
       try {
-        return (commands?.get?.(id)?.getState?.() ?? {}) as ReturnType<FormatReadingSource['getState']>;
+        const state = (commands?.get?.(id)?.getState?.() ?? {}) as ReturnType<FormatReadingSource['getState']>;
+        states.set(id, state);
+        return state;
       } catch {
         return {} as ReturnType<FormatReadingSource['getState']>;
       }
     },
   };
 
-  return readFormat(source, { empty, settled: true });
+  const format = readFormat(source, { empty, settled: true });
+  // In SuperDoc 2.23 these value commands have no active mark. Their active
+  // state comes from a pending caret pick, whereas projected run values are
+  // inactive. Read through the public command surface, not the host's store.
+  return {
+    ...format,
+    pendingFontFamily: states.get('font-family')?.active === true,
+    pendingFontSize: states.get('font-size')?.active === true,
+  };
 }
 
 type DestinationRead = { ok: true; marks: PasteRunMarks; revision: string } | { ok: false; outcome: CommandOutcome };
@@ -1160,18 +1174,28 @@ async function readDestination(
       if (!packageRead.contentBase64) throw error;
       marks = await marksFromEmptyDocument(packageRead.contentBase64, sample.start.kind === 'text' ? sample.start.blockId : '');
     }
-    // A scalar toolbar size cannot tell a pending uniform override apart from
-    // either channel of an inherited split size. Fail before writing in that case.
-    if (marks.fontSizePt === undefined || marks.fontSizeCsPt === undefined || marks.fontSizePt !== marks.fontSizeCsPt) throw new Error('Split destination sizes');
+    if (marks.fontSizePt === undefined || marks.fontSizeCsPt === undefined) throw new Error('Destination size unavailable');
     if (marks.bold !== undefined && marks.boldCs !== undefined && marks.bold !== marks.boldCs) throw new Error('Split destination bold state');
     if (marks.italic !== undefined && marks.italicCs !== undefined && marks.italic !== marks.italicCs) throw new Error('Split destination italic state');
     if (marks.highlight && caret.highlight == null) throw new Error('Pending highlight cancellation unsupported');
     if (marks.boldCs !== undefined) marks.boldCs = caret.bold;
     if (marks.italicCs !== undefined) marks.italicCs = caret.italic;
-    if (caret.fontFamily) marks.fontFamily = caret.fontFamily;
-    if (caret.fontSizePt) marks.fontSizePt = marks.fontSizeCsPt = caret.fontSizePt;
+    // A pending pick applies to both scripts, even when it equals one inherited
+    // channel. Otherwise preserve split channels when the toolbar projects one
+    // of them; an unrelated scalar still overrides both.
+    const families = [marks.fontFamily, marks.fontFamilyCs ?? marks.fontFamily].map((family) => family?.toLowerCase());
+    if (caret.fontFamily && (caret.pendingFontFamily || !families.includes(caret.fontFamily.toLowerCase()))) {
+      marks.fontFamily = caret.fontFamily;
+      delete marks.fontFamilyCs;
+    } else if (caret.fontFamily && marks.fontFamilyCs === undefined) marks.fontFamily = caret.fontFamily;
+    if (caret.fontSizePt && (caret.pendingFontSize || marks.fontSizePt === marks.fontSizeCsPt || ![marks.fontSizePt, marks.fontSizeCsPt].includes(caret.fontSizePt))) {
+      marks.fontSizePt = marks.fontSizeCsPt = caret.fontSizePt;
+    }
     return { ok: true, marks: { ...marks, ...destinationMarks(caret) }, revision };
-  } catch {
+  } catch (error) {
+    // כל הסירובים מגיעים לאותה הודעה למשתמש; הסיבה עצמה נרשמת ל-console.error,
+    // ומשם „דיווח על באג” מצרף אותה (host/recent-errors.ts).
+    console.error(`[otzaria-word] מיזוג עיצוב נדחה: ${error instanceof Error ? error.message : String(error)}`);
     return { ok: false, outcome: { ok: false, reason: 'paste-destination-unsupported', message: 'ההדבקה לא בוצעה: אי אפשר לשמר בבטחה את עיצוב התווים בנקודה זו. אפשר להשתמש בשמירה על עיצוב המקור.' } };
   }
 }
