@@ -11,8 +11,9 @@
  * בפופאובר, ולכן יש גם בדיקה שמקבעת איזו תווית יושבת בכל מיקום: בלעדיה
  * החלפת שתי התוויות ביניהן הייתה עוברת בירוק.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import InsertTab from '../../src/ui/ribbon/tabs/InsertTab.vue';
+import { DATE_CALENDAR_SETTING, type DateCalendar } from '../../src/engine/hebrew-date';
 import { autoUnmount, mountUi, settle, tipStartsSelector } from './harness';
 
 autoUnmount();
@@ -181,6 +182,74 @@ describe('כפתור „תאריך ושעה” המפוצל', () => {
 
     const items = await openDateMenu(harness);
     expect(items.slice(3).map((item) => item.attributes('aria-checked'))).toEqual(['false', 'true']);
+  });
+
+  it.each([
+    { saved: 'hebrew', chosen: 'gregorian', label: 'לוח לועזי' },
+    { saved: 'gregorian', chosen: 'hebrew', label: 'לוח עברי' },
+  ] as const)('טעינה מאוחרת של $saved אינה דורסת בחירה חדשה ב-$chosen', async ({ saved, chosen, label }) => {
+    let resolveSaved!: (calendar: DateCalendar) => void;
+    const pendingRead = new Promise<DateCalendar>((resolve) => { resolveSaved = resolve; });
+    let persisted: unknown = saved;
+    vi.stubGlobal('Otzaria', {
+      call: async (method: string, payload?: { key?: string; value?: unknown }) => {
+        if (payload?.key === DATE_CALENDAR_SETTING) {
+          if (method === 'storage.get') return { success: true, data: await pendingRead };
+          if (method === 'storage.set') persisted = payload.value;
+        }
+        return { success: true, data: null };
+      },
+    });
+
+    try {
+      const harness = mountWithWritableSelection();
+      await settle();
+      const items = await openDateMenu(harness);
+      await items[DATE_MENU_LABELS.indexOf(label)].trigger('click');
+      await settle();
+      expect(persisted).toBe(chosen);
+
+      resolveSaved(saved);
+      await settle();
+      const reopened = await openDateMenu(harness);
+      expect(reopened.slice(3).map((item) => item.attributes('aria-checked'))).toEqual(
+        chosen === 'hebrew' ? ['true', 'false'] : ['false', 'true'],
+      );
+      await harness.wrapper.find('.word-split__arrow').trigger('click');
+      await harness.wrapper.find('.word-split .word-btn').trigger('click');
+      await settle();
+
+      if (chosen === 'gregorian') {
+        const inputs = harness.superdoc.inputs('fields.insert') as { instruction: string }[];
+        expect(inputs.map((input) => input.instruction)).toEqual(['DATE \\@ "dd/MM/yyyy HH:mm"']);
+        expect(insertedText(harness)).toEqual([]);
+      } else {
+        expect(insertedText(harness)).toHaveLength(1);
+        expect(insertedText(harness)[0]).toMatch(HEBREW_DATE);
+        expect(harness.superdoc.inputs('fields.insert')).toEqual([]);
+      }
+      expect(harness.failures()).toEqual([]);
+      expect(persisted).toBe(chosen);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('טוען את הלוח השמור כשאין בחירה חדשה', async () => {
+    vi.stubGlobal('Otzaria', {
+      call: async () => ({ success: true, data: 'gregorian' }),
+    });
+    try {
+      const harness = mountUi(InsertTab);
+      await settle();
+      await harness.wrapper.find('.word-split .word-btn').trigger('click');
+      await settle();
+      const inputs = harness.superdoc.inputs('fields.insert') as { instruction: string }[];
+      expect(inputs.map((input) => input.instruction)).toEqual(['DATE \\@ "dd/MM/yyyy HH:mm"']);
+      expect(insertedText(harness)).toEqual([]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it.each(GREGORIAN_ITEMS.map((item, index) => ({ index, ...item })))(

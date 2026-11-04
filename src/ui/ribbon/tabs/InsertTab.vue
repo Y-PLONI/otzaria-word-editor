@@ -825,11 +825,14 @@ const pageNumberItems = [
  * engine/hebrew-date.ts.
  */
 const dateCalendar = ref<DateCalendar>(DEFAULT_DATE_CALENDAR);
+let dateCalendarChosen = false;
 void loadSetting(DATE_CALENDAR_SETTING, DEFAULT_DATE_CALENDAR, parseDateCalendar).then((saved) => {
-  dateCalendar.value = saved;
+  // קריאת האחסון עשויה לחזור אחרי בחירה מפורשת בתפריט. הבחירה החדשה קודמת לה.
+  if (!dateCalendarChosen) dateCalendar.value = saved;
 });
 
 function setDateCalendar(calendar: DateCalendar): void {
+  dateCalendarChosen = true;
   dateCalendar.value = calendar;
   void saveSetting(DATE_CALENDAR_SETTING, calendar);
 }
