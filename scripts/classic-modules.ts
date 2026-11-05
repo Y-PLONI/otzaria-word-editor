@@ -67,6 +67,13 @@ export function installClassicModules(files: readonly string[]): ClassicModules 
   function fetchDefinition(id: string, entry: Entry): Promise<void> {
     if (entry.definition) return Promise.resolve();
     if (entry.fetching) return entry.fetching;
+    // Match the boot probe's physical entry-script events. A module can remain
+    // pending on dependencies/factories after this script has registered.
+    function measured(event: string): void {
+      if (id !== 'assets/app') return;
+      try { target.__otzariaPerformance?.mark(event, { asset: 'app.js' }); }
+      catch { /* Diagnostics must not change loading or retry behavior. */ }
+    }
     entry.fetching = new Promise<void>((accept, reject) => {
       const script = document.createElement('script');
       entry.script = script;
@@ -84,15 +91,18 @@ export function installClassicModules(files: readonly string[]): ClassicModules 
           entry.script = undefined;
           entry.definition = undefined;
           script.remove();
+          measured('script.failed');
           reject(error);
         } else {
           performance.mark(`otzaria:script:${id}:loaded`);
+          measured('script.loaded');
           accept();
         }
       }
       script.onload = () => finish(entry.definition ? undefined : new Error(`Module did not register: ${id}`));
       script.onerror = () => finish(new Error(`Cannot load local module: ${id}`));
       performance.mark(`otzaria:script:${id}:start`);
+      measured('script.requested');
       document.head.appendChild(script);
     }).catch((error: unknown) => {
       entry.fetching = undefined;

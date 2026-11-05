@@ -48,6 +48,68 @@ describe('classic module loader', () => {
     expect((window as unknown as { define?: unknown }).define).toBe(previousDefine);
   });
 
+  it.each([false, true])('records physical App loading before pending dependency work (diagnostics throw: %s)', async (throws) => {
+    const mark = vi.fn(() => { if (throws) throw new Error('diagnostic failure'); });
+    vi.stubGlobal('__otzariaPerformance', { mark });
+    // Exercise the serialized bootstrap, not a separate module-bound recorder.
+    const install = new Function(`return (${installClassicModules.toString()})`)() as typeof installClassicModules;
+    const modules = install(['assets/app.js', 'assets/engine.js']);
+    const preload = modules.preload('assets/app');
+    const app = modules.load('assets/app');
+    expect(modules.load('assets/app')).toBe(app);
+    expect(mark.mock.calls).toEqual([['script.requested', { asset: 'app.js' }]]);
+    const appFactory = vi.fn((engine) => engine);
+    define('assets/app', ['./engine'], appFactory);
+    await preload;
+    expect(mark.mock.calls).toEqual([
+      ['script.requested', { asset: 'app.js' }],
+      ['script.loaded', { asset: 'app.js' }],
+    ]);
+    expect(appFactory).not.toHaveBeenCalled();
+    expect(performance.mark).not.toHaveBeenCalledWith('otzaria:module:assets/app:ready');
+
+    await vi.waitFor(() => expect(document.scripts).toHaveLength(2));
+    let release!: (value: number) => void;
+    const engineFactory = vi.fn(() => new Promise<number>((resolve) => { release = resolve; }));
+    define('assets/engine', [], engineFactory);
+    await vi.waitFor(() => expect(engineFactory).toHaveBeenCalledTimes(1));
+    expect(appFactory).not.toHaveBeenCalled();
+    expect(performance.mark).not.toHaveBeenCalledWith('otzaria:module:assets/app:ready');
+    expect(mark).toHaveBeenCalledTimes(2);
+    release(42);
+    expect(await app).toBe(42);
+    expect(performance.mark).toHaveBeenCalledWith('otzaria:module:assets/app:ready');
+
+    await modules.preload('assets/app');
+    expect(await modules.load('assets/app')).toBe(42);
+    expect(appFactory).toHaveBeenCalledTimes(1);
+    expect(document.scripts).toHaveLength(2);
+    expect(mark).toHaveBeenCalledTimes(2);
+  });
+
+  it('records a failed physical App attempt and allows retry even when diagnostics throw', async () => {
+    vi.useFakeTimers();
+    const mark = vi.fn(() => { throw new Error('diagnostic failure'); });
+    vi.stubGlobal('__otzariaPerformance', { mark });
+    const modules = installClassicModules(['assets/app.js']);
+    const first = modules.load('assets/app');
+    const rejected = expect(first).rejects.toThrow('Module load timed out: assets/app');
+    await vi.advanceTimersByTimeAsync(30_000);
+    await rejected;
+    expect(document.scripts).toHaveLength(0);
+    const retry = modules.load('assets/app');
+    define('assets/app', [], () => 23);
+    expect(await retry).toBe(23);
+    expect(await modules.load('assets/app')).toBe(23);
+    expect(mark.mock.calls).toEqual([
+      ['script.requested', { asset: 'app.js' }],
+      ['script.failed', { asset: 'app.js' }],
+      ['script.requested', { asset: 'app.js' }],
+      ['script.loaded', { asset: 'app.js' }],
+    ]);
+    expect(document.scripts).toHaveLength(1);
+  });
+
   it('shares the pending load and evaluated exports across all callers', async () => {
     const modules = installClassicModules(['assets/shared.js']);
     const a = modules.load('assets/shared');
