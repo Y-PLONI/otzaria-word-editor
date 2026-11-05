@@ -11,9 +11,9 @@
  * תלות חדשה.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { createApp, defineComponent, h, ref, type App } from 'vue';
+import { createApp, defineComponent, h, ref, type App, type Ref } from 'vue';
 import { useCommand } from '../../src/composables/useCommand';
-import { COMMAND_ADAPTER, COMMAND_REPORTER, type CommandReporter } from '../../src/composables/keys';
+import { COMMAND_ADAPTER, COMMAND_REPORTER, DOCUMENT_INTERACTION_BLOCKED, type CommandReporter } from '../../src/composables/keys';
 import type { CommandAdapter, CommandOutcome } from '../../src/engine/command-adapter';
 
 type Api = ReturnType<typeof useCommand>;
@@ -34,7 +34,7 @@ function fakeAdapter(outcome: CommandOutcome, calls: Array<{ id: string; payload
 /** מרכיבה קומפוננטה שמשתמשת ב-composable ומחזירה את ה-API שלה. */
 function mount(
   commandId: string,
-  options: { adapter?: CommandAdapter | null; reporter?: CommandReporter } = {},
+  options: { adapter?: CommandAdapter | null; reporter?: CommandReporter; blocked?: Ref<boolean> } = {},
 ): { api: Api; app: App } {
   let api: Api | null = null;
 
@@ -48,6 +48,7 @@ function mount(
   const app = createApp(Component);
   if (options.adapter !== undefined) app.provide(COMMAND_ADAPTER, ref(options.adapter));
   if (options.reporter) app.provide(COMMAND_REPORTER, options.reporter);
+  if (options.blocked) app.provide(DOCUMENT_INTERACTION_BLOCKED, options.blocked);
   app.mount(document.createElement('div'));
 
   if (!api) throw new Error('הקומפוננטה לא הורכבה');
@@ -55,6 +56,25 @@ function mount(
 }
 
 describe('useCommand', () => {
+  it('blocks UI dispatch during candidate initialization without replacing the adapter or losing its readout', async () => {
+    const blocked = ref(false);
+    const { adapter, calls } = fakeAdapter({ ok: true });
+    adapter.getState = () => ({ supported: true, enabled: true, active: false, value: 18 });
+    const { api, app } = mount('font-size', { adapter, blocked, reporter: () => {} });
+    expect(api.state.value.value).toBe(18);
+    blocked.value = true;
+    expect(api.enabled.value).toBe(false);
+    expect(api.state.value.value).toBe(18);
+    expect(await api.run(24)).toMatchObject({ ok: false, reason: 'not-ready' });
+    expect(calls).toEqual([]);
+    blocked.value = false;
+    expect(api.enabled.value).toBe(true);
+    expect(api.state.value.value).toBe(18);
+    await api.run(24);
+    expect(calls).toEqual([{ id: 'font-size', payload: 24 }]);
+    app.unmount();
+  });
+
   it('כשל פקודה מדווח למי שיודע להציג אותו, עם ההודעה בעברית של האדפטר', async () => {
     const reporter = vi.fn();
     const { adapter } = fakeAdapter({

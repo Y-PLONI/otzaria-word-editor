@@ -98,7 +98,7 @@
             class="fr-input"
             placeholder="טקסט חלופי..."
             aria-label="טקסט חלופי"
-            :disabled="isReplacing"
+            :disabled="isReplacing || readOnly"
             @keydown.enter="doReplace"
           >
         </div>
@@ -111,6 +111,9 @@
         role="note"
       >
         {{ REPLACE_UNAVAILABLE_TEXT }}
+      </p>
+      <p v-if="readOnly" class="fr-note" role="note">
+        החלפה אינה זמינה בזמן פתיחת מסמך
       </p>
     </div>
 
@@ -136,7 +139,7 @@
         v-if="activeMode === 'replace'"
         type="button"
         class="fr-btn"
-        :disabled="!searchQuery || isReplacing"
+        :disabled="!searchQuery || isReplacing || readOnly"
         @click="doReplace"
       >
         החלף
@@ -145,7 +148,7 @@
         v-if="activeMode === 'replace'"
         type="button"
         class="fr-btn"
-        :disabled="!searchQuery || isReplacing"
+        :disabled="!searchQuery || isReplacing || readOnly"
         @click="doReplaceAll"
       >
         החלף הכל
@@ -189,6 +192,8 @@ const props = withDefaults(
     initialQuery?: string;
     /** החלפה שנשלחה למנוע וטרם הסתיימה. */
     isReplacing?: boolean;
+    /** פתיחת מסמך משהה כתיבה בלי למחוק את השאילתה או לסגור את הלוח. */
+    readOnly?: boolean;
   }>(),
   {
     isOpen: false,
@@ -196,6 +201,7 @@ const props = withDefaults(
     resultText: '',
     canReplace: false,
     isReplacing: false,
+    readOnly: false,
     initialQuery: '',
   }
 );
@@ -267,12 +273,12 @@ function findPrev(): void {
 }
 
 function doReplace(): void {
-  if (!searchQuery.value) return;
+  if (!searchQuery.value || !props.canReplace || props.isReplacing || props.readOnly) return;
   emit('replace', replaceQuery.value);
 }
 
 function doReplaceAll(): void {
-  if (!searchQuery.value) return;
+  if (!searchQuery.value || !props.canReplace || props.isReplacing || props.readOnly) return;
   emit('replace-all', replaceQuery.value);
 }
 </script>

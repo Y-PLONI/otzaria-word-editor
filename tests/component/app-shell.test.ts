@@ -30,6 +30,7 @@
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { mount } from '@vue/test-utils';
+import { shallowRef } from 'vue';
 import {
   autoUnmount,
   buttonByTip,
@@ -44,8 +45,12 @@ import { COMPLEX_SCRIPT_BOLD_NOTICE } from '../../src/engine/docx-preflight';
 import { NO_VBA, type DocumentVba } from '../../src/engine/vba-import';
 import { COMMAND_REPORTER, STATUS_NOTIFIER, type CommandReporter } from '../../src/composables/keys';
 import type { DocMetrics } from '../../src/engine/doc-metrics';
+import type { MacrosHandle } from '../../src/engine/macros';
 import FindReplaceDialog from '../../src/ui/panels/FindReplaceDialog.vue';
 import TitleBar from '../../src/ui/shell/TitleBar.vue';
+import Ribbon from '../../src/ui/ribbon/Ribbon.vue';
+import DocumentRuler from '../../src/ui/shell/DocumentRuler.vue';
+import VerticalRuler from '../../src/ui/shell/VerticalRuler.vue';
 
 /**
  * המצב המשותף לכפילים. `vi.hoisted` נדרש: מפעלי ה-`vi.mock` מורמים אל מעל
@@ -59,6 +64,10 @@ const stub = vi.hoisted(() => ({
   markDirtyCalls: 0,
   /** האם „החלף הכל” של הכפיל זורק. */
   replaceAllFails: false,
+  replaces: [] as string[],
+  replaceAlls: [] as string[],
+  searchAvailable: false,
+  macros: null as MacrosHandle | null,
   /** כמה פעמים המעטפת סימנה „שוחזר מטיוטה” — ולא „נערך”. */
   markRestoredCalls: 0,
   /** הקפאות ושחרורים של פעולה כבדה, לפי הסדר. */
@@ -326,23 +335,36 @@ vi.mock('../../src/engine/command-adapter', async (importOriginal) => ({
   createCommandAdapter: () => (stub.adapterFactory ? stub.adapterFactory() : stub.adapter),
 }));
 
+vi.mock('../../src/engine/macros', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/engine/macros')>();
+  return {
+    ...actual,
+    installMacros: (...args: Parameters<typeof actual.installMacros>) => stub.macros ?? actual.installMacros(...args),
+  };
+});
+
 vi.mock('../../src/engine/search', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/engine/search')>();
+  const state = () => ({ ...actual.idleSearchState(), available: stub.searchAvailable, canReplace: stub.searchAvailable });
   return {
     ...actual,
     createSearchAdapter: () => ({
-      getState: () => actual.idleSearchState(),
+      getState: state,
       subscribe: () => () => {},
       open: () => {
         stub.searchOpens += 1;
-        return { ok: true, snapshot: actual.idleSearchState() };
+        return { ok: true, snapshot: state() };
       },
       close: () => {},
       clear: () => {},
       find: () => ({ ok: true, snapshot: actual.idleSearchState() }),
       findDebounced: () => {},
-      replace: async () => ({ ok: true, snapshot: actual.idleSearchState() }),
-      replaceAll: async () => {
+      replace: async (replacement: string) => {
+        stub.replaces.push(replacement);
+        return { ok: true, snapshot: actual.idleSearchState() };
+      },
+      replaceAll: async (replacement: string) => {
+        stub.replaceAlls.push(replacement);
         if (stub.replaceAllFails) throw new Error('ההחלפה נכשלה');
         return { ok: true, snapshot: actual.idleSearchState() };
       },
@@ -526,6 +548,10 @@ beforeEach(() => {
   for (const path of Object.keys(stub.draftsByPath)) delete stub.draftsByPath[path];
   stub.draftRemovals = 0;
   stub.replaceAllFails = false;
+  stub.replaces.length = 0;
+  stub.replaceAlls.length = 0;
+  stub.searchAvailable = false;
+  stub.macros = null;
   stub.markRestoredCalls = 0;
   stub.holdCalls = 0;
   stub.releaseCalls = 0;
@@ -557,10 +583,13 @@ beforeEach(() => {
   stub.metricsFactory = null;
   stub.disposeOrder.length = 0;
   stub.refreshCalls.length = 0;
-  stub.adapter = createCommandDouble();
+  stub.adapter = createCommandDouble({ states: { 'document-mode': { value: 'editing' } } });
   stub.superdoc = createSuperdocDouble();
+  const adapter = stub.adapter as CommandDouble;
+  stub.superdoc.host.setDocumentMode = vi.fn(mode => adapter.setState('document-mode', { value: mode }));
   stub.session = {
     superdoc: stub.superdoc.host,
+    container: document.createElement('div'),
     // ה-controller המזויף: רק מה שהמעטפת נוגעת בו ישירות. שאר הקוראים
     // (`observeZoom`, `observeFontOptions`, `observeStyleGallery`) מתוכננים
     // ליפול לברירת מחדל כשה-handle חסר, וזה מה שנמדד בבדיקות שלהם.
@@ -651,8 +680,177 @@ describe('נעילת העורך הקודם בזמן פתיחה', () => {
     return stub.preflightSignals[count]!;
   }
 
+  it('locks the real Ribbon, title actions, and rulers while preflight waits, then restores them on Skip', async () => {
+    const { previous } = containers();
+    const wrapper = await mountShell();
+    const adapter = stub.adapter as CommandDouble;
+    adapter.setState('document-mode', { value: 'suggesting' });
+    const release = holdPreflight();
+    const titleBar = wrapper.getComponent(TitleBar);
+    const originalTitle = titleBar.props('title');
+    try {
+      expect((buttonByTip(wrapper, 'מודגש').element as HTMLButtonElement).disabled).toBe(false);
+      await beginBlank();
+      expect(previous.inert).toBe(true);
+      expect(adapter.getState('document-mode').value).toBe('viewing');
+      expect(wrapper.get('.shell-top').attributes('inert')).toBeDefined();
+      expect(wrapper.getComponent(DocumentRuler).props('editable')).toBe(false);
+      expect(wrapper.getComponent(VerticalRuler).props('editable')).toBe(false);
+      const bold = buttonByTip(wrapper, 'מודגש');
+      expect((bold.element as HTMLButtonElement).disabled).toBe(true);
+      adapter.reset();
+      await bold.trigger('click');
+      titleBar.vm.$emit('undo');
+      titleBar.vm.$emit('redo');
+      titleBar.vm.$emit('update-title', 'must not rename the old document');
+      await settle(8);
+      expect(adapter.calls).toEqual([]);
+      expect(titleBar.props('title')).toBe(originalTitle);
+      const skip = wrapper.get('.status-load__skip');
+      expect(skip.element.closest('[inert]'), 'Skip remains outside the locked shell').toBeNull();
+      await skip.trigger('click');
+      expect(adapter.getState('document-mode').value).toBe('suggesting');
+      expect(previous.inert).toBe(false);
+      expect(wrapper.getComponent(DocumentRuler).props('editable')).toBe(true);
+      expect(wrapper.getComponent(VerticalRuler).props('editable')).toBe(true);
+      expect((bold.element as HTMLButtonElement).disabled).toBe(false);
+      await bold.trigger('click');
+      expect(adapter.calls.map(call => call.id)).toEqual(['bold']);
+    } finally { release(); await settle(12); }
+  });
+
+  it('Developer replay and record cannot bypass the opening lock through emitted events', async () => {
+    containers();
+    const replayLast = vi.fn(), toggleRecording = vi.fn();
+    stub.macros = {
+      kit: {
+        listRecordings: () => [], listSnippets: () => [], listScripts: () => [], listTools: () => [], registerTool: () => {},
+      } as unknown as MacrosHandle['kit'],
+      recording: shallowRef(false), scriptsEnabled: false, replayLast, toggleRecording, dispose: () => {},
+    };
+    const wrapper = await mountShell();
+    const ribbon = wrapper.getComponent(Ribbon);
+    ribbon.vm.$emit('update:activeTab', 'developer');
+    await settle(8);
+    const play = wrapper.findAll('button').find(button => button.text() === 'נגן אחרון')!;
+    expect(play.exists()).toBe(true);
+    expect((play.element as HTMLButtonElement).disabled).toBe(false);
+    const release = holdPreflight();
+    try {
+      await beginBlank();
+      expect((play.element as HTMLButtonElement).disabled).toBe(true);
+      ribbon.vm.$emit('macro-play');
+      ribbon.vm.$emit('macro-record');
+      await settle(8);
+      expect(replayLast).not.toHaveBeenCalled();
+      expect(toggleRecording).not.toHaveBeenCalled();
+      await wrapper.get('.status-load__skip').trigger('click');
+      expect((play.element as HTMLButtonElement).disabled).toBe(false);
+      await play.trigger('click');
+      expect(replayLast).toHaveBeenCalledOnce();
+    } finally { release(); await settle(12); }
+  });
+
+  it('keeps suggesting→protected→Skip→unprotect state and will not open across a pending protection write', async () => {
+    containers();
+    const adapter = stub.adapter as CommandDouble;
+    adapter.setState('document-mode', { value: 'suggesting' });
+    const run = adapter.run.bind(adapter);
+    adapter.run = async (id, payload) => {
+      const outcome = await run(id, payload);
+      if (outcome.ok && id === 'document-mode') adapter.setState(id, { value: (payload as { mode: string }).mode });
+      return outcome;
+    };
+    let enforced = false;
+    let finishSet!: () => void;
+    const setReply = new Promise<void>(resolve => { finishSet = resolve; });
+    const setProtection = vi.fn(async () => { await setReply; enforced = true; return { success: true }; });
+    Object.assign(stub.superdoc!.host.activeEditor!.doc!.protection, {
+      get: () => ({ editingRestriction: { mode: enforced ? 'readOnly' : 'none', enforced } }),
+      setEditingRestriction: setProtection,
+      clearEditingRestriction: () => { enforced = false; return { success: true }; },
+    });
+    const wrapper = await mountShell();
+    wrapper.getComponent(Ribbon).vm.$emit('update:activeTab', 'review');
+    await settle(8);
+    const protect = wrapper.findAll('button').find(button => button.text() === 'הגבל עריכה')!;
+    let release = (): void => {};
+    try {
+      await protect.trigger('click');
+      await protect.trigger('click');
+      expect(setProtection).toHaveBeenCalledOnce();
+      const openings = stub.preflightSignals.length;
+      pressCtrl('KeyN');
+      await settle(8);
+      expect(document.querySelector('.tpl-card'), 'opening waits for XML + runtime protection to settle').toBeNull();
+      expect(stub.preflightSignals).toHaveLength(openings);
+      expect(adapter.getState('document-mode').value).toBe('suggesting');
+      finishSet();
+      await settle(12);
+      expect(adapter.getState('document-mode').value).toBe('viewing');
+      expect(enforced).toBe(true);
+
+      release = holdPreflight();
+      await beginBlank();
+      expect(adapter.getState('document-mode').value).toBe('viewing');
+      await wrapper.get('.status-load__skip').trigger('click');
+      await settle(12);
+      expect(adapter.getState('document-mode').value).toBe('viewing');
+      expect(enforced).toBe(true);
+      await protect.trigger('click');
+      await settle(12);
+      expect(enforced).toBe(false);
+      expect(adapter.getState('document-mode').value).toBe('suggesting');
+    } finally { finishSet(); release(); await settle(12); }
+  });
+
+  it('an open nonmodal Replace panel preserves its query but cannot write until Skip', async () => {
+    containers();
+    stub.searchAvailable = true;
+    const wrapper = await mountShell();
+    wrapper.getComponent(Ribbon).vm.$emit('open-replace');
+    await settle(8);
+    const panel = wrapper.getComponent(FindReplaceDialog);
+    const query = panel.get<HTMLInputElement>('#fr-search-input');
+    await query.setValue('original query');
+    await panel.get('#fr-replace-input').setValue('replacement');
+    query.element.focus();
+    const release = holdPreflight();
+    try {
+      await beginBlank();
+      expect(panel.props('readOnly')).toBe(true);
+      const replaceButtons = panel.findAll('.fr-btn').filter(button => button.text().startsWith('החלף'));
+      expect(replaceButtons).toHaveLength(2);
+      expect(replaceButtons.every(button => (button.element as HTMLButtonElement).disabled)).toBe(true);
+      await panel.get('#fr-replace-input').trigger('keydown', { key: 'Enter' });
+      panel.vm.$emit('replace', 'must not write');
+      panel.vm.$emit('replace-all', 'must not write');
+      await settle(8);
+      expect(stub.replaces).toEqual([]);
+      expect(stub.replaceAlls).toEqual([]);
+      expect(stub.holdCalls).toBe(0);
+      query.element.focus();
+      await wrapper.get('.status-load__skip').trigger('click');
+      expect(document.activeElement).toBe(query.element);
+      expect(query.element.value).toBe('original query');
+      expect(panel.get<HTMLInputElement>('#fr-replace-input').element.value).toBe('replacement');
+      expect(panel.props('readOnly')).toBe(false);
+      await replaceButtons[0]!.trigger('click');
+      expect(stub.replaces).toEqual(['replacement']);
+    } finally { release(); await settle(12); }
+  });
+
   it('נועלת רק את הישן ומשאירה את המועמד החדש זמין למיקוד', async () => {
     const { previous, next } = containers();
+    const candidate = createSuperdocDouble();
+    candidate.host.setDocumentMode = vi.fn();
+    const base = stub.session as object;
+    let opens = 0, adapters = 0;
+    stub.sessionFactory = () => ++opens === 1
+      ? { ...base, container: previous }
+      : { ...base, superdoc: candidate.host, container: next };
+    stub.adapterFactory = () => ++adapters === 1 ? stub.adapter
+      : createCommandDouble({ states: { 'document-mode': { value: 'editing' } } });
     const wrapper = await mountShell();
     const release = holdPreflight();
     try {
@@ -661,12 +859,19 @@ describe('נעילת העורך הקודם בזמן פתיחה', () => {
       expect(next.inert).toBe(false);
       expect((wrapper.get('.editor-stack').element as HTMLElement).inert).not.toBe(true);
       stub.superdoc!.reset();
+      stub.caretApplied.length = 0;
       release();
       await vi.waitFor(() => expect(stub.resetCalls).toBe(2));
       await settle(12);
       expect(previous.inert).toBe(false);
       expect(next.inert).toBe(false);
-      expect(stub.superdoc!.ops()).toContain('focus');
+      expect(candidate.ops()).toContain('focus');
+      expect(candidate.host.setDocumentMode).not.toHaveBeenCalled();
+      expect(stub.caretApplied, 'the unleased candidate also gets a usable initial caret').toEqual([{
+        kind: 'selection',
+        start: { kind: 'text', blockId: 'block-1', offset: 0 },
+        end: { kind: 'text', blockId: 'block-1', offset: 0 },
+      }]);
     } finally { release(); }
   });
 
@@ -693,13 +898,20 @@ describe('נעילת העורך הקודם בזמן פתיחה', () => {
     const { previous } = containers();
     const wrapper = await mountShell();
     const release = holdPreflight();
+    const adapter = stub.adapter as CommandDouble;
+    adapter.setState('document-mode', { value: 'suggesting' });
     try {
       stub.openFailures = 1;
       await beginBlank();
       expect(previous.inert).toBe(true);
+      (document.activeElement as HTMLElement | null)?.blur();
+      stub.superdoc!.reset();
       release();
       await vi.waitFor(() => expect(wrapper.find('.word-statusbar').text()).toContain('פתיחת המסמך נכשלה'));
+      await settle(8);
       expect(previous.inert).toBe(false);
+      expect(adapter.getState('document-mode').value).toBe('suggesting');
+      expect(stub.superdoc!.ops()).toContain('focus');
       expect(stub.resetCalls).toBe(1);
     } finally { release(); }
   });
@@ -734,6 +946,9 @@ describe('נעילת העורך הקודם בזמן פתיחה', () => {
       expect(key({ code: 'F6' }, ribbon).defaultPrevented).toBe(true);
       expect(wrapper.get('.word-statusbar').element.contains(document.activeElement)).toBe(true);
       expect(stub.superdoc!.ops(), 'F6 מדלג על העורך הנעול').not.toContain('focus');
+      (document.activeElement as HTMLElement).blur();
+      expect(key({ code: 'F6' }).defaultPrevented).toBe(true);
+      expect(wrapper.get('.word-statusbar').element.contains(document.activeElement), 'F6 skips the inert titlebar and Ribbon from body too').toBe(true);
 
       key({ code: 'Slash', ctrlKey: true });
       await settle(8);
@@ -2338,8 +2553,10 @@ describe('קישוריות בין טאבים', () => {
   function engineSession(): unknown {
     const disposers: Array<() => void> = [];
     const superdoc = createSuperdocDouble();
+    superdoc.host.setDocumentMode = vi.fn();
     return {
       superdoc: superdoc.host,
+      container: document.createElement('div'),
       ui: {
         selection: { observe: () => () => {}, apply: () => ({ ok: true }) },
         viewport: { scrollIntoView: async () => ({ success: true }) },
@@ -2369,7 +2586,7 @@ describe('קישוריות בין טאבים', () => {
     const pages = [3, 7];
     stub.sessionFactory = engineSession;
     stub.adapterFactory = () => {
-      const adapter = createCommandDouble();
+      const adapter = createCommandDouble({ states: { 'document-mode': { value: 'editing' } } });
       adapters.push(adapter);
       return adapter;
     };
