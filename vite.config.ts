@@ -132,13 +132,19 @@ function deferredEntry(): Plugin {
             var script = document.createElement('script');
             script.async = false;
             script.src = step.src;
+            function measured(event) {
+              try { window.__otzariaPerformance?.mark(event, { asset: step.warm ? 'engine-workers.js' : 'app.js' }); } catch (ignored) {}
+            }
             script.addEventListener('load', function () {
+              measured('script.loaded');
               say(step.next);
               if (step.warm) warm();
             });
             script.addEventListener('error', function () {
+              measured('script.failed');
               if (splash) splash.fail('טעינת קוד התוסף נכשלה');
             });
+            measured('script.requested');
             document.head.appendChild(script);
           });
         }
