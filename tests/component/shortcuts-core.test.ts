@@ -202,6 +202,14 @@ async function mountShell() {
   return wrapper;
 }
 
+/** A requested dialog crosses import() before Vue can mount and focus it.
+ * Wait for that boundary without importing a closed panel in the fixture. */
+async function settleOpenDialog(): Promise<void> {
+  await settle();
+  await vi.dynamicImportSettled();
+  await settle(2);
+}
+
 /**
  * משטח ההקלדה של המנוע: `<textarea aria-label="Text composition input">`
  * בתוך `.editor-stack`. במודול-רמה (לא בתוך describe אחד) כי גם „הפוקוס
@@ -587,7 +595,7 @@ describe('פעולות המעטפת', () => {
     await mountShell();
 
     press({ code: 'KeyO', ctrlKey: true });
-    await settle();
+    await settleOpenDialog();
 
     expect(document.querySelector('.open-dialog'), 'הדיאלוג נפתח').not.toBeNull();
     expect(stub.pickCalls, 'ועדיין לא נפתח בורר קבצים').toBe(0);
@@ -609,7 +617,7 @@ describe('פעולות המעטפת', () => {
     stub.resets = 0;
 
     const event = press({ code: 'KeyN', ctrlKey: true });
-    await settle();
+    await settleOpenDialog();
 
     expect(event.defaultPrevented).toBe(true);
     expect(document.querySelector('.open-dialog'), 'הדיאלוג נפתח').not.toBeNull();
@@ -634,7 +642,7 @@ describe('פעולות המעטפת', () => {
     stub.resets = 0;
 
     press({ code: 'KeyN', ctrlKey: true });
-    await settle();
+    await settleOpenDialog();
 
     // „מסמך ריק” הוא הכרטיס שמגיע ל-`onNewDocument`, ושם יושבת ההכרעה.
     document.querySelector<HTMLButtonElement>('.tpl-card')?.click();
@@ -655,7 +663,7 @@ describe('פעולות המעטפת', () => {
     stub.isDirty = true;
 
     press({ code: 'KeyO', ctrlKey: true });
-    await settle();
+    await settleOpenDialog();
     document.querySelector<HTMLButtonElement>('.open-browse')?.click();
     await settle();
 

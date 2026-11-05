@@ -30,7 +30,7 @@ defineExpose({ contains: (node: Node | null) => root.value?.contains(node) ?? fa
   color: var(--color-on-surface);
   border: 1px solid var(--color-outline-variant);
   border-radius: var(--radius-sm);
-  box-shadow: 0 0.25rem 1rem rgb(0 0 0 / 15%);
+  box-shadow: var(--ribbon-shadow-bottom);
 }
 .panel-load-state button {
   font: inherit;
