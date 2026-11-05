@@ -109,6 +109,7 @@ const stub = vi.hoisted(() => ({
   workspaceWrites: [] as Array<{ path: string; bytes: Uint8Array }>,
   /** רשומת הגיבוי של „לא לשמור” שה-storage מחזיר בעלייה. */
   storedDiscardBackups: null as unknown,
+  discardHistoryFailure: false,
   /** כל מה שנכתב לרשומת הגיבוי, לפי הסדר. */
   persistedDiscardBackups: [] as unknown[],
   /** כמה פעמים נמחקה הטיוטה. */
@@ -433,7 +434,10 @@ vi.mock('../../src/host/settings', () => ({
   saveRecentDocuments: async (list: unknown) => {
     stub.persistedRecents.push(list);
   },
-  loadDiscardBackups: async () => stub.storedDiscardBackups,
+  loadDiscardBackups: async () => {
+    if (stub.discardHistoryFailure) throw new Error('offline');
+    return stub.storedDiscardBackups;
+  },
   saveDiscardBackups: async (list: unknown) => {
     stub.persistedDiscardBackups.push(list);
   },
@@ -520,6 +524,7 @@ beforeEach(() => {
   stub.storedRecents = null;
   stub.persistedRecents.length = 0;
   stub.storedDiscardBackups = null;
+  stub.discardHistoryFailure = false;
   stub.persistedDiscardBackups.length = 0;
   stub.workspaceWrites.length = 0;
   stub.caretApplied.length = 0;
@@ -1544,6 +1549,32 @@ describe('שחזור כל הטאבים', () => {
     expect(ledger.map((entry) => entry.slot), 'החדש ראשון, והישן נשאר').toEqual([1, 0]);
   });
 
+  it('טעינת גיבויים מאוחרת אינה חוסמת פתיחה ואינה דורסת גיבוי שנוסף בינתיים', async () => {
+    let release!: (value: unknown) => void;
+    stub.storedDiscardBackups = new Promise(resolve => { release = resolve; });
+    stub.storedSession = twoTabs(SECOND_DRAFT);
+    stub.draftsByPath[SECOND_DRAFT.path] = new Uint8Array([80, 75, 3, 4]);
+    const old = [{ slot: 0, name: 'ישן', size: 4, discardedAt: 1, token: null }];
+    const wrapper = await mountShell();
+    try {
+      expect(stub.openSources).toHaveLength(1);
+      await wrapper.findAll('.word-doctab')[1]!.find('.word-doctab-close').trigger('click');
+      await settle(12);
+      await answerUnsaved('discard');
+      expect(stub.workspaceWrites.filter(write => write.path.startsWith('discarded-'))).toHaveLength(0);
+      release(old);
+      await settle(24);
+      expect(lastDiscardBackups().map(item => item.slot)).toEqual([1, 0]);
+      pressCtrl('KeyO');
+      await settle(8);
+      expect(wrapper.find('.open-discarded').text()).toContain('(2)');
+    } finally {
+      release(old);
+      await settle(12);
+      wrapper.unmount();
+    }
+  });
+
   it('סגירת טאב שממתין ואין בו מה לאבד אינה שואלת, ומורידה אותו מהרשומה', async () => {
     stub.storedSession = twoTabs();
     const wrapper = await mountShell();
@@ -1830,6 +1861,30 @@ describe('שחזור כל הטאבים', () => {
     await settle(8);
     expect(document.querySelector('.open-discarded')).toBeNull();
     expect(wrapper.findAll('.word-doctab')).toHaveLength(1);
+  });
+
+  it.each(['forget', 'open'])('כשל בקריאת היסטוריית גיבויים ב-%s משאיר את הרשומה לניסיון נוסף', async (action) => {
+    stub.storedDiscardBackups = [
+      { slot: 1, name: 'עותק', size: 10, discardedAt: Date.now(), token: null },
+    ];
+    const wrapper = await mountShell();
+    pressCtrl('KeyO');
+    await settle(8);
+    document.querySelector<HTMLButtonElement>('.open-discarded')!.click();
+    await settle(8);
+    stub.discardHistoryFailure = true;
+    document.querySelector<HTMLButtonElement>(`.discarded-${action}`)!.click();
+    await settle(12);
+    expect(stub.persistedDiscardBackups).toHaveLength(0);
+    expect(stub.removedDrafts).not.toContain('discarded-1.docx');
+    expect(document.querySelector('.discarded-name')?.textContent).toBe('עותק');
+    expect(wrapper.find('.word-statusbar').text()).toContain('אפשר לנסות שוב');
+    expect(wrapper.find('.word-statusbar').text()).not.toContain('השורה הוסרה');
+    expect(document.querySelector<HTMLButtonElement>('.discarded-forget')!.disabled).toBe(false);
+    stub.discardHistoryFailure = false;
+    document.querySelector<HTMLButtonElement>('.discarded-forget')!.click();
+    await settle(12);
+    expect(stub.removedDrafts).toContain('discarded-1.docx');
   });
 
   it('שורה שהעותק שלה נעלם מוסרת במקום לפתוח מסמך ריק', async () => {
@@ -3135,5 +3190,48 @@ describe('פתיחת ספר Word מסרגל הקורא', () => {
       await wrapper.find('.word-doctabs-new').trigger('click'); await settle(12);
       expect(wrapper.findAll('.word-doctab')).toHaveLength(2);
     } finally { wrapper.unmount(); window.Otzaria = undefined as never; }
+  });
+});
+
+describe('startup history outside the opening barrier', () => {
+  it('opens a stored file before either history reply and merges the early recent entry', async () => {
+    let releaseRecents!: (value: unknown) => void;
+    let releaseBackups!: (value: unknown) => void;
+    stub.storedRecents = new Promise(resolve => { releaseRecents = resolve; });
+    stub.storedDiscardBackups = new Promise(resolve => { releaseBackups = resolve; });
+    stub.storedSession = {
+      version: 2,
+      documents: [{ id: 'doc-1', document: FIRST_DOC, caret: null, draft: null }],
+      activeId: 'doc-1',
+      view: { zoom: null, focusMode: false, ribbonTab: null, ribbonCollapsed: false },
+    };
+    stub.resolvedFile = TAB_FILES['tok-1'];
+    const oldRecents = [
+      { ...FIRST_DOC, size: 1, openedAt: 1, pinned: true },
+      { token: 'older', name: 'ישן.docx', writable: false, size: 3, openedAt: 2, pinned: false },
+    ];
+    const wrapper = await mountShell();
+    try {
+      expect(stub.openSources).toContain('loopback://first');
+      expect(stub.persistedRecents).toHaveLength(0);
+      pressCtrl('KeyO');
+      await settle(8);
+      expect(wrapper.text()).toContain('טוען מסמכים אחרונים');
+      expect(wrapper.find('.open-browse').attributes('disabled')).toBeUndefined();
+      releaseRecents(oldRecents);
+      releaseBackups([]);
+      await settle(20);
+      const saved = stub.persistedRecents[stub.persistedRecents.length - 1] as Array<Record<string, unknown>>;
+      expect(saved.map(item => item.token)).toEqual(['tok-1', 'older']);
+      expect(saved[0]).toMatchObject({ pinned: true, writable: true, size: 100 });
+      expect(saved[0]!.openedAt).toBeGreaterThan(2);
+      expect(wrapper.findAll('.rec-open')).toHaveLength(2);
+      expect(wrapper.text()).not.toContain('טוען מסמכים אחרונים');
+    } finally {
+      releaseRecents(oldRecents);
+      releaseBackups([]);
+      await settle(12);
+      wrapper.unmount();
+    }
   });
 });
