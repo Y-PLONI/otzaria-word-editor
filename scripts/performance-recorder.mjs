@@ -54,6 +54,7 @@ export function installPerformanceRecorder({ apiBytes = false, limit = 4000, bou
   // counts at this facade, not all internal engine RPCs or wire byte counts.
   const METHODS = ['get', 'getText', 'getNode', 'getNodeById', 'blocks.list', 'sections.list', 'selection.current'];
   function bind(editor, openingId = null) {
+    if (stopped) return;
     if (editors.has(editor)) return editors.get(editor);
     const item = { id: ++documentId, openingId, originals: new Map(), disposed: false };
     editors.set(editor, item);
@@ -334,4 +335,26 @@ export function installPerformanceRecorder({ apiBytes = false, limit = 4000, bou
   window.__otzariaPerformance = recorder;
   mark('recorder.installed');
   return recorder;
+}
+
+/** Validate the earliest selected intent and opening, never a later fallback. */
+export function validateStartupOpening(recording, openingId, expectedKind = null) {
+  if (recording.boundary === 'late-attach') return false;
+  const events = recording.events;
+  const intentAt = events.findIndex(event => event.name === 'document.intent.start');
+  const openingAt = events.findIndex(event => event.name === 'document.open.start');
+  const intent = events[intentAt], opening = events[openingAt];
+  if (!intent || !opening || !Number.isSafeInteger(intent.span) || !Number.isSafeInteger(opening.span)) {
+    throw new Error('Build lacks startup instrumentation');
+  }
+  const intentEndAt = events.findIndex(event => event.name === 'document.intent.end' && event.span === intent.span);
+  const openingEndAt = events.findIndex(event => event.name === 'document.open.end' && event.span === opening.span);
+  const sourceUnavailable = events.slice(intentAt + 1, intentEndAt)
+    .some(event => event.name === 'document.intent.source-unavailable');
+  if (openingId !== opening.span || intentAt >= openingAt || openingEndAt <= openingAt || intentEndAt <= openingEndAt ||
+      events[intentEndAt]?.status !== 'opened' || events[openingEndAt]?.status !== 'opened' || sourceUnavailable ||
+      (expectedKind !== null && opening.kind !== expectedKind)) {
+    throw new Error('The intended startup opening did not become the measured document');
+  }
+  return true;
 }

@@ -5978,17 +5978,30 @@ async function openStartupDocument(restored: DocumentSession): Promise<void> {
   const restoredSessions = new Set(sessions.values());
   // Send-to-document needs the old active document and its restored caret.
   while (!startupSendEvents.length && startupOpenRequests.length && !opened) {
-    opened = await startupOpenRequests.shift()!();
+    // Include source resolution before openDocument; a later fallback is not
+    // success for this selected request. Diagnostics never choose the target.
+    const intent = beginPerformanceSpan('document.intent');
+    try {
+      opened = await startupOpenRequests.shift()!();
+    } finally {
+      intent?.end(opened ? 'opened' : 'failed');
+    }
     if (!opened && isStatusError.value) failureMessage = statusText.value;
   }
   async function restoreOriginalTarget(): Promise<void> {
     activateTab(restored);
     if (restored.pendingRestore) {
-      if (startupAttemptedSessions.has(restored.id)) {
-        // A failed explicit request for this very tab must not retry it twice.
-        restored.pendingRestore = false;
-        await openDocument(undefined, { remember: false });
-      } else await openPendingTab(restored);
+      const intent = beginPerformanceSpan('document.intent');
+      let intendedOpened = false;
+      try {
+        if (startupAttemptedSessions.has(restored.id)) {
+          // A failed explicit request for this very tab must not retry it twice.
+          restored.pendingRestore = false;
+          await openDocument(undefined, { remember: false });
+        } else intendedOpened = await openPendingTab(restored);
+      } finally {
+        intent?.end(intendedOpened ? 'opened' : 'failed');
+      }
     }
   }
   if (!opened) await restoreOriginalTarget();
@@ -6767,6 +6780,9 @@ async function recoverDraft(
 /** בייטי הטיוטה כ-Blob שאפשר למסור למנוע, או `null` כשאין. */
 async function readDraftBytes(path: string): Promise<Blob | null> {
   const bytes = await readWorkspaceBytes(path);
+  // Only called after choosing a draft to restore. Choosing the disk file
+  // returns earlier; losing the chosen draft must not validate that fallback.
+  if (!bytes) markPerformance('document.intent.source-unavailable');
   return bytes ? new Blob([bytes], { type: DOCX_MIME }) : null;
 }
 

@@ -21,7 +21,7 @@ export interface Recorder {
     mark(stage: string): void; bind(editor: object): void; end(status: string): void;
   };
   api(scope: string, method: string, request: unknown): (response: unknown, status: 'ok' | 'error') => void;
-  bind(editor: object): object;
+  bind(editor: object): object | undefined;
   prepare(phase: string, text: string): Promise<{ documentId: number; openingId: number | null; inputCount: number }>;
   finishBurst(): Promise<{ valid: boolean; received: number; expected: number; displayed: number }>;
   snapshot(): Recording;
@@ -31,3 +31,8 @@ export interface Recorder {
 export function installPerformanceRecorder(options?: {
   apiBytes?: boolean; limit?: number; boundary?: 'plugin-navigation-start' | 'late-attach'; ownerId?: string;
 }): Recorder;
+export function validateStartupOpening(
+  recording: Pick<Recording, 'boundary' | 'events'>,
+  openingId: number | null,
+  expectedKind?: 'file' | 'new' | null,
+): boolean;

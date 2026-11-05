@@ -7,7 +7,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { parseArgs } from 'node:util';
 import { connect, openPage, requireChrome, sleep, onInterrupt } from './cdp.mjs';
-import { installPerformanceRecorder } from './performance-recorder.mjs';
+import { installPerformanceRecorder, validateStartupOpening } from './performance-recorder.mjs';
 import { summarize } from './performance-report.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -48,6 +48,7 @@ const limitFile = name => {
 const memoryLimit = limitFile('memory.max');
 const cpuLimit = limitFile('cpu.max');
 const fixture = args.docx ? readFileSync(resolve(args.docx)) : null;
+const expectedOpeningKind = args.attach ? null : fixture ? 'file' : 'new';
 const dist = resolve(args.dist);
 const runId = randomUUID();
 const injection = `(${installPerformanceRecorder.toString()})(${JSON.stringify({ ownerId: runId, apiBytes: Boolean(args['api-bytes']), boundary: args.attach && !args.reload ? 'late-attach' : 'plugin-navigation-start' })});`;
@@ -117,13 +118,9 @@ async function key(character) {
 async function typeBurst(phase, text, { waitForSave = false, documentId = null } = {}) {
   const prepared = await cdp.evaluate(owned(`return recorder.prepare(${JSON.stringify(phase)}, ${JSON.stringify(text)});`));
   if (documentId !== null && documentId !== prepared.documentId) throw new Error('The active document changed between typing phases');
-  if (phase === 'first-edit' && !args.attach) {
+  if (phase === 'first-edit') {
     const recording = await cdp.evaluate(owned('return recorder.snapshot();'));
-    const opening = recording.events.find(event => event.name === 'document.open.start' && event.span === prepared.openingId);
-    const opened = recording.events.some(event => event.name === 'document.open.end' && event.span === prepared.openingId && event.status === 'opened');
-    if (!opened || opening?.kind !== (fixture ? 'file' : 'new')) {
-      throw new Error('The requested fixture/opening did not become the measured document');
-    }
+    validateStartupOpening(recording, prepared.openingId, expectedOpeningKind);
   }
   if (waitForSave) await until(`(() => { for (const s of window.__otzariaEditors.values()) if (s.swap.current === window.__otzariaEditor) return s.save.snapshot.isSaving; return false; })()`, 12_000, 10);
   for (const character of text) { await key(character); if (gap) await sleep(gap); }
@@ -157,9 +154,8 @@ async function capture(index) {
       run.bursts.push(await typeBurst('autosave-overlap', text, { ...target, waitForSave: true }));
     }
     run.recording = await cdp.evaluate(owned("recorder.mark('measurement.finished'); return recorder.snapshot();"));
-    run.startupHooksObserved = run.recording.events.some(event => event.name === 'document.open.end' && event.status === 'opened');
     if (run.recording.dropped || !run.recording.firstEdit || run.recording.keys.some(sample => !sample.validated)) throw new Error('Incomplete recording');
-    if (!args.attach && !run.startupHooksObserved) throw new Error('Build lacks startup instrumentation');
+    run.startupHooksObserved = validateStartupOpening(run.recording, run.recording.firstEdit.openingId, expectedOpeningKind);
     if (args.autosave && !run.recording.keys.some(sample => sample.phase === 'autosave-overlap' && ['exporting', 'uploading', 'committing'].includes(sample.saveState))) throw new Error('No keystroke overlapped a save');
     run.resources = await cdp.evaluate(String.raw`performance.getEntriesByType('resource').filter(r => /\/(app|engine-workers)\.js(?:[?#]|$)/.test(r.name)).map(r => ({ asset: r.name.includes('engine-workers') ? 'engine-workers.js' : 'app.js', start: r.startTime, duration: r.duration, fetchEnd: r.responseEnd, transferBytes: r.transferSize > 0 ? r.transferSize : null, encodedBytes: r.encodedBodySize > 0 ? r.encodedBodySize : null }))`);
     run.resourceTimingAvailable = run.resources.length > 0;

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { installPerformanceRecorder, type Recorder } from '../../scripts/performance-recorder.mjs';
+import { installPerformanceRecorder, validateStartupOpening, type Recorder } from '../../scripts/performance-recorder.mjs';
 import { beginPerformanceApi, beginPerformanceSpan, markPerformance } from '../../src/diagnostics/performance';
 
 let recorder: Recorder | undefined;
@@ -70,6 +70,111 @@ describe('optional production hooks', () => {
     const fail = () => { throw new Error('diagnostics failed'); };
     window.__otzariaPerformance = { mark: fail, api: () => fail, begin: () => ({ mark: fail, end: fail, bind: fail }) };
     expect(() => { markPerformance('test'); const span = beginPerformanceSpan('open'); span?.mark('step'); span?.bind({}); span?.end('done'); beginPerformanceApi('host', 'x', {})?.({}, 'ok'); }).not.toThrow();
+  });
+});
+
+describe('startup opening validation', () => {
+  it('rejects a failed native opening followed by a successful blank fallback', async () => {
+    const f = fixture(); recorder = installPerformanceRecorder();
+    const intent = recorder.begin('document.intent');
+    const intended = recorder.begin('document.open', { kind: 'file', restored: true });
+    intended.end('cancelled');
+    const fallback = recorder.begin('document.open', { kind: 'new' });
+    fallback.bind(f.editor); fallback.end('opened');
+    intent.end('failed');
+    const prepared = await recorder.prepare('first-edit', 'א');
+    expect(() => validateStartupOpening(recorder!.snapshot(), prepared.openingId))
+      .toThrow('intended startup opening');
+    expect(recorder.snapshot().keys).toHaveLength(0);
+  });
+  it('accepts typing in the successful intended native restoration', async () => {
+    const f = fixture(); recorder = installPerformanceRecorder();
+    recorder.begin('preferences').end('loaded');
+    const intent = recorder.begin('document.intent');
+    const intended = recorder.begin('document.open', { kind: 'file', restored: true });
+    intended.bind(f.editor); intended.end('opened'); intent.end('opened');
+    const prepared = await recorder.prepare('first-edit', 'א');
+    expect(validateStartupOpening(recorder.snapshot(), prepared.openingId)).toBe(true);
+    f.down('א'); await f.render('א');
+    expect((await recorder.finishBurst()).valid).toBe(true);
+    const recording = recorder.snapshot();
+    expect(validateStartupOpening(recording, recording.firstEdit!.openingId)).toBe(true);
+  });
+  it('keeps late attachment valid for typing without startup hooks or a startup claim', async () => {
+    const f = fixture(); recorder = installPerformanceRecorder({ boundary: 'late-attach' });
+    const prepared = await recorder.prepare('first-edit', 'א');
+    expect(prepared.openingId).toBeNull();
+    expect(validateStartupOpening(recorder.snapshot(), prepared.openingId)).toBe(false);
+    f.down('א'); await f.render('א');
+    expect((await recorder.finishBurst()).valid).toBe(true);
+    const recording = recorder.snapshot();
+    expect(recording.boundary).toBe('late-attach');
+    expect(validateStartupOpening(recording, recording.firstEdit!.openingId)).toBe(false);
+  });
+  it.each([false, true])('requires intent instrumentation even when opening hooks exist: %s', async (openingHooks) => {
+    const f = fixture(); recorder = installPerformanceRecorder();
+    if (openingHooks) {
+      const opening = recorder.begin('document.open', { kind: 'new' });
+      opening.bind(f.editor); opening.end('opened');
+    }
+    const prepared = await recorder.prepare('first-edit', 'א');
+    expect(() => validateStartupOpening(recorder!.snapshot(), prepared.openingId))
+      .toThrow('Build lacks startup instrumentation');
+    expect(recorder.snapshot().keys).toHaveLength(0);
+  });
+  it('requires both the intended opening and its intent to complete before typing', async () => {
+    const f = fixture(); recorder = installPerformanceRecorder();
+    const intent = recorder.begin('document.intent');
+    const opening = recorder.begin('document.open', { kind: 'file' });
+    opening.bind(f.editor);
+    const prepared = await recorder.prepare('first-edit', 'א');
+    expect(() => validateStartupOpening(recorder!.snapshot(), prepared.openingId)).toThrow();
+    opening.end('opened');
+    expect(() => validateStartupOpening(recorder!.snapshot(), prepared.openingId)).toThrow();
+    intent.end('opened');
+    expect(validateStartupOpening(recorder.snapshot(), prepared.openingId)).toBe(true);
+  });
+  it('rejects a later successful opening even when its kind matches', async () => {
+    recorder = installPerformanceRecorder();
+    const intent = recorder.begin('document.intent');
+    const original = fixture();
+    const intended = recorder.begin('document.open', { kind: 'file' });
+    intended.bind(original.editor); intended.end('opened');
+    const replacement = fixture();
+    const later = recorder.begin('document.open', { kind: 'file' });
+    later.bind(replacement.editor); later.end('opened'); intent.end('opened');
+    const prepared = await recorder.prepare('first-edit', 'א');
+    expect(() => validateStartupOpening(recorder!.snapshot(), prepared.openingId))
+      .toThrow('intended startup opening');
+  });
+  it('rejects a successful opening outside the earliest intent', async () => {
+    const f = fixture(); recorder = installPerformanceRecorder();
+    recorder.begin('document.intent').end('opened');
+    const opening = recorder.begin('document.open', { kind: 'new' });
+    opening.bind(f.editor); opening.end('opened');
+    const prepared = await recorder.prepare('first-edit', 'א');
+    expect(() => validateStartupOpening(recorder!.snapshot(), prepared.openingId))
+      .toThrow('intended startup opening');
+  });
+  it('ignores source failures outside the first intent lifetime', async () => {
+    const f = fixture(); recorder = installPerformanceRecorder();
+    recorder.mark('document.intent.source-unavailable');
+    const intent = recorder.begin('document.intent');
+    const opening = recorder.begin('document.open', { kind: 'new' });
+    opening.bind(f.editor); opening.end('opened'); intent.end('opened');
+    recorder.mark('document.intent.source-unavailable');
+    const prepared = await recorder.prepare('first-edit', 'א');
+    expect(validateStartupOpening(recorder.snapshot(), prepared.openingId)).toBe(true);
+  });
+  it('continues to require the requested headless fixture kind', async () => {
+    const f = fixture(); recorder = installPerformanceRecorder();
+    const intent = recorder.begin('document.intent');
+    const opening = recorder.begin('document.open', { kind: 'new' });
+    opening.bind(f.editor); opening.end('opened'); intent.end('opened');
+    const prepared = await recorder.prepare('first-edit', 'א');
+    expect(() => validateStartupOpening(recorder!.snapshot(), prepared.openingId, 'file'))
+      .toThrow('intended startup opening');
+    expect(validateStartupOpening(recorder.snapshot(), prepared.openingId, 'new')).toBe(true);
   });
 });
 
@@ -162,6 +267,24 @@ describe('document-validated typing recorder', () => {
     expect(doc.get()).toBe(pending); expect(receiver).toBe(doc); await pending;
     expect(recorder.snapshot().api.find(row => row.method === 'get')).toMatchObject({ calls: 1, completed: 1, responseBytes: null });
     for (const dispose of f.disposers) dispose(); expect(doc.get).toBe(original);
+  });
+  it('makes retained span and public binding inert after stop', () => {
+    const f = fixture(); recorder = installPerformanceRecorder();
+    const opening = beginPerformanceSpan('document.open')!;
+    const bind = recorder.bind;
+    const docDescriptors = Object.getOwnPropertyDescriptors(f.doc);
+    const selectionDescriptors = Object.getOwnPropertyDescriptors(f.doc.selection);
+    recorder.stop();
+    const stopped = recorder.snapshot();
+    opening.bind(f.editor);
+    expect(bind(f.editor)).toBeUndefined();
+    recorder.begin('document.open').bind(f.editor);
+    recorder.stop();
+    expect(Object.getOwnPropertyDescriptors(f.doc)).toEqual(docDescriptors);
+    expect(Object.getOwnPropertyDescriptors(f.doc.selection)).toEqual(selectionDescriptors);
+    expect(f.disposers).toHaveLength(0);
+    expect(recorder.snapshot()).toEqual(stopped);
+    expect(window.__otzariaPerformance).toBeUndefined();
   });
   it('bounds exported events and makes truncated measurements detectable', () => {
     recorder = installPerformanceRecorder({ limit: 2 });
