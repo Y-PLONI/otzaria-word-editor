@@ -12,7 +12,8 @@
  */
 import { readFileSync, writeFileSync, existsSync, readdirSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { randomUUID } from 'node:crypto';
 import { inflateRawSync } from 'node:zlib';
 import { onInterrupt, openPage, requireChrome, sleep } from '../cdp.mjs';
 
@@ -34,8 +35,8 @@ const QA_API = readFileSync(join(HERE, 'qa-api.js'), 'utf8');
  * ההזרקה היא **אחרי ה-latch** ולפני שהבאנדל מוזרק: `plugin.boot` חייב להיות
  * זמין לפני שהאפליקציה קמה, בדיוק כמו אצל אוצריא.
  */
-function writeProbe(name, extra = '') {
-  const index = join(DIST, 'index.html');
+function writeProbe(name, extra = '', buildDirectory = DIST) {
+  const index = join(buildDirectory, 'index.html');
   if (!existsSync(index)) {
     console.error('dist/index.html אינו קיים — הריצו npm run build תחילה');
     process.exit(1);
@@ -52,10 +53,10 @@ function writeProbe(name, extra = '') {
    * הפיל את השער הבא, וההרצה שאחריו עברה בלי ששום דבר השתנה. מנקים את מה
    * שנשאר **לפני** שכותבים, ולא סומכים על ה-`finally` של הריצה שמתה.
    */
-  for (const stale of readdirSync(DIST)) {
-    if (stale.startsWith('__qa-') && stale.endsWith('.html')) rmSync(join(DIST, stale), { force: true });
+  for (const stale of readdirSync(buildDirectory)) {
+    if (stale.startsWith('__qa-') && stale.endsWith('.html')) rmSync(join(buildDirectory, stale), { force: true });
   }
-  const probe = join(DIST, `__qa-${name}.html`);
+  const probe = join(buildDirectory, `__qa-${name}.html`);
   const inject = `\n<script>${HOST_STUB}</script>\n<script>${QA_API}</script>\n${extra}\n`;
   writeFileSync(probe, html.slice(0, cut) + inject + html.slice(cut));
   return probe;
@@ -66,20 +67,47 @@ function writeProbe(name, extra = '') {
  *
  * `port` חובה בפועל בכל שער שרץ לצד אחרים.
  */
-export async function openApp({ name = 'qa', port = Number(process.env.QA_PORT ?? 9350), extra = '', settle = 3_000 } = {}) {
+export async function openApp({ name = 'qa', port = Number(process.env.QA_PORT ?? 9350), extra = '', settle = 3_000, buildDirectory = DIST, cpuRate = 1 } = {}) {
   requireChrome();
-  const probe = writeProbe(name, extra);
+  if (!Number.isFinite(cpuRate) || cpuRate < 1) throw new Error('cpuRate must be at least 1');
+  const probe = writeProbe(name, extra, buildDirectory);
+  // openPage deliberately accepts only an exact local-file target. A unique
+  // empty page lets us configure CPU before the real navigation without
+  // weakening that guard or accidentally attaching to a previous run.
+  const preparation = cpuRate === 1 ? null : join(buildDirectory, `__qa-${name}-prepare-${randomUUID()}.html`);
+  if (preparation) writeFileSync(preparation, '<!doctype html><title>QA preparation</title>');
+  const removeFiles = () => {
+    rmSync(probe, { force: true });
+    if (preparation) rmSync(preparation, { force: true });
+  };
   // Ctrl+C באמצע: הדפדפן נסגר דרך `cdp.mjs`, אבל דף הבדיקה שייך לכאן.
-  const forgetProbe = onInterrupt(() => rmSync(probe, { force: true }));
+  const forgetProbe = onInterrupt(removeFiles);
   const removeProbe = () => {
     forgetProbe();
-    rmSync(probe, { force: true });
+    removeFiles();
   };
-  const { cdp, close } = await openPage(`file:///${probe.split('\\').join('/')}`, { port, label: name });
-
+  const url = pathToFileURL(probe).href;
+  // Apply throttling before navigation; applying it after ready would measure
+  // an ordinary startup and only slow down the subsequent test actions.
+  let page;
+  try {
+    page = await openPage(pathToFileURL(preparation ?? probe).href, { port, label: name });
+  } catch (error) {
+    removeProbe();
+    throw error;
+  }
+  const { cdp, close } = page;
   const api = makeApi(cdp);
 
   try {
+    if (cpuRate !== 1) {
+      const throttle = await cdp.send('Emulation.setCPUThrottlingRate', { rate: cpuRate });
+      if (throttle.error) throw new Error(`CDP CPU throttling failed: ${JSON.stringify(throttle.error)}`);
+      const navigation = await cdp.send('Page.navigate', { url });
+      if (navigation.error || navigation.result?.errorText) {
+        throw new Error(`CDP navigation failed: ${JSON.stringify(navigation.error ?? navigation.result.errorText)}`);
+      }
+    }
     let ready = false;
     for (let waited = 0; waited < OPEN_MS; waited += 500) {
       await sleep(500);

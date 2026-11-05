@@ -11,7 +11,7 @@
  * ונבדקות בנפרד, וכל אחת זורקת כשהעוגן שהיא מחפשת חסר — בנייה שנכשלת עדיפה
  * על תבנית שקטה בלי RTL.
  */
-import { DOCX_MIME } from './export';
+import { DOCX_MIME } from './docx-mime';
 import { PAPER_SIZES } from './page-setup';
 import { alignComplexScriptStyles, hasEngineTemplateSignature } from './docx-cs-align';
 import { editStyles } from './docx-style-edit';

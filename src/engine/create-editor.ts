@@ -24,6 +24,7 @@ import { createOtzariaLinkActivation } from './otzaria-link-activation';
 import { openOtzariaLink } from '../host/otzaria-reader';
 import { engineWorkerUrls } from './workers';
 import { createNoteRunFormatExtension } from './footnote-run-format';
+import { createDocumentUpdateBridge } from './document-updates';
 
 export interface EditorSession {
   superdoc: SuperDoc;
@@ -195,8 +196,10 @@ export function createEditor(options: CreateEditorOptions): Promise<EditorSessio
 
     const noteRunFormat = createNoteRunFormatExtension();
     disposers.push(noteRunFormat.dispose);
+    const documentUpdates = createDocumentUpdateBridge(onUpdate);
+    disposers.push(documentUpdates.dispose);
     const superdoc = new SuperDoc({
-      extensions: [noteRunFormat.extension],
+      extensions: [noteRunFormat.extension, documentUpdates.extension],
       selector: container,
       document: source,
 
@@ -247,7 +250,9 @@ export function createEditor(options: CreateEditorOptions): Promise<EditorSessio
       workerUrls: engineWorkerUrls(),
 
       // כל שינוי במסמך. ה-session מסמן ממנו dirty; אין קריאה ל-DOM.
-      onEditorUpdate: onUpdate ? () => onUpdate() : undefined,
+      onEditorUpdate: ({ editor, sourceEditor }) => {
+        documentUpdates.onEditorUpdate(editor?.doc ?? sourceEditor?.doc);
+      },
 
       // מספר העמודים, אחרי כל מעבר פריסה. ראו onPaginationUpdate למעלה.
       onPaginationUpdate: onPaginationUpdate
@@ -259,6 +264,7 @@ export function createEditor(options: CreateEditorOptions): Promise<EditorSessio
       onReady: ({ superdoc: ready }) => {
         if (settled) return;
         noteRunFormat.bind(ready);
+        documentUpdates.bind(ready.activeEditor?.doc);
         settled = true;
         stopWaiting();
         const session: EditorSession = {

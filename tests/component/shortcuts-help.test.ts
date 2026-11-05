@@ -22,12 +22,13 @@ import {
   type CommandDouble,
   type SuperdocDouble,
 } from './harness';
+import type { CreateEditorOptions, EditorSession } from '../../src/engine/create-editor';
 import type { SaveCoordinatorDeps } from '../../src/sessions/save-coordinator';
 
 const stub = vi.hoisted(() => ({
   saveNowCalls: [] as Array<{ forceSaveAs?: boolean } | undefined>,
-  session: null as unknown,
-  adapter: null as unknown,
+  openEditor: null as ((container: HTMLElement) => EditorSession) | null,
+  adapters: new WeakMap<object, CommandDouble>(),
   pickCalls: 0,
   /** מצב השמירה שהקואורדינטור מדווח. בדיקה יכולה להפוך אותו למלוכלך. */
   isDirty: false,
@@ -41,31 +42,14 @@ const stub = vi.hoisted(() => ({
   sessionRecord: null as unknown,
 }));
 
-vi.mock('../../src/engine/create-editor', () => ({
-  createEditor: vi.fn(),
-  OPEN_TIMEOUT_MS: 1_000,
-}));
-
 /**
- * פריסה של המודול המקורי ודריסה של `createEditorSwap` בלבד — ולא factory
- * שמחזיר תת-קבוצה של הייצואים. מוק חלקי נשבר בכל פעם שהמעטפת מתחילה להשתמש
- * בייצוא נוסף מאותו מודול; כאן זה קרה כש-`documentScrollHost` התחיל לקרוא
- * `HOST_CLASS`/`PENDING_CLASS`. והכשל שהוא מייצר אינו נראה כמו „חסר ייצוא”
- * אלא כמו באג במוצר: הזריקה מבטלת את `onMounted` לפני שהסשן נפתח, ושלושים
- * בדיקות נופלות על מיקוד. זו הסיבה שהתבנית אחידה בכל קבצי ההרכבה.
+ * Keep the real swap lifecycle: current is null until the first open completes,
+ * and replacing/closing an editor disposes that editor's interaction lease.
+ * A pre-populated swap double prevents App from registering its first adapter.
  */
-vi.mock('../../src/sessions/editor-swap', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../src/sessions/editor-swap')>()),
-  createEditorSwap: () => ({
-    get current() {
-      return stub.session;
-    },
-    get isOpening() {
-      return false;
-    },
-    open: async () => ({ status: 'opened', session: stub.session }),
-    destroy: () => {},
-  }),
+vi.mock('../../src/engine/create-editor', () => ({
+  createEditor: vi.fn(({ container }: CreateEditorOptions) => stub.openEditor!(container)),
+  OPEN_TIMEOUT_MS: 1_000,
 }));
 
 vi.mock('../../src/sessions/save-coordinator', async (importOriginal) => ({
@@ -100,7 +84,7 @@ vi.mock('../../src/sessions/save-coordinator', async (importOriginal) => ({
 
 vi.mock('../../src/engine/command-adapter', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../src/engine/command-adapter')>()),
-  createCommandAdapter: () => stub.adapter,
+  createCommandAdapter: (ui: object) => stub.adapters.get(ui)!,
 }));
 
 vi.mock('../../src/engine/search', async (importOriginal) => {
@@ -217,6 +201,8 @@ let superdoc: SuperdocDouble;
 async function mountShell() {
   const wrapper = mount(App, { attachTo: document.body });
   await settle(12);
+  expect(stub.resets, 'the initial document actually opened before testing focus').toBe(1);
+  expect(wrapper.find('.status-load__skip').exists(), 'opening has finished').toBe(false);
   return wrapper;
 }
 
@@ -235,14 +221,34 @@ beforeEach(() => {
   stub.isDirty = false;
   stub.confirmAnswer = false;
   stub.sessionRecord = null;
-  adapter = createCommandDouble();
+  adapter = createCommandDouble({ states: { 'document-mode': { value: 'editing' } } });
   superdoc = createSuperdocDouble();
-  stub.adapter = adapter;
-  stub.session = {
-    superdoc: superdoc.host,
-    ui: { selection: { observe: () => () => {} } },
-    onDispose: () => {},
-    destroy: () => {},
+  stub.adapters = new WeakMap();
+  let first = true;
+  stub.openEditor = (container) => {
+    // Each candidate owns its mode and subscriptions; it must not inherit the
+    // previous editor's temporary viewing mode during a repeated open.
+    const doc = first ? superdoc : createSuperdocDouble();
+    const commands = first ? adapter : createCommandDouble();
+    first = false;
+    commands.setState('document-mode', { value: commands.getState('document-mode').value ?? 'editing' });
+    doc.host.setDocumentMode = vi.fn(mode => commands.setState('document-mode', { value: mode }));
+    const ui = { selection: { observe: () => () => {} } } as unknown as EditorSession['ui'];
+    stub.adapters.set(ui, commands);
+    const disposers: Array<() => void> = [];
+    let destroyed = false;
+    return {
+      superdoc: doc.host, ui, container,
+      onDispose(dispose) {
+        if (destroyed) dispose();
+        else disposers.push(dispose);
+      },
+      destroy() {
+        if (destroyed) return;
+        destroyed = true;
+        for (const dispose of disposers.splice(0)) dispose();
+      },
+    };
   };
 });
 

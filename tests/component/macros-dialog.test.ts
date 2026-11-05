@@ -6,7 +6,7 @@
  * וייבוא/ייצוא מול ה-API האמיתי, בלי מנוע. הדיאלוג מרונדר ב-Teleport לגוף
  * הדף, ולכן הבדיקות ניגשות אליו דרך ה-document — כמו LinkDialog.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { shallowRef } from 'vue';
 import { DOMWrapper } from '@vue/test-utils';
 import {
@@ -235,6 +235,47 @@ describe('MacrosDialog', () => {
 
     expect(host.text).toBe('שלום');
     expect(dialog().text()).toContain('המאקרו הסתיים בהצלחה');
+  });
+
+  it.each([
+    ['הקלטות', 'נגן'], ['קטעי טקסט', 'הכנס למסמך'],
+    ['סקריפטים', 'הרץ'], ['כלים', 'הרץ'],
+  ])('דיאלוג פתוח אינו משנה מסמך שננעל (%s), והטופס נשמר עד השחרור', async (section, action) => {
+    const { handle, host } = createHandle();
+    const text = 'בדיקת ביצוע';
+    handle.kit.importState(JSON.stringify({
+      version: 1, scripts: [], snippets: [],
+      recordings: [{ version: 1, id: 'pending', name: 'בדיקה', steps: [{ type: 'insert-text', text }] }],
+    }));
+    handle.kit.saveSnippet({ name: 'בדיקה', text });
+    handle.kit.registerTool({
+      id: 'pending', name: 'בדיקה', description: 'בדיקת נעילה',
+      run: () => { host.text += text; return { ok: true }; },
+    });
+    let blocked = false;
+    const { wrapper } = mountUi(MacrosDialog, {
+      props: { isOpen: true, handle, busy: false, isDocumentBlocked: () => blocked },
+    });
+    await settle();
+    await switchTab(section);
+    const source = `await api.insertText('${text}');`;
+    if (section === 'סקריפטים') await dialog().find('#md-scr-source').setValue(source);
+    else await dialog().find('.md-list-item').trigger('click');
+    await settle();
+
+    // The live guard changes before a rendering update can disable the button.
+    blocked = true;
+    await buttonByText(action).trigger('click');
+    await settle(6);
+    expect(host.text).toBe('');
+    await wrapper.setProps({ busy: true });
+    expect((buttonByText(action).element as HTMLButtonElement).disabled).toBe(true);
+    if (section === 'סקריפטים') expect((dialog().find('#md-scr-source').element as HTMLTextAreaElement).value).toBe(source);
+
+    blocked = false;
+    await wrapper.setProps({ busy: false });
+    await buttonByText(action).trigger('click');
+    await vi.waitFor(() => expect(host.text).toBe(text));
   });
 
   it('הקלטה: בחירה, ניגון ועדכון שם', async () => {

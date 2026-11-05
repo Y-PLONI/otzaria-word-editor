@@ -10,6 +10,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   createTextCursorWatch,
   pointInTextArea,
+  TEXT_CURSOR_DEBOUNCE_MS,
   type TextBandGeometry,
 } from '../../src/engine/text-cursor';
 import type { IndexedPageRect } from '../../src/engine/page-ruler';
@@ -175,5 +176,30 @@ describe('createTextCursorWatch', () => {
     watch.refreshNow();
     watch.noteDocumentChanged();
     watch.dispose();
+  });
+
+  it('תשובת שוליים ישנה אינה משנה סמן בזמן ההמתנה לרענון', async () => {
+    vi.useFakeTimers();
+    const host = hostWithPage();
+    let resolve!: (value: PageMarginsState) => void;
+    const readMargins = vi.fn<() => Promise<PageMarginsState | null>>()
+      .mockImplementationOnce(() => new Promise((done) => { resolve = done; }))
+      .mockResolvedValue({ ...margins, leftTwips: 600 });
+    const watch = createTextCursorWatch({ host, readMargins });
+    try {
+      watch.refreshNow();
+      moveTo(host, 250, 500);
+      watch.noteDocumentChanged();
+      resolve(margins);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(host.style.cursor).toBe('');
+      await vi.advanceTimersByTimeAsync(TEXT_CURSOR_DEBOUNCE_MS);
+      expect(readMargins).toHaveBeenCalledTimes(2);
+      expect(host.style.cursor).toBe('');
+    } finally {
+      watch.dispose();
+      host.remove();
+      vi.useRealTimers();
+    }
   });
 });

@@ -107,6 +107,7 @@ describe('סלקטורים בגלובלים', () => {
   const ENGINE_OWNED = new Set([
     'superdoc',
     'sd-v2-local-selection-caret',
+    'superdoc-empty-run',
   ]);
 
   it('כל מחלקה בסלקטור קיימת בקומפוננטה או בקוד', () => {

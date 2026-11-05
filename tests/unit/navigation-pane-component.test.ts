@@ -8,7 +8,10 @@ const blocks = [
   { nodeId: 'c', text: 'Next chapter', headingLevel: 1 },
 ];
 function host(entries = blocks) {
-  const list = vi.fn(({ offset, limit }: { offset: number; limit: number }) => ({ blocks: entries.slice(offset, offset + limit) }));
+  const list = vi.fn(({ offset, limit, nodeIds, includeText }: { offset: number; limit: number; nodeIds?: string[]; includeText: boolean }) => ({
+    blocks: (nodeIds ? entries.filter((entry) => nodeIds.includes(entry.nodeId)) : entries).slice(offset, offset + limit)
+      .map((entry) => includeText ? entry : { ...entry, text: undefined }),
+  }));
   const current = vi.fn(() => ({ target: { segments: [{ blockId: 'a' }] } }));
   const apply = vi.fn();
   return { activeEditor: { doc: { blocks: { list }, selection: { current } } }, ui: { selection: { apply } }, list, current, apply };
@@ -64,7 +67,7 @@ describe('navigation pane interaction and async safety', () => {
     h.current.mockReturnValue({ target: { segments: [{ blockId: 'unscanned' }] } });
     await w.setProps({ caretRevision: 1 }); await vi.advanceTimersByTimeAsync(151);
     expect(w.find('[aria-current=location]').exists()).toBe(false);
-    expect(h.list).toHaveBeenCalledTimes(1);
+    expect(h.list).toHaveBeenCalledTimes(2);
   });
 
   it('ignores an out-of-order selection read', async () => {
@@ -83,7 +86,7 @@ describe('navigation pane interaction and async safety', () => {
     h.list.mockImplementationOnce(() => new Promise((r) => { resolve = r; }) as never);
     const w = pane(h); await w.setProps({ generation: 2 }); await flushPromises();
     resolve({ blocks: Array.from({ length: 500 }, () => blocks[0]) }); await flushPromises();
-    expect(h.list).toHaveBeenCalledTimes(2);
+    expect(h.list).toHaveBeenCalledTimes(3);
     expect(w.findAll('[role=treeitem]')).toHaveLength(3);
   });
 

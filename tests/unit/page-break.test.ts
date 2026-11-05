@@ -12,6 +12,7 @@ import {
   readPageBreakSupport,
   startParagraphOnNewPage,
   setParagraphPageBreak,
+  toggleParagraphPageBreak,
   readPageBreakNodeId,
   createPageBreakTracker,
   type PageBreakDocumentApi,
@@ -489,6 +490,94 @@ describe('setParagraphPageBreak', () => {
     });
     expect(calls).toEqual([]);
   });
+});
+
+describe('toggleParagraphPageBreak', () => {
+  it('derives the toggle from the one selection it writes, independent of a visual readout', async () => {
+    const tracker = createPageBreakTracker();
+    tracker.remember('p3', true);
+    const { host, doc, calls } = fakeDoc();
+    const selection = vi.mocked(doc.selection!.current!);
+    selection.mockResolvedValueOnce(CARET).mockResolvedValue({
+      target: { segments: [{ blockId: 'p4', range: { start: 0, end: 0 } }] },
+    });
+
+    await expect(toggleParagraphPageBreak(host, tracker)).resolves.toEqual({ ok: true });
+    expect(selection).toHaveBeenCalledTimes(1);
+    expect(calls).toEqual([{ target: { kind: 'block', nodeType: 'paragraph', nodeId: 'p3' }, pageBreakBefore: false }]);
+    expect(tracker.isOn('p3')).toBe(false);
+
+    await expect(toggleParagraphPageBreak(host, tracker)).resolves.toEqual({ ok: true });
+    expect(selection).toHaveBeenCalledTimes(2);
+    expect(calls[1]).toMatchObject({ target: { nodeId: 'p4' }, pageBreakBefore: true });
+    expect(tracker.isOn('p4')).toBe(true);
+  });
+
+  it('keeps tracked state when turning a known paragraph off fails', async () => {
+    const tracker = createPageBreakTracker();
+    tracker.remember('p3', true);
+    const { host } = fakeDoc({ flow: () => ({ success: false, failure: { code: 'DOCUMENT_READONLY' } }) });
+    const outcome = await toggleParagraphPageBreak(host, tracker);
+    expect(outcome).toMatchObject({ ok: false, reason: 'DOCUMENT_READONLY' });
+    if (!outcome.ok) expect(outcome.message).toContain('ביטול התחלת העמוד החדש');
+    expect(tracker.isOn('p3')).toBe(true);
+  });
+
+  it('does not change tracked state or write when there is no current paragraph', async () => {
+    const tracker = createPageBreakTracker();
+    tracker.remember('p3', true);
+    const { host, calls } = fakeDoc({ selection: { target: null } });
+    await expect(toggleParagraphPageBreak(host, tracker)).resolves.toMatchObject({ ok: false, reason: 'selection-required' });
+    expect(calls).toEqual([]);
+    expect(tracker.isOn('p3')).toBe(true);
+  });
+});
+
+describe('page-break commands across document replacement', () => {
+  for (const mode of ['toggle', 'set'] as const) {
+    const run = mode === 'toggle'
+      ? toggleParagraphPageBreak
+      : (host: Parameters<typeof setParagraphPageBreak>[0], tracker: Parameters<typeof setParagraphPageBreak>[2]) => setParagraphPageBreak(host, false, tracker);
+
+    it(`${mode}: cancels before writing when the tracker switches during selection resolution`, async () => {
+      const tracker = createPageBreakTracker();
+      tracker.syncDocument('A');
+      tracker.remember('p3', true);
+      let resolveSelection!: (value: unknown) => void;
+      const selection = new Promise(done => { resolveSelection = done; });
+      const { host, calls } = fakeDoc({ selection });
+      const pending = run(host, tracker);
+      tracker.syncDocument('B');
+      tracker.remember('p3', false);
+      resolveSelection(CARET);
+
+      await expect(pending).resolves.toMatchObject({ ok: false, reason: 'not-ready' });
+      expect(calls).toEqual([]);
+      expect(tracker.isOn('p3')).toBe(false);
+    });
+
+    it(`${mode}: does not remember an old document's completed write in the new document`, async () => {
+      const tracker = createPageBreakTracker();
+      tracker.syncDocument('A');
+      tracker.remember('p3', true);
+      let entered!: () => void;
+      const started = new Promise<void>(done => { entered = done; });
+      let resolveWrite!: (value: unknown) => void;
+      const { host, calls } = fakeDoc({ flow: () => {
+        entered();
+        return new Promise(done => { resolveWrite = done; });
+      } });
+      const pending = run(host, tracker);
+      await started;
+      expect(calls).toEqual([{ target: { kind: 'block', nodeType: 'paragraph', nodeId: 'p3' }, pageBreakBefore: false }]);
+      tracker.syncDocument('B');
+      tracker.remember('p3', true);
+      resolveWrite({ success: true });
+
+      await expect(pending).resolves.toEqual({ ok: true });
+      expect(tracker.isOn('p3')).toBe(true);
+    });
+  }
 });
 
 describe('PageBreakTracker.onChange', () => {

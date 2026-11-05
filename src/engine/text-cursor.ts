@@ -205,6 +205,7 @@ export function createTextCursorWatch(options: TextCursorWatchOptions): TextCurs
     },
     noteDocumentChanged() {
       if (disposed) return;
+      generation += 1;
       clearTimeout(timer);
       timer = setTimeout(() => void read(), TEXT_CURSOR_DEBOUNCE_MS);
     },

@@ -1,0 +1,1210 @@
+{
+  "revision": "8fe0a7741522842ca04703db4c9bd35ac361da6b",
+  "sourceDirty": false,
+  "environment": {
+    "platform": "linux",
+    "cpu": "INTEL(R) XEON(R) PLATINUM 8573C",
+    "logicalCpus": 9,
+    "ramBytes": 10451423232,
+    "rendererCpuRate": 4,
+    "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/134.0.6998.35 Safari/537.36"
+  },
+  "note": "Headless Chromium, file://, synthetic typing document. Main fallback and worker use this same build. Dispatch-to-handler measures input queue delay; two-rAF after keydown is only a scheduling opportunity, not per-key engine acceptance or native paint. Saved snapshot, final canonical and painted text, body caret, active document and dirty state are validated separately. No user document text is recorded.",
+  "paragraphs": 5000,
+  "typingParagraphs": 1001,
+  "package": [
+    {
+      "name": "unchanged",
+      "run": 1,
+      "inputBytes": 260,
+      "main": {
+        "mode": "main",
+        "wallMs": 20.399999998509884,
+        "outputBytes": 260,
+        "sha256": "36838620cd85e0ed5349e8e3d643cd38739bb6536f6bd4a8c5fb36da66eaed1c",
+        "unchanged": true,
+        "longestTaskMs": 0,
+        "mainBlockingMs": 0,
+        "workers": {
+          "created": 0,
+          "transferred": 0,
+          "responses": 0,
+          "terminated": 0,
+          "failed": 0,
+          "blocked": 0
+        }
+      },
+      "worker": {
+        "mode": "worker",
+        "wallMs": 38.29999999701977,
+        "outputBytes": 260,
+        "sha256": "36838620cd85e0ed5349e8e3d643cd38739bb6536f6bd4a8c5fb36da66eaed1c",
+        "unchanged": true,
+        "longestTaskMs": 0,
+        "mainBlockingMs": 0,
+        "workers": {
+          "created": 1,
+          "transferred": 1,
+          "responses": 1,
+          "terminated": 1,
+          "failed": 0,
+          "blocked": 0
+        }
+      }
+    },
+    {
+      "name": "unchanged",
+      "run": 2,
+      "inputBytes": 260,
+      "worker": {
+        "mode": "worker",
+        "wallMs": 28.799999997019768,
+        "outputBytes": 260,
+        "sha256": "36838620cd85e0ed5349e8e3d643cd38739bb6536f6bd4a8c5fb36da66eaed1c",
+        "unchanged": true,
+        "longestTaskMs": 0,
+        "mainBlockingMs": 0,
+        "workers": {
+          "created": 1,
+          "transferred": 1,
+          "responses": 1,
+          "terminated": 1,
+          "failed": 0,
+          "blocked": 0
+        }
+      },
+      "main": {
+        "mode": "main",
+        "wallMs": 5.5,
+        "outputBytes": 260,
+        "sha256": "36838620cd85e0ed5349e8e3d643cd38739bb6536f6bd4a8c5fb36da66eaed1c",
+        "unchanged": true,
+        "longestTaskMs": 0,
+        "mainBlockingMs": 0,
+        "workers": {
+          "created": 0,
+          "transferred": 0,
+          "responses": 0,
+          "terminated": 0,
+          "failed": 0,
+          "blocked": 0
+        }
+      }
+    },
+    {
+      "name": "unchanged",
+      "run": 3,
+      "inputBytes": 260,
+      "main": {
+        "mode": "main",
+        "wallMs": 3.600000001490116,
+        "outputBytes": 260,
+        "sha256": "36838620cd85e0ed5349e8e3d643cd38739bb6536f6bd4a8c5fb36da66eaed1c",
+        "unchanged": true,
+        "longestTaskMs": 0,
+        "mainBlockingMs": 0,
+        "workers": {
+          "created": 0,
+          "transferred": 0,
+          "responses": 0,
+          "terminated": 0,
+          "failed": 0,
+          "blocked": 0
+        }
+      },
+      "worker": {
+        "mode": "worker",
+        "wallMs": 20.19999999552965,
+        "outputBytes": 260,
+        "sha256": "36838620cd85e0ed5349e8e3d643cd38739bb6536f6bd4a8c5fb36da66eaed1c",
+        "unchanged": true,
+        "longestTaskMs": 0,
+        "mainBlockingMs": 0,
+        "workers": {
+          "created": 1,
+          "transferred": 1,
+          "responses": 1,
+          "terminated": 1,
+          "failed": 0,
+          "blocked": 0
+        }
+      }
+    },
+    {
+      "name": "large",
+      "run": 1,
+      "inputBytes": 16044,
+      "main": {
+        "mode": "main",
+        "wallMs": 2999.7999999970198,
+        "outputBytes": 19107,
+        "sha256": "4ec9d95b7430740fd9139e6f2e6c62588f8c8de0f3475f6f74aae8bbea9cd562",
+        "unchanged": false,
+        "longestTaskMs": 0,
+        "mainBlockingMs": 0,
+        "workers": {
+          "created": 0,
+          "transferred": 0,
+          "responses": 0,
+          "terminated": 0,
+          "failed": 0,
+          "blocked": 0
+        }
+      },
+      "worker": {
+        "mode": "worker",
+        "wallMs": 561.1999999955297,
+        "outputBytes": 19107,
+        "sha256": "4ec9d95b7430740fd9139e6f2e6c62588f8c8de0f3475f6f74aae8bbea9cd562",
+        "unchanged": false,
+        "longestTaskMs": 0,
+        "mainBlockingMs": 0,
+        "workers": {
+          "created": 1,
+          "transferred": 1,
+          "responses": 1,
+          "terminated": 1,
+          "failed": 0,
+          "blocked": 0
+        }
+      }
+    },
+    {
+      "name": "large",
+      "run": 2,
+      "inputBytes": 16044,
+      "worker": {
+        "mode": "worker",
+        "wallMs": 634.7000000029802,
+        "outputBytes": 19107,
+        "sha256": "4ec9d95b7430740fd9139e6f2e6c62588f8c8de0f3475f6f74aae8bbea9cd562",
+        "unchanged": false,
+        "longestTaskMs": 0,
+        "mainBlockingMs": 0,
+        "workers": {
+          "created": 1,
+          "transferred": 1,
+          "responses": 1,
+          "terminated": 1,
+          "failed": 0,
+          "blocked": 0
+        }
+      },
+      "main": {
+        "mode": "main",
+        "wallMs": 2650,
+        "outputBytes": 19107,
+        "sha256": "4ec9d95b7430740fd9139e6f2e6c62588f8c8de0f3475f6f74aae8bbea9cd562",
+        "unchanged": false,
+        "longestTaskMs": 0,
+        "mainBlockingMs": 0,
+        "workers": {
+          "created": 0,
+          "transferred": 0,
+          "responses": 0,
+          "terminated": 0,
+          "failed": 0,
+          "blocked": 0
+        }
+      }
+    },
+    {
+      "name": "large",
+      "run": 3,
+      "inputBytes": 16044,
+      "main": {
+        "mode": "main",
+        "wallMs": 1254.8000000044703,
+        "outputBytes": 19107,
+        "sha256": "4ec9d95b7430740fd9139e6f2e6c62588f8c8de0f3475f6f74aae8bbea9cd562",
+        "unchanged": false,
+        "longestTaskMs": 0,
+        "mainBlockingMs": 0,
+        "workers": {
+          "created": 0,
+          "transferred": 0,
+          "responses": 0,
+          "terminated": 0,
+          "failed": 0,
+          "blocked": 0
+        }
+      },
+      "worker": {
+        "mode": "worker",
+        "wallMs": 1125.1000000014901,
+        "outputBytes": 19107,
+        "sha256": "4ec9d95b7430740fd9139e6f2e6c62588f8c8de0f3475f6f74aae8bbea9cd562",
+        "unchanged": false,
+        "longestTaskMs": 53,
+        "mainBlockingMs": 3,
+        "workers": {
+          "created": 1,
+          "transferred": 1,
+          "responses": 1,
+          "terminated": 1,
+          "failed": 0,
+          "blocked": 0
+        }
+      }
+    },
+    {
+      "name": "corrupt",
+      "run": 1,
+      "inputBytes": 11,
+      "main": {
+        "mode": "main",
+        "wallMs": 13.199999995529652,
+        "outputBytes": 11,
+        "sha256": "b9062a2e15fa51a2eecec2b0e43139e2d09b606b815028de2ed27dccfa51aaef",
+        "unchanged": true,
+        "longestTaskMs": 0,
+        "mainBlockingMs": 0,
+        "workers": {
+          "created": 0,
+          "transferred": 0,
+          "responses": 0,
+          "terminated": 0,
+          "failed": 0,
+          "blocked": 0
+        }
+      },
+      "worker": {
+        "mode": "worker",
+        "wallMs": 452.6000000014901,
+        "outputBytes": 11,
+        "sha256": "b9062a2e15fa51a2eecec2b0e43139e2d09b606b815028de2ed27dccfa51aaef",
+        "unchanged": true,
+        "longestTaskMs": 0,
+        "mainBlockingMs": 0,
+        "workers": {
+          "created": 1,
+          "transferred": 1,
+          "responses": 1,
+          "terminated": 1,
+          "failed": 0,
+          "blocked": 0
+        }
+      }
+    },
+    {
+      "name": "corrupt",
+      "run": 2,
+      "inputBytes": 11,
+      "worker": {
+        "mode": "worker",
+        "wallMs": 18.399999998509884,
+        "outputBytes": 11,
+        "sha256": "b9062a2e15fa51a2eecec2b0e43139e2d09b606b815028de2ed27dccfa51aaef",
+        "unchanged": true,
+        "longestTaskMs": 0,
+        "mainBlockingMs": 0,
+        "workers": {
+          "created": 1,
+          "transferred": 1,
+          "responses": 1,
+          "terminated": 1,
+          "failed": 0,
+          "blocked": 0
+        }
+      },
+      "main": {
+        "mode": "main",
+        "wallMs": 3.2999999970197678,
+        "outputBytes": 11,
+        "sha256": "b9062a2e15fa51a2eecec2b0e43139e2d09b606b815028de2ed27dccfa51aaef",
+        "unchanged": true,
+        "longestTaskMs": 0,
+        "mainBlockingMs": 0,
+        "workers": {
+          "created": 0,
+          "transferred": 0,
+          "responses": 0,
+          "terminated": 0,
+          "failed": 0,
+          "blocked": 0
+        }
+      }
+    },
+    {
+      "name": "corrupt",
+      "run": 3,
+      "inputBytes": 11,
+      "main": {
+        "mode": "main",
+        "wallMs": 1.5,
+        "outputBytes": 11,
+        "sha256": "b9062a2e15fa51a2eecec2b0e43139e2d09b606b815028de2ed27dccfa51aaef",
+        "unchanged": true,
+        "longestTaskMs": 0,
+        "mainBlockingMs": 0,
+        "workers": {
+          "created": 0,
+          "transferred": 0,
+          "responses": 0,
+          "terminated": 0,
+          "failed": 0,
+          "blocked": 0
+        }
+      },
+      "worker": {
+        "mode": "worker",
+        "wallMs": 18.700000002980232,
+        "outputBytes": 11,
+        "sha256": "b9062a2e15fa51a2eecec2b0e43139e2d09b606b815028de2ed27dccfa51aaef",
+        "unchanged": true,
+        "longestTaskMs": 0,
+        "mainBlockingMs": 0,
+        "workers": {
+          "created": 1,
+          "transferred": 1,
+          "responses": 1,
+          "terminated": 1,
+          "failed": 0,
+          "blocked": 0
+        }
+      }
+    },
+    {
+      "name": "officeDocm",
+      "run": 1,
+      "inputBytes": 4992,
+      "main": {
+        "mode": "main",
+        "wallMs": 5.0999999940395355,
+        "outputBytes": 4992,
+        "sha256": "960cd55b6018f2b51620523f703a2dab77d2953a987915bfcda415cdbc6bdf62",
+        "unchanged": true,
+        "longestTaskMs": 0,
+        "mainBlockingMs": 0,
+        "workers": {
+          "created": 0,
+          "transferred": 0,
+          "responses": 0,
+          "terminated": 0,
+          "failed": 0,
+          "blocked": 0
+        }
+      },
+      "worker": {
+        "mode": "worker",
+        "wallMs": 22.200000002980232,
+        "outputBytes": 4992,
+        "sha256": "960cd55b6018f2b51620523f703a2dab77d2953a987915bfcda415cdbc6bdf62",
+        "unchanged": true,
+        "longestTaskMs": 0,
+        "mainBlockingMs": 0,
+        "workers": {
+          "created": 1,
+          "transferred": 1,
+          "responses": 1,
+          "terminated": 1,
+          "failed": 0,
+          "blocked": 0
+        }
+      }
+    },
+    {
+      "name": "officeDocm",
+      "run": 2,
+      "inputBytes": 4992,
+      "worker": {
+        "mode": "worker",
+        "wallMs": 18.799999997019768,
+        "outputBytes": 4992,
+        "sha256": "960cd55b6018f2b51620523f703a2dab77d2953a987915bfcda415cdbc6bdf62",
+        "unchanged": true,
+        "longestTaskMs": 0,
+        "mainBlockingMs": 0,
+        "workers": {
+          "created": 1,
+          "transferred": 1,
+          "responses": 1,
+          "terminated": 1,
+          "failed": 0,
+          "blocked": 0
+        }
+      },
+      "main": {
+        "mode": "main",
+        "wallMs": 5.9000000059604645,
+        "outputBytes": 4992,
+        "sha256": "960cd55b6018f2b51620523f703a2dab77d2953a987915bfcda415cdbc6bdf62",
+        "unchanged": true,
+        "longestTaskMs": 0,
+        "mainBlockingMs": 0,
+        "workers": {
+          "created": 0,
+          "transferred": 0,
+          "responses": 0,
+          "terminated": 0,
+          "failed": 0,
+          "blocked": 0
+        }
+      }
+    },
+    {
+      "name": "officeDocm",
+      "run": 3,
+      "inputBytes": 4992,
+      "main": {
+        "mode": "main",
+        "wallMs": 5.4000000059604645,
+        "outputBytes": 4992,
+        "sha256": "960cd55b6018f2b51620523f703a2dab77d2953a987915bfcda415cdbc6bdf62",
+        "unchanged": true,
+        "longestTaskMs": 0,
+        "mainBlockingMs": 0,
+        "workers": {
+          "created": 0,
+          "transferred": 0,
+          "responses": 0,
+          "terminated": 0,
+          "failed": 0,
+          "blocked": 0
+        }
+      },
+      "worker": {
+        "mode": "worker",
+        "wallMs": 20.799999997019768,
+        "outputBytes": 4992,
+        "sha256": "960cd55b6018f2b51620523f703a2dab77d2953a987915bfcda415cdbc6bdf62",
+        "unchanged": true,
+        "longestTaskMs": 0,
+        "mainBlockingMs": 0,
+        "workers": {
+          "created": 1,
+          "transferred": 1,
+          "responses": 1,
+          "terminated": 1,
+          "failed": 0,
+          "blocked": 0
+        }
+      }
+    }
+  ],
+  "typing": [
+    {
+      "mode": "main-fallback",
+      "run": 1,
+      "fixtureBytes": 137478,
+      "totalSaveMs": 859.7001953125,
+      "postflightMs": 605,
+      "validatedKeys": 12,
+      "keys": [
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": false,
+          "dispatchToHandlerMs": 647.89990234375,
+          "dispatchToTwoFramesOpportunityMs": 1086.60009765625,
+          "commandRoundTripMs": 754
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": false,
+          "dispatchToHandlerMs": 729.10009765625,
+          "dispatchToTwoFramesOpportunityMs": 1059.60009765625,
+          "commandRoundTripMs": 733
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": false,
+          "dispatchToHandlerMs": 705.89990234375,
+          "dispatchToTwoFramesOpportunityMs": 1033.60009765625,
+          "commandRoundTripMs": 712
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": false,
+          "dispatchToHandlerMs": 685.300048828125,
+          "dispatchToTwoFramesOpportunityMs": 1008.60009765625,
+          "commandRoundTripMs": 687
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": false,
+          "dispatchToHandlerMs": 661.5,
+          "dispatchToTwoFramesOpportunityMs": 981.60009765625,
+          "commandRoundTripMs": 667
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": false,
+          "dispatchToHandlerMs": 638.800048828125,
+          "dispatchToTwoFramesOpportunityMs": 955.60009765625,
+          "commandRoundTripMs": 643
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": false,
+          "dispatchToHandlerMs": 619.60009765625,
+          "dispatchToTwoFramesOpportunityMs": 930.60009765625,
+          "commandRoundTripMs": 623
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": false,
+          "dispatchToHandlerMs": 596.10009765625,
+          "dispatchToTwoFramesOpportunityMs": 904.60009765625,
+          "commandRoundTripMs": 599
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": false,
+          "dispatchToHandlerMs": 574.89990234375,
+          "dispatchToTwoFramesOpportunityMs": 879.60009765625,
+          "commandRoundTripMs": 579
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": false,
+          "dispatchToHandlerMs": 552.699951171875,
+          "dispatchToTwoFramesOpportunityMs": 853.60009765625,
+          "commandRoundTripMs": 555
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": false,
+          "dispatchToHandlerMs": 531.89990234375,
+          "dispatchToTwoFramesOpportunityMs": 828.60009765625,
+          "commandRoundTripMs": 535
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": false,
+          "dispatchToHandlerMs": 510.10009765625,
+          "dispatchToTwoFramesOpportunityMs": 802.60009765625,
+          "commandRoundTripMs": 513
+        }
+      ],
+      "workers": {
+        "created": 0,
+        "transferred": 0,
+        "responses": 0,
+        "terminated": 0,
+        "failed": 0,
+        "blocked": 2
+      },
+      "oldSnapshotVerified": true,
+      "activeDocumentTextCaretAndPaintVerified": true,
+      "dirtyRevisionVerified": true,
+      "nextSaveVerified": true,
+      "longTasks": []
+    },
+    {
+      "mode": "worker",
+      "run": 1,
+      "fixtureBytes": 137478,
+      "totalSaveMs": 1239.5,
+      "postflightMs": 997.5,
+      "validatedKeys": 12,
+      "keys": [
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": true,
+          "dispatchToHandlerMs": 17.10009765625,
+          "dispatchToTwoFramesOpportunityMs": 129,
+          "commandRoundTripMs": 101
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": true,
+          "dispatchToHandlerMs": 76.10009765625,
+          "dispatchToTwoFramesOpportunityMs": 103,
+          "commandRoundTripMs": 79
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": true,
+          "dispatchToHandlerMs": 55,
+          "dispatchToTwoFramesOpportunityMs": 78,
+          "commandRoundTripMs": 57
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": true,
+          "dispatchToHandlerMs": 31.300048828125,
+          "dispatchToTwoFramesOpportunityMs": 52,
+          "commandRoundTripMs": 34
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": true,
+          "dispatchToHandlerMs": 19.10009765625,
+          "dispatchToTwoFramesOpportunityMs": 145.900146484375,
+          "commandRoundTripMs": 23
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": true,
+          "dispatchToHandlerMs": 10.300048828125,
+          "dispatchToTwoFramesOpportunityMs": 129.60009765625,
+          "commandRoundTripMs": 106
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": true,
+          "dispatchToHandlerMs": 78.199951171875,
+          "dispatchToTwoFramesOpportunityMs": 95.60009765625,
+          "commandRoundTripMs": 83
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": true,
+          "dispatchToHandlerMs": 37.60009765625,
+          "dispatchToTwoFramesOpportunityMs": 49.60009765625,
+          "commandRoundTripMs": 40
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": true,
+          "dispatchToHandlerMs": 14.199951171875,
+          "dispatchToTwoFramesOpportunityMs": 228.300048828125,
+          "commandRoundTripMs": 17
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": true,
+          "dispatchToHandlerMs": 188.199951171875,
+          "dispatchToTwoFramesOpportunityMs": 318.800048828125,
+          "commandRoundTripMs": 193
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": true,
+          "dispatchToHandlerMs": 166.400146484375,
+          "dispatchToTwoFramesOpportunityMs": 292.800048828125,
+          "commandRoundTripMs": 170
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": true,
+          "dispatchToHandlerMs": 143.199951171875,
+          "dispatchToTwoFramesOpportunityMs": 267.800048828125,
+          "commandRoundTripMs": 145
+        }
+      ],
+      "workers": {
+        "created": 1,
+        "transferred": 1,
+        "responses": 1,
+        "terminated": 1,
+        "failed": 0,
+        "blocked": 0
+      },
+      "oldSnapshotVerified": true,
+      "activeDocumentTextCaretAndPaintVerified": true,
+      "dirtyRevisionVerified": true,
+      "nextSaveVerified": true,
+      "longTasks": [
+        {
+          "durationMs": 88
+        },
+        {
+          "durationMs": 101
+        },
+        {
+          "durationMs": 171
+        },
+        {
+          "durationMs": 94
+        },
+        {
+          "durationMs": 135
+        },
+        {
+          "durationMs": 66
+        },
+        {
+          "durationMs": 84
+        }
+      ]
+    },
+    {
+      "mode": "worker",
+      "run": 2,
+      "fixtureBytes": 137478,
+      "totalSaveMs": 1281.199951171875,
+      "postflightMs": 875.39990234375,
+      "validatedKeys": 12,
+      "keys": [
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": true,
+          "dispatchToHandlerMs": 58.400146484375,
+          "dispatchToTwoFramesOpportunityMs": 197.5,
+          "commandRoundTripMs": 161
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": true,
+          "dispatchToHandlerMs": 122.300048828125,
+          "dispatchToTwoFramesOpportunityMs": 157.5,
+          "commandRoundTripMs": 127
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": true,
+          "dispatchToHandlerMs": 96.60009765625,
+          "dispatchToTwoFramesOpportunityMs": 126.5,
+          "commandRoundTripMs": 98
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": true,
+          "dispatchToHandlerMs": 73.2001953125,
+          "dispatchToTwoFramesOpportunityMs": 101.5,
+          "commandRoundTripMs": 75
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": true,
+          "dispatchToHandlerMs": 49.60009765625,
+          "dispatchToTwoFramesOpportunityMs": 75.5,
+          "commandRoundTripMs": 54
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": true,
+          "dispatchToHandlerMs": 28.7001953125,
+          "dispatchToTwoFramesOpportunityMs": 50.5,
+          "commandRoundTripMs": 30
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": true,
+          "dispatchToHandlerMs": 21.5,
+          "dispatchToTwoFramesOpportunityMs": 45,
+          "commandRoundTripMs": 25
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": true,
+          "dispatchToHandlerMs": 18.300048828125,
+          "dispatchToTwoFramesOpportunityMs": 70.2001953125,
+          "commandRoundTripMs": 23
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": true,
+          "dispatchToHandlerMs": 35.10009765625,
+          "dispatchToTwoFramesOpportunityMs": 325.400146484375,
+          "commandRoundTripMs": 40
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": true,
+          "dispatchToHandlerMs": 14.800048828125,
+          "dispatchToTwoFramesOpportunityMs": 300.400146484375,
+          "commandRoundTripMs": 18
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": true,
+          "dispatchToHandlerMs": 264,
+          "dispatchToTwoFramesOpportunityMs": 437.400146484375,
+          "commandRoundTripMs": 270
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": true,
+          "dispatchToHandlerMs": 242.5,
+          "dispatchToTwoFramesOpportunityMs": 411.400146484375,
+          "commandRoundTripMs": 248
+        }
+      ],
+      "workers": {
+        "created": 1,
+        "transferred": 1,
+        "responses": 1,
+        "terminated": 1,
+        "failed": 0,
+        "blocked": 0
+      },
+      "oldSnapshotVerified": true,
+      "activeDocumentTextCaretAndPaintVerified": true,
+      "dirtyRevisionVerified": true,
+      "nextSaveVerified": true,
+      "longTasks": [
+        {
+          "durationMs": 159
+        },
+        {
+          "durationMs": 249
+        },
+        {
+          "durationMs": 51
+        },
+        {
+          "durationMs": 95
+        },
+        {
+          "durationMs": 119
+        }
+      ]
+    },
+    {
+      "mode": "main-fallback",
+      "run": 2,
+      "fixtureBytes": 137478,
+      "totalSaveMs": 1055.2998046875,
+      "postflightMs": 732,
+      "validatedKeys": 12,
+      "keys": [
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": false,
+          "dispatchToHandlerMs": 838.60009765625,
+          "dispatchToTwoFramesOpportunityMs": 1151.800048828125,
+          "commandRoundTripMs": 1009
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": false,
+          "dispatchToHandlerMs": 981.300048828125,
+          "dispatchToTwoFramesOpportunityMs": 1124.800048828125,
+          "commandRoundTripMs": 982
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": false,
+          "dispatchToHandlerMs": 955,
+          "dispatchToTwoFramesOpportunityMs": 1097.800048828125,
+          "commandRoundTripMs": 958
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": false,
+          "dispatchToHandlerMs": 933.39990234375,
+          "dispatchToTwoFramesOpportunityMs": 1072.800048828125,
+          "commandRoundTripMs": 936
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": false,
+          "dispatchToHandlerMs": 910.199951171875,
+          "dispatchToTwoFramesOpportunityMs": 1046.800048828125,
+          "commandRoundTripMs": 914
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": false,
+          "dispatchToHandlerMs": 888.300048828125,
+          "dispatchToTwoFramesOpportunityMs": 1021.800048828125,
+          "commandRoundTripMs": 891
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": false,
+          "dispatchToHandlerMs": 864.10009765625,
+          "dispatchToTwoFramesOpportunityMs": 995.800048828125,
+          "commandRoundTripMs": 865
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": false,
+          "dispatchToHandlerMs": 838.60009765625,
+          "dispatchToTwoFramesOpportunityMs": 969.800048828125,
+          "commandRoundTripMs": 842
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": false,
+          "dispatchToHandlerMs": 818.39990234375,
+          "dispatchToTwoFramesOpportunityMs": 944.800048828125,
+          "commandRoundTripMs": 820
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": false,
+          "dispatchToHandlerMs": 794.800048828125,
+          "dispatchToTwoFramesOpportunityMs": 919.800048828125,
+          "commandRoundTripMs": 797
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": false,
+          "dispatchToHandlerMs": 771.10009765625,
+          "dispatchToTwoFramesOpportunityMs": 893.800048828125,
+          "commandRoundTripMs": 773
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": false,
+          "dispatchToHandlerMs": 748,
+          "dispatchToTwoFramesOpportunityMs": 868.89990234375,
+          "commandRoundTripMs": 749
+        }
+      ],
+      "workers": {
+        "created": 0,
+        "transferred": 0,
+        "responses": 0,
+        "terminated": 0,
+        "failed": 0,
+        "blocked": 2
+      },
+      "oldSnapshotVerified": true,
+      "activeDocumentTextCaretAndPaintVerified": true,
+      "dirtyRevisionVerified": true,
+      "nextSaveVerified": true,
+      "longTasks": []
+    },
+    {
+      "mode": "main-fallback",
+      "run": 3,
+      "fixtureBytes": 137478,
+      "totalSaveMs": 932.300048828125,
+      "postflightMs": 468.5,
+      "validatedKeys": 12,
+      "keys": [
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": false,
+          "dispatchToHandlerMs": 490.300048828125,
+          "dispatchToTwoFramesOpportunityMs": 1116.300048828125,
+          "commandRoundTripMs": 647
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": false,
+          "dispatchToHandlerMs": 619.400146484375,
+          "dispatchToTwoFramesOpportunityMs": 1090.300048828125,
+          "commandRoundTripMs": 644
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": false,
+          "dispatchToHandlerMs": 601,
+          "dispatchToTwoFramesOpportunityMs": 1065.300048828125,
+          "commandRoundTripMs": 632
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": false,
+          "dispatchToHandlerMs": 584.300048828125,
+          "dispatchToTwoFramesOpportunityMs": 1039.300048828125,
+          "commandRoundTripMs": 606
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": false,
+          "dispatchToHandlerMs": 586.400146484375,
+          "dispatchToTwoFramesOpportunityMs": 1013.300048828125,
+          "commandRoundTripMs": 604
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": false,
+          "dispatchToHandlerMs": 575.800048828125,
+          "dispatchToTwoFramesOpportunityMs": 988.300048828125,
+          "commandRoundTripMs": 581
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": false,
+          "dispatchToHandlerMs": 550.7001953125,
+          "dispatchToTwoFramesOpportunityMs": 961.300048828125,
+          "commandRoundTripMs": 555
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": false,
+          "dispatchToHandlerMs": 527.300048828125,
+          "dispatchToTwoFramesOpportunityMs": 936.300048828125,
+          "commandRoundTripMs": 530
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": false,
+          "dispatchToHandlerMs": 502.5,
+          "dispatchToTwoFramesOpportunityMs": 910.300048828125,
+          "commandRoundTripMs": 512
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": false,
+          "dispatchToHandlerMs": 483.300048828125,
+          "dispatchToTwoFramesOpportunityMs": 884.300048828125,
+          "commandRoundTripMs": 486
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": false,
+          "dispatchToHandlerMs": 459.5,
+          "dispatchToTwoFramesOpportunityMs": 858.300048828125,
+          "commandRoundTripMs": 461
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": false,
+          "dispatchToHandlerMs": 434.5,
+          "dispatchToTwoFramesOpportunityMs": 832.300048828125,
+          "commandRoundTripMs": 436
+        }
+      ],
+      "workers": {
+        "created": 0,
+        "transferred": 0,
+        "responses": 0,
+        "terminated": 0,
+        "failed": 0,
+        "blocked": 2
+      },
+      "oldSnapshotVerified": true,
+      "activeDocumentTextCaretAndPaintVerified": true,
+      "dirtyRevisionVerified": true,
+      "nextSaveVerified": true,
+      "longTasks": []
+    },
+    {
+      "mode": "worker",
+      "run": 3,
+      "fixtureBytes": 137478,
+      "totalSaveMs": 1792.199951171875,
+      "postflightMs": 1300.10009765625,
+      "validatedKeys": 12,
+      "keys": [
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": true,
+          "dispatchToHandlerMs": 13.7001953125,
+          "dispatchToTwoFramesOpportunityMs": 297.5,
+          "commandRoundTripMs": 123
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": true,
+          "dispatchToHandlerMs": 97.900146484375,
+          "dispatchToTwoFramesOpportunityMs": 272.5,
+          "commandRoundTripMs": 103
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": true,
+          "dispatchToHandlerMs": 78.400146484375,
+          "dispatchToTwoFramesOpportunityMs": 246.5,
+          "commandRoundTripMs": 82
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": true,
+          "dispatchToHandlerMs": 56.400146484375,
+          "dispatchToTwoFramesOpportunityMs": 220.5,
+          "commandRoundTripMs": 61
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": true,
+          "dispatchToHandlerMs": 36.60009765625,
+          "dispatchToTwoFramesOpportunityMs": 195.5,
+          "commandRoundTripMs": 40
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": true,
+          "dispatchToHandlerMs": 149.5,
+          "dispatchToTwoFramesOpportunityMs": 211.400146484375,
+          "commandRoundTripMs": 159
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": true,
+          "dispatchToHandlerMs": 125.300048828125,
+          "dispatchToTwoFramesOpportunityMs": 178.400146484375,
+          "commandRoundTripMs": 128
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": true,
+          "dispatchToHandlerMs": 90.2001953125,
+          "dispatchToTwoFramesOpportunityMs": 141.400146484375,
+          "commandRoundTripMs": 93
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": true,
+          "dispatchToHandlerMs": 49.300048828125,
+          "dispatchToTwoFramesOpportunityMs": 98.400146484375,
+          "commandRoundTripMs": 51
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": true,
+          "dispatchToHandlerMs": 19,
+          "dispatchToTwoFramesOpportunityMs": 64.400146484375,
+          "commandRoundTripMs": 21
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": true,
+          "dispatchToHandlerMs": 15.7001953125,
+          "dispatchToTwoFramesOpportunityMs": 354.800048828125,
+          "commandRoundTripMs": 20
+        },
+        {
+          "dispatchedDuringPostflight": true,
+          "handledDuringPostflight": true,
+          "dispatchToHandlerMs": 4.5,
+          "dispatchToTwoFramesOpportunityMs": 327.800048828125,
+          "commandRoundTripMs": 10
+        }
+      ],
+      "workers": {
+        "created": 1,
+        "transferred": 1,
+        "responses": 1,
+        "terminated": 1,
+        "failed": 0,
+        "blocked": 0
+      },
+      "oldSnapshotVerified": true,
+      "activeDocumentTextCaretAndPaintVerified": true,
+      "dirtyRevisionVerified": true,
+      "nextSaveVerified": true,
+      "longTasks": [
+        {
+          "durationMs": 115
+        },
+        {
+          "durationMs": 146
+        },
+        {
+          "durationMs": 254
+        },
+        {
+          "durationMs": 74
+        },
+        {
+          "durationMs": 106
+        },
+        {
+          "durationMs": 82
+        },
+        {
+          "durationMs": 100
+        },
+        {
+          "durationMs": 110
+        }
+      ]
+    }
+  ],
+  "typingPolicy": {
+    "autosaveEnabled": false,
+    "explicitSaves": 2,
+    "recoveryDraftsEnabled": true
+  },
+  "artifact": {
+    "builtFromCommit": "725ae2dc351911eb34cfaf7a2cd47e11f579c3e0",
+    "laterChanges": "8fe0a77 changes the QA recorder only; product source and build are unchanged.",
+    "appBytes": 16642489,
+    "appSha256": "9f5002f44b65eb0289087ed66040af8ebfd1388b999a029939764dfdcf298c2e"
+  },
+  "measurementLimitations": {
+    "typingLongTasks": "Raw diagnostic data only. startSave was initiated through CDP Runtime.evaluate, which the separate calibration showed can omit inspector-initiated tasks. Do not compare these counters to infer main-thread blocking or its reduction; local keys were delayed despite zero reported long tasks. Raw entries are retained.",
+    "packageLongTasks": "The package measurement starts after a timer continuation, but zero reported long tasks is not proof of improved responsiveness.",
+    "inputTiming": "Dispatch-to-handler is input queue latency. Two rAF are scheduling opportunities, not per-key engine acceptance or paint. Canonical text, painted text and caret are validated after each full burst.",
+    "sampling": "Three synthetic pairs on a shared machine. CPU throttling affects the renderer only. This is not a native Word/Otzaria or Windows/WebView2 measurement.",
+    "saveDuration": "The worker typing samples took longer to save overall. Improved input availability must not be described as faster total saves."
+  }
+}

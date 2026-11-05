@@ -98,6 +98,8 @@ export interface CommandAdapter {
   observe(id: string, listener: (state: CommandState) => void): () => void;
   /** מריצה פקודה ומחזירה תוצאה עם הודעה בעברית בכשל. */
   run(id: string, payload?: unknown): Promise<CommandOutcome>;
+  /** Reserve a write + runtime-mode transaction against document replacement. */
+  beginModeChange?(): (() => void) | null;
 }
 
 export function createCommandAdapter(ui: BorrowedSuperDocUI): CommandAdapter {

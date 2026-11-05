@@ -29,7 +29,6 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   edgeSlot,
   installRtlVisualArrows,
-  dragWentBackward,
   isHorizontalArrow,
   movesForward,
   visualTarget,
@@ -474,17 +473,6 @@ describe('movesForward', () => {
   });
 });
 
-describe('dragWentBackward', () => {
-  it('שורה אחרת מוכרעת לפי y, באותה שורה לפי כיוון השורה', () => {
-    expect(dragWentBackward(0, -30, true)).toBe(true);
-    expect(dragWentBackward(0, 30, true)).toBe(false);
-    expect(dragWentBackward(40, 2, true), 'בעברית ימינה הוא אחורה').toBe(true);
-    expect(dragWentBackward(-40, 2, true)).toBe(false);
-    expect(dragWentBackward(-40, 2, false)).toBe(true);
-    expect(dragWentBackward(0, 0, true), 'לחיצה כפולה אינה גרירה').toBe(false);
-  });
-});
-
 describe('edgeSlot', () => {
   const slots = caretSlots(CLEAN, true);
 
@@ -895,6 +883,15 @@ describe('installRtlVisualArrows', () => {
     handle.dispose();
   });
 
+  it('Shift+חץ מעוגן על תפר BiDi נשאר למנוע כשאין לו מיקום יחיד', () => {
+    const state = setup({ caretOffset: 5, caretX: 980 });
+    const handle = installRtlVisualArrows(state);
+    expect(press(state.line, 'ArrowRight', { shiftKey: true }).defaultPrevented).toBe(false);
+    expect(state.setSelectionTarget).not.toHaveBeenCalled();
+    expectAlive(state, state.line);
+    handle.dispose();
+  });
+
   it('Shift+חץ שני ממשיך מהראש שנזכר, גם כשהתצלום כבר אינו מוסר בחירה', () => {
     const { host, line, superdoc, setSelectionTarget } = setup();
     const handle = installRtlVisualArrows({ host, superdoc });
@@ -924,6 +921,90 @@ describe('installRtlVisualArrows', () => {
     handle.dispose();
   });
 
+  it.each([
+    { key: 'ArrowRight', expected: 7 },
+    { key: 'ArrowLeft', expected: 6 },
+  ])('קריסה בתוך אי לטיני ב-$key נבחרת לפי הצד המצויר', ({ key, expected }) => {
+    // היסטים 6 ו-7 יושבים בתוך ABC ומתקדמים משמאל לימין, למרות כיוון הפסקה.
+    const state = setup({ caretOffset: 6, caretX: 991.5 });
+    const handle = installRtlVisualArrows(state);
+    press(state.line, 'ArrowRight', { shiftKey: true });
+    state.setSelectionTarget.mockClear();
+    expect(press(state.line, key).defaultPrevented).toBe(true);
+    expect(written(state.setSelectionTarget).target.start.offset).toBe(expected);
+    expect(written(state.setSelectionTarget).target.end.offset).toBe(expected);
+    handle.dispose();
+  });
+
+  it.each([
+    { shiftKey: true, key: 'ArrowRight', expected: 4 },
+    { shiftKey: false, key: 'ArrowRight', expected: 7 },
+    { shiftKey: false, key: 'ArrowLeft', expected: 6 },
+  ])('בחירה זזה עם הפריסה: $key עם Shift=$shiftKey מודד קצוות מחדש', ({ shiftKey, key, expected }) => {
+    const state = setup({ caretOffset: 6, caretX: 991.5 });
+    const handle = installRtlVisualArrows(state);
+    press(state.line, 'ArrowRight', { shiftKey: true });
+    state.setSelectionTarget.mockClear();
+    // אותו טקסט אחרי הזזה אופקית ואנכית של העמוד, בלי שום שינוי בבחירה.
+    for (const span of Array.from(state.line.children) as (HTMLElement & { __chars: PaintedChar[] })[]) {
+      span.__chars = span.__chars.map((c) => ({ ...c, left: c.left + 100, right: c.right + 100 }));
+    }
+    state.line.getBoundingClientRect = () => ({ left: 151, right: 1143.4, top: 40, bottom: 60 }) as DOMRect;
+    expect(press(state.line, key, { shiftKey }).defaultPrevented).toBe(true);
+    expect(written(state.setSelectionTarget).target.end.offset).toBe(expected);
+    expect(written(state.setSelectionTarget).target.start.offset).toBe(shiftKey ? 6 : expected);
+    handle.dispose();
+  });
+
+  it('פריסה שהחליפה את השורה משחזרת היסט יחיד בלי להשתמש בקואורדינטה ישנה', () => {
+    const state = setup({ caretOffset: 6, caretX: 991.5 });
+    const handle = installRtlVisualArrows(state);
+    press(state.line, 'ArrowRight', { shiftKey: true });
+    const moved = mixedRuns().map((run) => ({ ...run,
+      chars: run.chars.map((c) => ({ ...c, left: c.left + 100, right: c.right + 100 })),
+    }));
+    const replacement = buildLine(moved, 51, 64, true, 40);
+    state.line.replaceWith(replacement);
+    state.setSelectionTarget.mockClear();
+    expect(press(replacement, 'ArrowRight', { shiftKey: true }).defaultPrevented).toBe(true);
+    expect(written(state.setSelectionTarget).target.start.offset).toBe(6);
+    expect(written(state.setSelectionTarget).target.end.offset).toBe(4);
+    handle.dispose();
+  });
+
+  it('auto-scroll בגבול שורות שומר את השורה של הראש וממשיך תו אחד', () => {
+    const state = setup({
+      runs: [{ text: 'אחת', chars: boxes(51, [1043, 1035, 1027, 1019], true) }],
+      pmStart: 51, pmEnd: 54, caretOffset: 2, caretX: 1027,
+      extraLine: { runs: [{ text: 'שנייה', chars: boxes(54, [1043, 1035, 1027, 1019, 1011, 1003], true) }],
+        pmStart: 54, pmEnd: 59 },
+    });
+    const handle = installRtlVisualArrows(state);
+    press(state.line, 'ArrowLeft', { shiftKey: true });
+    expect(written(state.setSelectionTarget).target.end.offset).toBe(3);
+    state.line.getBoundingClientRect = () => ({ top: -100, bottom: -80, left: 51, right: 1043 }) as DOMRect;
+    state.line.nextElementSibling!.getBoundingClientRect = () =>
+      ({ top: -80, bottom: -60, left: 51, right: 1043 }) as DOMRect;
+    state.setSelectionTarget.mockClear();
+    expect(press(state.line, 'ArrowLeft', { shiftKey: true }).defaultPrevented).toBe(true);
+    expect(written(state.setSelectionTarget).target.start.offset).toBe(2);
+    expect(written(state.setSelectionTarget).target.end.offset).toBe(4);
+    handle.dispose();
+  });
+
+  it('שורה שהוחלפה והפכה את הראש לתפר בין שורות מוסרת את המקש בלי לנחש', () => {
+    const state = setup({ caretOffset: 6, caretX: 991.5 });
+    const handle = installRtlVisualArrows(state);
+    press(state.line, 'ArrowRight', { shiftKey: true });
+    const first = buildLine([{ text: 'אבגדהוז', chars: boxes(51, [1000, 990, 980, 970, 960, 950, 940, 930], true) }], 51, 58, true);
+    const second = buildLine([{ text: 'חטיכלמ', chars: boxes(58, [1000, 990, 980, 970, 960, 950, 940], true) }], 58, 64, true, 20);
+    state.line.replaceWith(first, second);
+    state.setSelectionTarget.mockClear();
+    expect(press(second, 'ArrowRight', { shiftKey: true }).defaultPrevented).toBe(false);
+    expect(state.setSelectionTarget).not.toHaveBeenCalled();
+    handle.dispose();
+  });
+
   it('מקש אחר ולחיצת עכבר שוכחים את הבחירה — אבל Shift לבדו לא', () => {
     const { host, line, superdoc, setSelectionTarget } = setup();
     const handle = installRtlVisualArrows({ host, superdoc });
@@ -940,7 +1021,7 @@ describe('installRtlVisualArrows', () => {
     handle.dispose();
   });
 
-  it('בחירת עכבר בעברית: הקצוות נקראים, וההקשות בינתיים ממתינות', async () => {
+  it('בחירת עכבר בעברית נקראת בסיום הגרירה, ואז שתי הקשות ממשיכות מהראש', async () => {
     const { host, line, superdoc, setSelectionTarget } = setup();
     const story = { kind: 'story', storyType: 'body' };
     const point = (offset: number) => ({ kind: 'text', blockId: 'p1', offset, story });
@@ -948,7 +1029,6 @@ describe('installRtlVisualArrows', () => {
       ({ left: 900, right: 1100, top: 0, bottom: 20 }) as DOMRect;
     const editor = superdoc.activeEditor!;
     editor.host!.readLiveSelectionSyncSnapshot = () => ({ selectionTarget: null });
-    editor.host!.getSelectionAnchorRect = () => ({ left: 960, right: 1000, top: 5, bottom: 15 });
     editor.doc = {
       selection: {
         current: async () => ({
@@ -962,6 +1042,7 @@ describe('installRtlVisualArrows', () => {
 
     line.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 1000, clientY: 10 }));
     line.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientX: 960, clientY: 10 }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
     const first = press(line, 'ArrowLeft', { shiftKey: true });
     const queued = press(line, 'ArrowLeft', { shiftKey: true });
     expect(first.defaultPrevented, 'ההכרעה נופלת סינכרונית').toBe(true);
@@ -995,7 +1076,6 @@ describe('installRtlVisualArrows', () => {
     const current = vi.fn(async () => { await gate; return range; });
     const editor = state.superdoc.activeEditor!;
     editor.host!.readLiveSelectionSyncSnapshot = () => ({ selectionTarget: null });
-    editor.host!.getSelectionAnchorRect = () => ({ left: 1010.1, right: 1043.4, top: 5, bottom: 15 });
     state.line.getBoundingClientRect = () =>
       ({ left: 900, right: 1100, top: 0, bottom: 20 }) as DOMRect;
     editor.doc = { selection: { current } };
@@ -1011,54 +1091,115 @@ describe('installRtlVisualArrows', () => {
     }
     expect(state.current).not.toHaveBeenCalled();
     expect(state.setSelectionTarget).not.toHaveBeenCalled();
-    // ההתקנה עצמה חיה: קריסה בלי Shift אינה זקוקה לידיעת הכיוון.
-    expect(press(state.line, 'ArrowLeft').defaultPrevented).toBe(true);
+    expect(press(state.line, 'ArrowLeft').defaultPrevented).toBe(false);
+    // ההתקנה עצמה חיה; חץ על סמן רגיל עדיין מתוקן.
+    state.superdoc.activeEditor!.host!.readLiveSelectionSyncSnapshot = () => ({
+      selectionTarget: { end: { kind: 'text', blockId: 'p1', offset: 5 } },
+    });
+    expectAlive(state, state.line);
     handle.dispose();
     state.release();
   });
 
-  it.each([
-    { shifts: [false, false], expected: [[5, 5], [6, 6]] },
-    { shifts: [false, true, false, false], expected: [[5, 5], [5, 6], [6, 6], [7, 7]] },
-  ])('תור שמתחיל בקריסה ממשיך מהסמן שקרס: $shifts', async ({ shifts, expected }) => {
+  const dragRange = (state: Setup, from = 1043.4, to = 1010.1, modifiers: MouseEventInit = {}) => {
+    state.line.dispatchEvent(new MouseEvent('pointerdown', {
+      bubbles: true, clientX: from, clientY: 10, ...modifiers,
+    }));
+    state.line.dispatchEvent(new MouseEvent('pointerup', {
+      bubbles: true, clientX: to, clientY: 10, ...modifiers,
+    }));
+  };
+
+  it('קריאה מושהית אינה בולעת חצים, ואינה מחזירה בחירה שכבר זזה במנוע', async () => {
     const state = externalRange();
     const handle = installRtlVisualArrows(state);
-    for (const shiftKey of shifts) {
-      expect(press(state.line, 'ArrowLeft', { shiftKey }).defaultPrevented).toBe(true);
-    }
-    expect(state.current).toHaveBeenCalledTimes(1);
-    expect(state.setSelectionTarget).not.toHaveBeenCalled();
+    dragRange(state);
+    await vi.waitFor(() => expect(state.current).toHaveBeenCalledTimes(1));
+    expect(press(state.line, 'ArrowLeft').defaultPrevented).toBe(false);
+    expect(press(state.line, 'ArrowLeft').defaultPrevented).toBe(false);
     state.release();
-    await vi.waitFor(() => expect(state.setSelectionTarget).toHaveBeenCalledTimes(expected.length));
-    expect(state.setSelectionTarget.mock.calls.map(([{ target }]) =>
-      [target.start.offset, target.end.offset])).toEqual(expected);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(state.setSelectionTarget).not.toHaveBeenCalled();
+    expect(press(state.line, 'ArrowLeft', { shiftKey: true }).defaultPrevented).toBe(false);
     handle.dispose();
   });
 
-  it.each(['key', 'pointer', 'dispose', 'editor'] as const)(
-    'קריאה ותור שהתיישנו אינם כותבים או מחזירים מיקוד אחרי %s', async (cancel) => {
+  it.each(['key', 'pointer', 'pointercancel', 'dispose', 'editor'] as const)(
+    'קריאה שהתיישנה אינה כותבת או מחזירה מיקוד אחרי %s', async (cancel) => {
       const state = externalRange();
       const handle = installRtlVisualArrows(state);
-      press(state.line, 'ArrowLeft');
-      press(state.line, 'ArrowLeft');
+      dragRange(state);
+      await vi.waitFor(() => expect(state.current).toHaveBeenCalledTimes(1));
       if (cancel === 'key') press(state.line, 'Home');
       if (cancel === 'pointer') state.line.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+      if (cancel === 'pointercancel') state.line.dispatchEvent(new Event('pointercancel', { bubbles: true }));
       if (cancel === 'dispose') handle.dispose();
       if (cancel === 'editor') state.superdoc.activeEditor = { ...state.superdoc.activeEditor };
       state.release();
       await state.current.mock.results[0]!.value;
-      // גם .then של ההקשה השנייה וגם ניקוי הזנב חייבים להספיק לרוץ.
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(state.setSelectionTarget).not.toHaveBeenCalled();
+      expect(press(state.line, 'ArrowLeft', { shiftKey: true }).defaultPrevented).toBe(false);
       handle.dispose();
     },
   );
 
-  it('בחירה שלא נבנתה כאן בלי שורה עברית מתחתיה נשארת למנוע', () => {
+  it.each([
+    { label: 'Shift+click', from: 1043.4, to: 1010.1, modifiers: { shiftKey: true } },
+    { label: 'לחיצה כפולה בלי גרירה', from: 1010.1, to: 1010.1, modifiers: {} },
+  ])('$label אינו מנחש עוגן לפי תנועת העכבר', ({ from, to, modifiers }) => {
+    const state = externalRange();
+    const handle = installRtlVisualArrows(state);
+    dragRange(state, from, to, modifiers);
+    expect(press(state.line, 'ArrowLeft', { shiftKey: true }).defaultPrevented).toBe(false);
+    expect(state.current).not.toHaveBeenCalled();
+    expect(state.setSelectionTarget).not.toHaveBeenCalled();
+    handle.dispose();
+    state.release();
+  });
+
+  it('ראש בחירה שאינו מצויר נשאר למנוע, בלי בליעת המקש', async () => {
+    const state = externalRange();
+    const handle = installRtlVisualArrows(state);
+    dragRange(state);
+    await vi.waitFor(() => expect(state.current).toHaveBeenCalledTimes(1));
+    state.line.remove();
+    state.release();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(press(state.host, 'ArrowLeft', { shiftKey: true }).defaultPrevented).toBe(false);
+    expect(state.setSelectionTarget).not.toHaveBeenCalled();
+    handle.dispose();
+  });
+
+  it.each([
+    { from: 991.5, to: 1002.2, anchor: 6, head: 6 },
+    { from: 1002.2, to: 991.5, anchor: 7, head: 9 },
+  ])('גרירה בתוך אי לטיני שומרת את העוגן $anchor לפי המיקום המצויר', async ({ from, to, anchor, head }) => {
+    const state = setup();
+    const editor = state.superdoc.activeEditor!;
+    editor.host!.readLiveSelectionSyncSnapshot = () => ({ selectionTarget: null });
+    state.line.getBoundingClientRect = () => ({ left: 900, right: 1100, top: 0, bottom: 20 }) as DOMRect;
+    editor.doc = { selection: { current: async () => ({
+      empty: false,
+      selectionTarget: {
+        kind: 'selection',
+        start: { kind: 'text', blockId: 'p1', offset: 6 },
+        end: { kind: 'text', blockId: 'p1', offset: 7 },
+      },
+    }) } };
+    const handle = installRtlVisualArrows(state);
+    dragRange(state, from, to);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(press(state.line, 'ArrowLeft', { shiftKey: true }).defaultPrevented).toBe(true);
+    expect(written(state.setSelectionTarget).target.start.offset).toBe(anchor);
+    expect(written(state.setSelectionTarget).target.end.offset).toBe(head);
+    handle.dispose();
+  });
+
+  it('בחירה חיצונית אינה מתחילה קריאה או בולעת את המקש', () => {
     const { host, line, superdoc, setSelectionTarget } = setup();
     const editor = superdoc.activeEditor!;
     editor.host!.readLiveSelectionSyncSnapshot = () => ({ selectionTarget: null });
-    editor.host!.getSelectionAnchorRect = () => ({ left: 1, right: 2, top: 900, bottom: 910 });
     const handle = installRtlVisualArrows({ host, superdoc });
 
     expect(press(line, 'ArrowRight').defaultPrevented).toBe(false);

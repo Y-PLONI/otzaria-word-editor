@@ -81,6 +81,11 @@ function fakeDoc(options: {
             if (input === undefined) throw new TypeError("Cannot read properties of undefined (reading 'options')");
             return options.get;
           },
+          getNodeById: async ({ nodeId }: { nodeId: string }) => {
+            const body = (options.get as { body?: Array<Record<string, unknown>> }).body ?? [];
+            const node = body.find((entry) => entry.id === nodeId || (entry.paragraphIds as { paraId?: string })?.paraId === nodeId);
+            return { node, address: { kind: 'block', nodeType: node?.kind === 'heading' ? 'heading' : 'paragraph', nodeId } };
+          },
         }),
     ...(options.blocks === undefined ? {} : { blocks: { list: async () => ({ blocks: options.blocks }) } }),
     ...(options.listState === undefined
@@ -695,12 +700,12 @@ describe('readParagraphIndents', () => {
     expect(await readParagraphIndents(host as never)).toBeNull();
   });
 
-  it('`get` שזורק מוחזר כ-`null` ואינו מפיל את הסרגל', async () => {
+  it('`getNodeById` שזורק מוחזר כ-`null` ואינו מפיל את הסרגל', async () => {
     const host = {
       activeEditor: {
         doc: {
           selection: { current: async () => CARET },
-          get: () => {
+          getNodeById: () => {
             throw new Error('boom');
           },
         },
@@ -710,7 +715,7 @@ describe('readParagraphIndents', () => {
     expect(await readParagraphIndents(host as never)).toBeNull();
   });
 
-  it('גרסה בלי `get` אינה זורקת', async () => {
+  it('גרסה בלי קריאת צומת ממוקדת אינה זורקת', async () => {
     expect(await readParagraphIndents({ activeEditor: { doc: {} } } as never)).toBeNull();
   });
 });

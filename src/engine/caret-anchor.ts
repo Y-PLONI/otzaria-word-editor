@@ -21,8 +21,8 @@
  *
  * 1. `blockId` — מנוסה ראשון, ועולה אפס: אם הוא שרד, השחזור מדויק ומיידי.
  * 2. `ordinal` — מקומה של הפסקה בסדר המסמך. הוא אינו יכול „לא לשרוד”: פסקה
- *    שלישית נשארת שלישית. הוא נפתר דרך `doc.blocks.list()`, ולכן הוא יקר
- *    יותר — ולכן הוא הגיבוי ולא הראשון.
+ *    שלישית נשארת שלישית. הוא נפתר דרך `doc.blocks.list({offset, limit: 1})`,
+ *    ולכן הוא הגיבוי ולא הראשון — קריאה לכל קצה ייחודי של הבחירה בלבד.
  *
  * הצורה הזאת גם אינה תלויה בתשובה: אם המזהים שורדים, המסלול השני לא ירוץ אף
  * פעם; אם לא — הוא זה שיעבוד, ואין שינוי קוד בין המקרים.
@@ -111,12 +111,12 @@ export interface CaretDocSource {
 export type CaretDoc = SuperDoc | CaretDocSource | null | undefined;
 
 /**
- * כמה פסקאות לבקש בכל קריאה, וכמה קריאות לכל היותר.
+ * כמה פסקאות לבקש בכל קריאה בעת שמירת העוגן, וכמה קריאות לכל היותר.
  *
  * המנוע רשאי להחזיר פחות מהמבוקש, ולכן ההתקדמות היא לפי מה שחזר בפועל ולא
  * לפי הבקשה — לולאה שמתקדמת ב-`limit` הייתה מדלגת על פסקאות בכל מנוע שמגביל
- * את הדף. התקרה קיימת כדי שמסמך ענק לא יהפוך שחזור סמן להמתנה: 50 קריאות של
- * 500 הן 25,000 פסקאות, ומעליהן הסמן פשוט אינו משוחזר.
+ * את הדף. התקרה מגבילה את עבודת שמירת המיקום: 50 קריאות של 500 הן 25,000
+ * פסקאות, ומעליהן נשמר רק המזהה. שחזור ordinal שכבר ידוע אינו סורק את הרשימה.
  */
 const PAGE_SIZE = 500;
 const MAX_PAGES = 50;
@@ -209,6 +209,28 @@ async function listBlockIds(host: CaretDoc): Promise<string[] | null> {
   }
 
   return ids;
+}
+
+/**
+ * אותו סדר גוף מסמך לא מסונן שבו `listBlockIds` שומר ordinal, ברשומה אחת.
+ * אם מנוע החזיר רשומה ממיקום אחר (למשל אחרי הגבלת offset), אין לשחזר אליה.
+ */
+async function blockIdAt(host: CaretDoc, ordinal: number): Promise<string | null> {
+  if (!Number.isSafeInteger(ordinal) || ordinal < 0) return null;
+  const blocks = (host as CaretDocSource | null | undefined)?.activeEditor?.doc?.blocks;
+  const list = blocks?.list;
+  if (typeof list !== 'function') return null;
+
+  try {
+    const result = await list.call(blocks, { offset: ordinal, limit: 1 });
+    if (typeof result?.total === 'number' && ordinal >= result.total) return null;
+    const entry = Array.isArray(result?.blocks) ? (result.blocks[0] as BlockEntryLike) : undefined;
+    if (entry?.ordinal !== undefined && entry.ordinal !== ordinal) return null;
+    return typeof entry?.nodeId === 'string' && entry.nodeId !== '' ? entry.nodeId : null;
+  } catch (error) {
+    console.warn('[otzaria-word] קריאת הפסקה לשחזור המקום נכשלה', error);
+    return null;
+  }
 }
 
 /**
@@ -327,8 +349,8 @@ async function scrollTo(ui: CaretUiSource, point: CaretPoint): Promise<void> {
  * מחזירה את הסמן — ואת התצוגה — למקום השמור. `false` פירושו שהמקום לא נמצא,
  * והמסמך נשאר פתוח בתחילתו.
  *
- * סדר הניסיונות הוא סדר העלות: המזהה השמור, ואחריו הסדר (שדורש קריאה של
- * הפסקאות). ההנמקה המלאה בראש הקובץ.
+ * סדר הניסיונות הוא סדר העלות: המזהה השמור, ואחריו קריאה ממוקדת לפי הסדר.
+ * ההנמקה המלאה בראש הקובץ.
  */
 export async function applyCaretAnchor(
   host: CaretUi,
@@ -357,13 +379,11 @@ export async function applyCaretAnchor(
 
   // המזהים לא שרדו את סבב הייצוא. הסדר תמיד שורד — ראו „שני עוגנים” בראש.
   if (anchor.start.ordinal === null) return false;
-  const ids = await listBlockIds(doc);
-  if (!ids) return false;
-
-  const startId = ids[anchor.start.ordinal];
+  const startId = await blockIdAt(doc, anchor.start.ordinal);
   if (!startId) return false;
   const endOrdinal = end.ordinal ?? anchor.start.ordinal;
-  const endId = ids[endOrdinal] || startId;
+  const endId =
+    endOrdinal === anchor.start.ordinal ? startId : (await blockIdAt(doc, endOrdinal)) ?? startId;
 
   return attempt({ ...anchor.start, blockId: startId }, { ...end, blockId: endId });
 }

@@ -384,7 +384,7 @@ describe('הגשר ל-storage', () => {
     expect(call).toHaveBeenCalledWith('storage.get', { key: 'recent-documents' });
   });
 
-  it('כשל של ה-Host אינו מפיל את העלייה', async () => {
+  it('מחוץ לאוצריא אין היסטוריה שמורה', async () => {
     await expect(loadRecentDocuments()).resolves.toBeNull();
   });
 

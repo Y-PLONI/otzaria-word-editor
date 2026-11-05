@@ -85,9 +85,11 @@ describe('mergeFontFamilies', () => {
     expect(merged.find((option) => option.value === 'TaameyDavidCLM')?.label).toBe('David');
   });
 
-  it('לכל אפשרות יש previewFamily, כדי שהבורר יציג כל שם בגופן שלו', () => {
+  it('דגימה מוצעת רק כאשר הזמינות ידועה', () => {
     const merged = mergeFontFamilies([{ value: 'Verdana', label: 'Verdana' }]);
-    expect(merged.every((option) => Boolean(option.previewFamily))).toBe(true);
+    expect(merged.filter((option) => option.available === true).every((option) => Boolean(option.previewFamily))).toBe(true);
+    expect(merged.find((option) => option.value === 'Verdana')).toMatchObject({ available: undefined, measured: false });
+    expect(merged.find((option) => option.value === 'Verdana')?.previewFamily).toBeUndefined();
   });
 
   it('שורה פגומה מהמנוע נדחית ואינה מפילה את הרשימה', () => {
@@ -177,22 +179,10 @@ describe('mergeFontFamilies — מותקן שאינו מצוייר', () => {
     expect(flagged?.group).toBe(FONT_GROUP_HEBREW);
   });
 
-  it('שם שהמנייה לא סימנה אינו נמדד כלל — 287 מדידות בכל מיזוג הן ארבע שניות', () => {
-    const asked: string[] = [];
-    const merged = mergeFontFamilies(
-      undefined,
-      installed(['David', 'Narkisim'], ['David', 'Narkisim'], []),
-      () => true,
-      (family) => {
-        asked.push(family);
-        return true;
-      },
-    );
-
-    expect(asked).not.toContain('David');
-    expect(asked).not.toContain('Narkisim');
-    expect(find(merged, 'David')?.measured).toBe(false);
-    expect(find(merged, 'David')?.available).toBe(true);
+  it('שמות מהמארח נשארים לא בדוקים עד שיש תוצאת מטמון', () => {
+    const merged = mergeFontFamilies(undefined, installed(['David', 'Narkisim'], ['David']));
+    expect(find(merged, 'David')).toMatchObject({ measured: false, available: undefined, hebrew: true });
+    expect(find(merged, 'Narkisim')).toMatchObject({ measured: false, available: undefined, hebrew: undefined });
   });
 
   it('„מותקן ואינו מצוייר” מסומן בנפרד מ„אינו מותקן”', () => {
@@ -298,7 +288,7 @@ describe('mergeFontFamilies — המכסה על „אחרונים”', () => {
  * הלטינית, וגופן שמכסה עברית יכול לשבת שם גם הוא (Arial).
  */
 describe('mergeFontFamilies — כיסוי עברית', () => {
-  const hebrewOf = (options: readonly { value: string; hebrew: boolean }[], value: string) =>
+  const hebrewOf = (options: readonly { value: string; hebrew: boolean | undefined }[], value: string) =>
     options.find((option) => option.value === value)?.hebrew;
 
   it('שש המשפחות שלנו מסומנות עבריות גם בלי מנייה', () => {
@@ -313,7 +303,7 @@ describe('mergeFontFamilies — כיסוי עברית', () => {
   it('מה שבקבוצת „עברית” מסומן, ומה שבזנב אינו', () => {
     const merged = mergeFontFamilies(undefined, installed(['Bahnschrift', 'Narkisim'], ['Narkisim']));
     expect(hebrewOf(merged, 'Narkisim')).toBe(true);
-    expect(hebrewOf(merged, 'Bahnschrift')).toBe(false);
+    expect(hebrewOf(merged, 'Bahnschrift')).toBeUndefined();
   });
 
   it('גופן בראש הרשימה מסומן לפי המנייה ולא לפי הקבוצה', () => {
@@ -322,20 +312,20 @@ describe('mergeFontFamilies — כיסוי עברית', () => {
     const merged = mergeFontFamilies(undefined, installed(['Aptos', 'Arial'], ['Arial']));
     expect(groupOf(merged, 'Arial')).toBe(FONT_GROUP_TOP);
     expect(hebrewOf(merged, 'Arial')).toBe(true);
-    expect(hebrewOf(merged, 'Aptos')).toBe(false);
+    expect(hebrewOf(merged, 'Aptos')).toBeUndefined();
   });
 
   it('גופן שהמסמך משתמש בו מסומן לפי המנייה', () => {
     const engine = [{ value: 'Narkisim', label: 'Narkisim' }, { value: 'Cambria', label: 'Cambria' }];
     const merged = mergeFontFamilies(engine, installed(['Narkisim'], ['Narkisim']));
     expect(hebrewOf(merged, 'Narkisim')).toBe(true);
-    expect(hebrewOf(merged, 'Cambria')).toBe(false);
+    expect(hebrewOf(merged, 'Cambria')).toBeUndefined();
   });
 
   it('בלי מנייה ובלי מדידה גופן לטיני אינו מסומן — דגימה שנופלת ל-fallback היא שקר', () => {
     const merged = mergeFontFamilies([{ value: 'Cambria', label: 'Cambria' }]);
-    expect(hebrewOf(merged, 'Cambria')).toBe(false);
-    expect(hebrewOf(merged, 'Aptos')).toBe(false);
+    expect(hebrewOf(merged, 'Cambria')).toBeUndefined();
+    expect(hebrewOf(merged, 'Aptos')).toBeUndefined();
   });
 
   it('מדידה מסמנת גם גופן שהמנייה אינה מכירה', () => {
@@ -353,6 +343,16 @@ describe('mergeFontFamilies — כיסוי עברית', () => {
     const merged = mergeFontFamilies(undefined, installed(['Gisha', 'Bahnschrift']), (family) => family === 'Gisha');
     expect(groupOf(merged, 'Gisha')).toBe(FONT_GROUP_HEBREW);
     expect(groupOf(merged, 'Bahnschrift')).toBe(FONT_GROUP_ALL);
+  });
+});
+
+describe('coverage cache states', () => {
+  it('distinguishes a measured negative from unknown host metadata', () => {
+    const options = mergeFontFamilies(undefined, installed(['Unknown', 'Latin', 'Hebrew']),
+      (name) => name === 'Unknown' ? undefined : name === 'Hebrew');
+    expect(options.find((font) => font.value === 'Unknown')?.hebrew).toBeUndefined();
+    expect(options.find((font) => font.value === 'Latin')?.hebrew).toBe(false);
+    expect(options.find((font) => font.value === 'Hebrew')?.hebrew).toBe(true);
   });
 });
 
@@ -622,20 +622,11 @@ describe('mergeFontFamilies — זמינות', () => {
     }
   });
 
-  it('שם מהמנייה שהמנייה לא סימנה אינו נמדד שוב — סומכים על מה שכבר נמדד', () => {
-    // המנייה מדדה את כל השמות שהמארח דיווח (`measureUnresolved`), ומה שלא
-    // סומן שם נפתר. שאלה חוזרת עליו במיזוג היא מדידה של משפחה **מותקנת** —
-    // ~15ms כל אחת, סינכרונית בתוך `computed`.
-    const merged = mergeFontFamilies(
-      undefined,
-      installed(['Narkisim'], ['Narkisim']),
-      () => true,
-      resolvesAllBut(['Narkisim']),
-    );
-    const row = find(merged, 'Narkisim');
-
-    expect(row?.available).toBe(true);
-    expect(row?.previewFamily).toBe('"Narkisim", sans-serif');
+  it('תשובת מטמון שלילית חלה גם על שם שדווח כמותקן', () => {
+    const merged = mergeFontFamilies(undefined, installed(['Narkisim'], ['Narkisim']),
+      () => true, resolvesAllBut(['Narkisim']));
+    expect(find(merged, 'Narkisim')).toMatchObject({ available: false, measured: true, installedNotDrawable: true });
+    expect(find(merged, 'Narkisim')?.previewFamily).toBeUndefined();
   });
 
   it('גופן מסמך שאינו נפתר מסומן — זה המקור שהבאג באמת חי בו', () => {
@@ -691,38 +682,21 @@ describe('mergeFontFamilies — זמינות', () => {
     expect(values(merged).filter((value) => value === 'Aptos')).toHaveLength(1);
   });
 
-  it('נשאלים הלטינית וגופני המסמך — ולא מאות שמות המנייה', () => {
-    /*
-     * מדידה של משפחה **מותקנת** דורשת טעינת גופן מהדיסק אל ה-renderer, ~15ms
-     * (system-fonts.ts). 300 מהן בתוך `computed` סינכרוני הן כמה שניות של
-     * בלימה בכל פתיחת מסמך — כי `installDocumentFontAliases` מרוקן את מטמון
-     * המדידה. לכן נשאלים רק אלה שהמנייה סימנה, וכאן אין כאלה.
-     *
-     * שוויון קבוצות ולא „מכיל”: הוא תופס גם „לא מודד את מי שצריך” וגם „מודד
-     * את כולם”, ולכן הוא גם השומר על העלות אם מישהו יחליף את הפרדיקט בדגל.
-     */
-    const resolves = vi.fn((_family: string) => true);
+  it('קורא מטמון עבור כל מקור, בלי להפוך תשובה חסרה לשלילית', () => {
+    const cached = vi.fn((_family: string) => undefined);
     const many = Array.from({ length: 300 }, (_, index) => `Family ${index}`);
-
-    mergeFontFamilies(
-      [{ value: 'Cambria', label: 'Cambria' }],
-      installed(many),
-      () => false,
-      resolves,
-    );
-
-    const asked = new Set(resolves.mock.calls.map(([name]) => name));
-    expect(asked).toEqual(new Set([...values(LATIN_FONT_FAMILIES), 'Cambria']));
-    expect(asked.has('Family 0')).toBe(false);
-    expect(asked.has('Family 299')).toBe(false);
+    const merged = composeFontOptions({ options: [{ value: 'Cambria', label: 'Cambria' }] },
+      installed(many), cached, cached).families;
+    expect(merged).toHaveLength(311);
+    expect(merged.filter((option) => option.available === undefined)).toHaveLength(305);
+    expect(merged.filter((option) => option.hebrew === undefined)).toHaveLength(305);
   });
 
-  it('בלי כפיל — ברירת המחדל אינה מפילה דבר', () => {
-    // `isFamilyAvailable` האמיתית מחזירה `true` כשאין canvas, ולכן ריצה בלי
-    // הזרקה חייבת להשאיר את כל הרשימה זמינה. בדיקה זו היא השומר על כך
-    // שהתיקון לא יכבה דגימות בסביבה שאינה יכולה למדוד.
+  it('בלי canvas אין טענה שגופן מותקן או חסר', () => {
     const merged = mergeFontFamilies([{ value: 'Cambria', label: 'Cambria' }]);
-    expect(merged.every((option) => option.available)).toBe(true);
-    expect(merged.every((option) => option.previewFamily !== undefined)).toBe(true);
+    const cambria = find(merged, 'Cambria');
+    expect(cambria?.available).toBeUndefined();
+    expect(cambria?.previewFamily).toBeUndefined();
+    expect(cambria?.measured).toBe(false);
   });
 });

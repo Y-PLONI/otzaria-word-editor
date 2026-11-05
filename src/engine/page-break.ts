@@ -294,9 +294,11 @@ export async function readPageBreakSupport(host: PageBreakTarget): Promise<PageB
  */
 async function applyPageBreak(
   host: PageBreakTarget,
-  pageBreakBefore: boolean,
-): Promise<{ outcome: CommandOutcome; nodeId: string | null }> {
-  const failedAction = pageBreakBefore ? FAILED_ACTION : FAILED_ACTION_OFF;
+  requested: boolean | ((nodeId: string) => boolean),
+  isCurrent: () => boolean = () => true,
+): Promise<{ outcome: CommandOutcome; nodeId: string | null; pageBreakBefore: boolean }> {
+  let pageBreakBefore = typeof requested === 'boolean' ? requested : true;
+  let failedAction = pageBreakBefore ? FAILED_ACTION : FAILED_ACTION_OFF;
   const setFlowOptions = (host as PageBreakHost | null | undefined)?.activeEditor?.doc?.format
     ?.paragraph?.setFlowOptions;
 
@@ -310,16 +312,30 @@ async function applyPageBreak(
         reason: 'command-unsupported',
       },
       nodeId: null,
+      pageBreakBefore,
     };
   }
 
   const selection = await readDocSelection(host);
+  if (!isCurrent()) {
+    return {
+      outcome: { ok: false, message: 'המסמך התחלף; יש להפעיל את הפעולה שוב', reason: 'not-ready' },
+      nodeId: null,
+      pageBreakBefore,
+    };
+  }
   if (!selection.blockId) {
     return {
       outcome: { ok: false, message: 'יש למקם את הסמן במסמך', reason: 'selection-required' },
       nodeId: null,
+      pageBreakBefore,
     };
   }
+
+  // A toggle derives its value from the same resolved paragraph that is written,
+  // never from a paused visual readout or a second selection request.
+  if (typeof requested === 'function') pageBreakBefore = requested(selection.blockId);
+  failedAction = pageBreakBefore ? FAILED_ACTION : FAILED_ACTION_OFF;
 
   const target: ParagraphTarget = {
     kind: 'block',
@@ -337,12 +353,13 @@ async function applyPageBreak(
     return {
       outcome: { ok: false, message: thrownText(failedAction, error), reason: 'threw' },
       nodeId: selection.blockId,
+      pageBreakBefore,
     };
   }
 
   // הערך המבוקש כבר מוגדר. הצלחה מבחינת המשתמש.
   if (receipt?.success === false && receipt.failure?.code === 'NO_OP') {
-    return { outcome: { ok: true }, nodeId: selection.blockId };
+    return { outcome: { ok: true }, nodeId: selection.blockId, pageBreakBefore };
   }
 
   if (receipt?.success === false) {
@@ -353,17 +370,18 @@ async function applyPageBreak(
         reason: receipt.failure?.code,
       },
       nodeId: selection.blockId,
+      pageBreakBefore,
     };
   }
 
-  return { outcome: { ok: true }, nodeId: selection.blockId };
+  return { outcome: { ok: true }, nodeId: selection.blockId, pageBreakBefore };
 }
 
 /**
  * מסמנת את הפסקה שבה הסמן כ„מתחילה בעמוד חדש”. שולחת `true` תמיד — זו
  * הפעולה שהקיצור `Ctrl+Enter` מריץ (App.vue, `runPageBreak`), ומשמעותה שם
  * זהה למשמעות של „מעבר עמוד” ב-Word: פעולה קדימה, לא מתג. הכפתור ברצועה
- * (InsertTab.vue) הוא זה שמתנהג כמתג, דרך `setParagraphPageBreak` למטה.
+ * (InsertTab.vue) הוא זה שמתנהג כמתג, דרך `toggleParagraphPageBreak` למטה.
  */
 export async function startParagraphOnNewPage(host: PageBreakTarget): Promise<CommandOutcome> {
   return (await applyPageBreak(host, true)).outcome;
@@ -379,8 +397,24 @@ export async function setParagraphPageBreak(
   pageBreakBefore: boolean,
   tracker: PageBreakTracker,
 ): Promise<CommandOutcome> {
-  const { outcome, nodeId } = await applyPageBreak(host, pageBreakBefore);
-  if (outcome.ok) tracker.remember(nodeId, pageBreakBefore);
+  const version = tracker.documentVersion;
+  const isCurrent = () => tracker.documentVersion === version;
+  const { outcome, nodeId } = await applyPageBreak(host, pageBreakBefore, isCurrent);
+  if (outcome.ok && isCurrent()) tracker.remember(nodeId, pageBreakBefore);
+  return outcome;
+}
+
+/** Resolve the current paragraph once, then invert its tracked value. */
+export async function toggleParagraphPageBreak(
+  host: PageBreakTarget,
+  tracker: PageBreakTracker,
+): Promise<CommandOutcome> {
+  const version = tracker.documentVersion;
+  const isCurrent = () => tracker.documentVersion === version;
+  const { outcome, nodeId, pageBreakBefore } = await applyPageBreak(host, id => !tracker.isOn(id), isCurrent);
+  // A write already sent to the old document may finish after a tab switch.
+  // Its success must never enter the new document's tracked state.
+  if (outcome.ok && isCurrent()) tracker.remember(nodeId, pageBreakBefore);
   return outcome;
 }
 
@@ -401,6 +435,8 @@ export async function readPageBreakNodeId(host: PageBreakTarget): Promise<string
  * בהערת הפתיחה של הקובץ.
  */
 export interface PageBreakTracker {
+  /** Changes only when syncDocument switches document, fencing pending commands. */
+  readonly documentVersion: number;
   /** האם ידוע לנו שהפסקה הזאת מסומנת. `false` גם כש„לא ידוע” — זו ברירת המחדל הבטוחה. */
   isOn(nodeId: string | null | undefined): boolean;
   /** קוראת אחרי כתיבה מוצלחת (כולל NO_OP) — ראו `setParagraphPageBreak`. */
@@ -468,6 +504,7 @@ export function createPageBreakTracker(): PageBreakTracker {
   const known = new Map<string, boolean>();
   const UNSET = Symbol('page-break-tracker-unset');
   let lastKey: unknown = UNSET;
+  let documentVersion = 0;
   const listeners = new Set<() => void>();
   /** ראו `forgetAllKeepingSnapshot`/`restoreSnapshot`. `null` = אין מה להחזיר. */
   let pendingSnapshot: Map<string, boolean> | null = null;
@@ -483,6 +520,7 @@ export function createPageBreakTracker(): PageBreakTracker {
   }
 
   return {
+    get documentVersion() { return documentVersion; },
     isOn: (nodeId) => typeof nodeId === 'string' && nodeId !== '' && known.get(nodeId) === true,
     remember(nodeId, on) {
       if (typeof nodeId !== 'string' || nodeId === '') return;
@@ -492,6 +530,7 @@ export function createPageBreakTracker(): PageBreakTracker {
     syncDocument(key) {
       if (key === lastKey) return;
       lastKey = key;
+      documentVersion += 1;
       known.clear();
       // מסמך אחר: תצלום ממתין ממסמך שכבר אינו פתוח אינו רלוונטי להחזרה.
       pendingSnapshot = null;

@@ -14,6 +14,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { CommandAdapter, CommandOutcome } from '../../src/engine/command-adapter';
+import type { EditorSession } from '../../src/engine/create-editor';
+import { createEditorInteraction } from '../../src/engine/editor-interaction';
 import {
   disableProtection,
   enableReadOnlyProtection,
@@ -50,7 +52,7 @@ function fakeDoc(options: {
  * ש-`run` קבע — בדיוק ה"מנוע" ש-`enable/disableProtection` צריכות כדי
  * לבצע את החסימה בפועל. `mode()` חושף את המצב הנוכחי לבדיקה.
  */
-function fakeCommandAdapter(initialMode: string): { adapter: CommandAdapter; mode: () => string; payloads: unknown[] } {
+function fakeCommandAdapter(initialMode: string): { adapter: CommandAdapter; mode: () => string; setMode: (mode: string) => void; payloads: unknown[] } {
   let mode = initialMode;
   const payloads: unknown[] = [];
 
@@ -72,7 +74,7 @@ function fakeCommandAdapter(initialMode: string): { adapter: CommandAdapter; mod
     },
   };
 
-  return { adapter, mode: () => mode, payloads };
+  return { adapter, mode: () => mode, setMode: value => { mode = value; }, payloads };
 }
 
 describe('enableReadOnlyProtection', () => {
@@ -176,6 +178,35 @@ describe('readProtectionState', () => {
 });
 
 describe('חסימה בפועל: document-mode יחד עם ה-XML', () => {
+  it('serializes a delayed protection write with opening and refuses unprotect while leased', async () => {
+    let finishSet!: (receipt: { success: boolean }) => void;
+    const pendingSet = new Promise<{ success: boolean }>(resolve => { finishSet = resolve; });
+    const { host, calls } = fakeDoc({ set: () => pendingSet });
+    const commands = fakeCommandAdapter('suggesting');
+    const interaction = createEditorInteraction({
+      superdoc: { setDocumentMode: commands.setMode }, container: document.createElement('div'), onDispose: () => {},
+    } as unknown as EditorSession, commands.adapter);
+
+    const enabling = enableReadOnlyProtection(host, interaction.commands);
+    expect(interaction.pendingModeChanges.value).toBe(1);
+    expect(() => interaction.block()).toThrow('שינוי הגנת המסמך עדיין מתבצע');
+    expect(commands.mode()).toBe('suggesting');
+    finishSet({ success: true });
+    expect(await enabling).toEqual({ ok: true, previousMode: 'suggesting' });
+    expect(interaction.pendingModeChanges.value).toBe(0);
+    expect(commands.mode()).toBe('viewing');
+
+    const release = interaction.block();
+    expect(await disableProtection(host, interaction.commands, 'suggesting')).toMatchObject({ ok: false, reason: 'not-ready' });
+    expect(await enableReadOnlyProtection(host, interaction.commands)).toMatchObject({ ok: false, reason: 'not-ready' });
+    expect(calls.get('clear')).toBeUndefined();
+    expect(calls.get('set')).toHaveLength(1);
+    release();
+    expect(commands.mode()).toBe('viewing');
+    expect(await disableProtection(host, interaction.commands, 'suggesting')).toEqual({ ok: true });
+    expect(commands.mode()).toBe('suggesting');
+  });
+
   it('הפעלה מעבירה document-mode ל-viewing — זה מה שחוסם קלט ופקודות בפועל', async () => {
     const { host } = fakeDoc();
     const commands = fakeCommandAdapter('editing');
@@ -222,6 +253,29 @@ describe('חסימה בפועל: document-mode יחד עם ה-XML', () => {
 });
 
 describe('syncProtectionRuntime', () => {
+  it('reserves a delayed protection read so a temporary viewing lease cannot mask permanent protection', async () => {
+    let finishRead!: (value: unknown) => void;
+    const reply = new Promise(resolve => { finishRead = resolve; });
+    const { host, calls } = fakeDoc({ get: reply });
+    const commands = fakeCommandAdapter('editing');
+    const interaction = createEditorInteraction({
+      superdoc: { setDocumentMode: commands.setMode }, container: document.createElement('div'), onDispose: () => {},
+    } as unknown as EditorSession, commands.adapter);
+    const syncing = syncProtectionRuntime(host, interaction.commands);
+    expect(interaction.pendingModeChanges.value).toBe(1);
+    expect(() => interaction.block()).toThrow('שינוי הגנת המסמך עדיין מתבצע');
+    expect(commands.mode()).toBe('editing');
+    finishRead({ editingRestriction: { mode: 'readOnly', enforced: true } });
+    expect(await syncing).toMatchObject({ enforced: true });
+    expect(interaction.pendingModeChanges.value).toBe(0);
+    expect(commands.mode()).toBe('viewing');
+    const release = interaction.block();
+    expect(await syncProtectionRuntime(host, interaction.commands)).toBeNull();
+    expect(calls.get('get')).toHaveLength(1);
+    release();
+    expect(commands.mode()).toBe('viewing');
+  });
+
   it('מסמך שנטען כשהוא כבר מוגן: כופה viewing גם בלי הפעלה בסשן הזה', async () => {
     const { host } = fakeDoc({
       get: { editingRestriction: { mode: 'readOnly', enforced: true } },

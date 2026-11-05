@@ -55,6 +55,7 @@ import RibbonGroup from '../common/RibbonGroup.vue';
 import RibbonStack from '../common/RibbonStack.vue';
 import RibbonButton from '../common/RibbonButton.vue';
 import { ACTIVE_MACROS, type MacrosHandle } from '../../../engine/macros';
+import { DOCUMENT_INTERACTION_BLOCKED } from '../../../composables/keys';
 
 defineEmits<{
   (e: 'manage-macros'): void;
@@ -67,7 +68,8 @@ defineEmits<{
  * כפתור שאינו יכול לעבוד נראה כך לפני הלחיצה.
  */
 const macros = inject(ACTIVE_MACROS, shallowRef<MacrosHandle | null>(null));
-const macrosAvailable = computed(() => macros.value !== null);
+const blocked = inject(DOCUMENT_INTERACTION_BLOCKED, shallowRef(false));
+const macrosAvailable = computed(() => macros.value !== null && !blocked.value);
 
 /**
  * מצב ההקלטה, מתוך ה-ref שה-handle חושף: הכפתור צריך להתחלף ל„עצור הקלטה”

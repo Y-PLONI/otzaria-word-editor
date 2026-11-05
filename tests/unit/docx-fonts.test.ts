@@ -236,6 +236,9 @@ interface FontProbe {
   available: (name: string) => boolean;
   /** המיזוג מהמודול **הזה**, כדי שהמדידה שהוא עושה תהיה זו שנספרת כאן. */
   merge: typeof import('../../src/engine/font-options').mergeFontFamilies;
+  compose: typeof import('../../src/engine/font-options').composeFontOptions;
+  cached: (name: string) => boolean | undefined;
+  cachedCoverage: (name: string) => boolean | undefined;
   install: (fontTableXml: string | null) => Promise<string[]>;
   /** כמה מדידות רוחב נעשו בפועל — כך נראה מה נשמר במפה ומה נמדד מחדש. */
   measurements: () => number;
@@ -281,6 +284,9 @@ async function fontProbe(hebrew: readonly string[]): Promise<FontProbe> {
     covers: fonts.coversHebrew,
     available: fonts.isFamilyAvailable,
     merge: options.mergeFontFamilies,
+    compose: options.composeFontOptions,
+    cached: fonts.cachedFamilyAvailability,
+    cachedCoverage: fonts.cachedHebrewCoverage,
     install: fonts.installDocumentFontAliases,
     measurements: () => measurements,
     hebrew: known,
@@ -355,30 +361,28 @@ describe('coversHebrew — המפתח שהתשובה נשמרת תחתיו', () 
     }
   });
 
-  it('הזרקת אליאסים של מסמך מפילה את הזיכרון — לשני הכיוונים', async () => {
-    // `installDocumentFontAliases` דורס את `@font-face` בכל מסמך, ולכן
-    // התשובה כן משתנה תוך ההפעלה. בלי דור במפתח:
-    //   • גופן שנפתר רק דרך האליאס נמדד `false` לפני ההזרקה ונשאר מסווג
-    //     „בלי עברית” לכל ההפעלה (נמדד בדפדפן: FrankRuhlCLM=false);
-    //   • ו-`true` שנמדד בזכות מסמך א' נשאר אחרי שמסמך ב' דרס את הסגנון —
-    //     ואז הדגימה נצבעת ב-fallback, בדיוק מה שהדגל קיים כדי למנוע.
-    tryCallMock.mockResolvedValue(null);
-    const probe = await fontProbe([]);
+  it('הוספה והסרה של אליאס מבטלות כיסוי רק למשפחה שהשתנתה', async () => {
+    const probe = await fontProbe(['Arial']);
     try {
-      expect(probe.covers('FrankRuhlCLM')).toBe(false);
-
-      // מסמך א': ההזרקה הביאה את הגופן.
-      probe.hebrew.add('FrankRuhlCLM');
+      tryCallMock.mockResolvedValue({
+        css: '@font-face{font-family:"Narkisim";src:url(data:font/woff2;base64,AA==)}',
+        resolved: ['Narkisim'],
+      });
+      expect(probe.covers('Narkisim')).toBe(false);
+      expect(probe.covers('Arial')).toBe(true);
+      await probe.install('<w:font w:name="Narkisim"><w:charset w:val="B1"/></w:font>');
+      probe.hebrew.add('Narkisim');
+      expect(probe.cachedCoverage('Narkisim')).toBeUndefined();
+      expect(probe.covers('Narkisim')).toBe(true);
+      const measured = probe.measurements();
+      expect(probe.covers('Arial')).toBe(true);
+      expect(probe.measurements()).toBe(measured);
       await probe.install(null);
-      expect(probe.covers('FrankRuhlCLM')).toBe(true);
-
-      // מסמך ב': הסגנון נדרס, והגופן אינו נפתר יותר.
-      probe.hebrew.delete('FrankRuhlCLM');
-      await probe.install(null);
-      expect(probe.covers('FrankRuhlCLM')).toBe(false);
-    } finally {
-      probe.restore();
-    }
+      probe.hebrew.delete('Narkisim');
+      expect(probe.cachedCoverage('Narkisim')).toBeUndefined();
+      expect(probe.covers('Narkisim')).toBe(false);
+      expect(probe.cachedCoverage('Arial')).toBe(true);
+    } finally { probe.restore(); }
   });
 });
 
@@ -389,6 +393,34 @@ describe('isFamilyAvailable', () => {
     expect(isFamilyAvailable('גופן שאינו קיים בשום מקום')).toBe(true);
   });
 });
+
+// jsdom does not load fonts; a nonempty result models a fulfilled FontFaceSet load.
+const LOADED_FONT_FACES = [{ status: 'loaded' }] as FontFace[];
+const hostedTable = (...names: string[]) => names.map((name) =>
+  `<w:font w:name="${name}"><w:charset w:val="B1"/></w:font>`).join('');
+const hostedCss = (...names: string[]) => names.map((name) =>
+  `@font-face{font-family:"${name}";src:url(data:font/woff2;base64,AA==)}`).join('\n');
+
+function deferredFontLoad() {
+  let resolve!: (faces: FontFace[]) => void;
+  let reject!: (reason: Error) => void;
+  const promise = new Promise<FontFace[]>((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve: () => resolve(LOADED_FONT_FACES), reject };
+}
+
+async function hostedFontProbe(fontSet: unknown) {
+  const probe = await fontProbe([]);
+  const previousFonts = Object.getOwnPropertyDescriptor(document, 'fonts');
+  Object.defineProperty(document, 'fonts', { configurable: true, value: fontSet });
+  return {
+    ...probe,
+    restore() {
+      if (previousFonts) Object.defineProperty(document, 'fonts', previousFonts);
+      else Reflect.deleteProperty(document, 'fonts');
+      probe.restore();
+    },
+  };
+}
 
 describe('installDocumentFontAliases', () => {
   beforeEach(() => {
@@ -407,12 +439,11 @@ describe('installDocumentFontAliases', () => {
     expect(document.querySelectorAll(`#${FONT_ALIAS_STYLE_ID}`)).toHaveLength(1);
   });
 
-  it('ממתינה לגופני מארח לפני שמקדמים את דור המטמון', async () => {
+  it('ממתינה לגופני מארח לפני שמבטלים את תשובת המטמון', async () => {
     /*
-     * גופן שמגיע ב-`url(data:...)` נטען אחרי שה-`@font-face` נכתב. אם הדור
-     * מתקדם לפני ה-load, המיזוג שאחריו יכול לזכור `false` ולסמן את הגופן
-     * „אינו מותקן” עד המסמך הבא. המדמה מחזיק את הטעינה באמצע בדיוק, כדי
-     * שהבדיקה תיכשל אם ההמתנה תוסר או תעבור אחרי `advanceAliasGeneration`.
+     * גופן שמגיע ב-`url(data:...)` נטען אחרי שה-`@font-face` נכתב. ביטול
+     * המטמון לפני ה-load מאפשר למדידה ביניים לשמור `false` מיושן.
+     * המדמה מחזיק את הטעינה באמצע כדי להגן על סדר ההמתנה והביטול.
      */
     const probe = await fontProbe([]);
     const previousFonts = Object.getOwnPropertyDescriptor(document, 'fonts');
@@ -420,13 +451,14 @@ describe('installDocumentFontAliases', () => {
     const loading = new Promise<void>((resolve) => { release = resolve; });
     const load = vi.fn(async () => {
       await loading;
-      return [];
+      return LOADED_FONT_FACES;
     });
 
     Object.defineProperty(document, 'fonts', { configurable: true, value: { load } });
     try {
       tryCallMock.mockResolvedValue({
         css: '@font-face{font-family:"Narkisim";src:url(data:font/woff2;base64,AA==)}',
+        resolved: ['Narkisim'],
       });
       const fontTable = '<w:font w:name="Narkisim"><w:charset w:val="B1"/></w:font>';
       expect(probe.available('Narkisim')).toBe(false);
@@ -452,10 +484,291 @@ describe('installDocumentFontAliases', () => {
     }
   });
 
+  it('פתיחה חוזרת ממתינה לטעינה שכבר רצה בלי להזריק CSS או לטעון שוב', async () => {
+    const probe = await fontProbe([]);
+    const previousFonts = Object.getOwnPropertyDescriptor(document, 'fonts');
+    let release!: () => void;
+    const loading = new Promise<void>((resolve) => { release = resolve; });
+    const load = vi.fn(async () => { await loading; return LOADED_FONT_FACES; });
+    Object.defineProperty(document, 'fonts', { configurable: true, value: { load } });
+    const installations: Promise<string[]>[] = [];
+    try {
+      const xml = '<w:font w:name="Narkisim"><w:charset w:val="B1"/></w:font>';
+      const css = '@font-face{font-family:"Narkisim";src:url(data:font/woff2;base64,AA==)}';
+      tryCallMock.mockResolvedValue({ css, resolved: ['Narkisim'] });
+      let firstSettled = false;
+      let secondSettled = false;
+      installations.push(probe.install(xml).then((missing) => { firstSettled = true; return missing; }));
+      await vi.waitFor(() => expect(load).toHaveBeenCalledTimes(1));
+      const style = document.getElementById(FONT_ALIAS_STYLE_ID)!;
+      const write = vi.spyOn(style, 'textContent', 'set');
+      installations.push(probe.install(xml).then((missing) => { secondSettled = true; return missing; }));
+      // Like Skip followed by reopening: the first font request is still alive.
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      expect(firstSettled).toBe(false);
+      expect(secondSettled).toBe(false);
+      expect(load).toHaveBeenCalledTimes(1);
+      expect(tryCallMock).toHaveBeenCalledTimes(1);
+      expect(write).not.toHaveBeenCalled();
+
+      probe.hebrew.add('Narkisim');
+      release();
+      expect(await Promise.all(installations)).toEqual([['Narkisim'], ['Narkisim']]);
+      expect(probe.available('Narkisim')).toBe(true);
+      await probe.install(xml);
+      expect(load).toHaveBeenCalledTimes(1);
+      expect(write).not.toHaveBeenCalled();
+      expect(probe.cached('Narkisim')).toBe(true);
+      write.mockRestore();
+    } finally {
+      release();
+      await Promise.all(installations);
+      if (previousFonts) Object.defineProperty(document, 'fonts', previousFonts);
+      else Reflect.deleteProperty(document, 'fonts');
+      probe.restore();
+    }
+  });
+
+  it('CSS זהה משתף טעינה קיימת אבל ממתין גם למשפחה נוספת שהתבקשה', async () => {
+    const firstFont = deferredFontLoad();
+    const secondFont = deferredFontLoad();
+    const load = vi.fn((font: string) => font === '72px "Narkisim"' ? firstFont.promise : secondFont.promise);
+    const probe = await hostedFontProbe({ load });
+    const installations: Promise<string[]>[] = [];
+    try {
+      const names = ['Narkisim', 'FrankRuhlCLM'];
+      // A host may include extra rules even though only requested names are tracked.
+      const css = hostedCss(...names);
+      tryCallMock.mockResolvedValue({ css, resolved: names });
+      installations.push(probe.install(hostedTable(names[0])));
+      await vi.waitFor(() => expect(load).toHaveBeenCalledTimes(1));
+      const write = vi.spyOn(document.getElementById(FONT_ALIAS_STYLE_ID)!, 'textContent', 'set');
+      let secondSettled = false;
+      installations.push(probe.install(hostedTable(...names)).then((missing) => {
+        secondSettled = true;
+        return missing;
+      }));
+      await vi.waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+      expect(load.mock.calls.map(([font]) => font)).toEqual(['72px "Narkisim"', '72px "FrankRuhlCLM"']);
+      firstFont.resolve();
+      await installations[0];
+      expect(secondSettled).toBe(false);
+      expect(write).not.toHaveBeenCalled();
+      secondFont.resolve();
+      await installations[1];
+      await probe.install(hostedTable(...names));
+      expect(load).toHaveBeenCalledTimes(2);
+      expect(write).not.toHaveBeenCalled();
+      write.mockRestore();
+    } finally {
+      firstFont.resolve();
+      secondFont.resolve();
+      await Promise.all(installations);
+      probe.restore();
+    }
+  });
+
+  it.each(['reject', 'throw', 'empty'] as const)('טעינה מסוג %s מאפשרת fallback וניסיון חוזר בלי לשכתב CSS', async (failure) => {
+    const retry = deferredFontLoad();
+    const load = vi.fn<FontFaceSet['load']>().mockImplementationOnce(() => {
+      if (failure === 'throw') throw new Error('font unavailable');
+      return failure === 'reject' ? Promise.reject(new Error('font unavailable')) : Promise.resolve([]);
+    }).mockImplementation(() => retry.promise);
+    const probe = await hostedFontProbe({ load });
+    let installing: Promise<string[]> | undefined;
+    try {
+      const xml = hostedTable('Narkisim');
+      const css = hostedCss('Narkisim');
+      tryCallMock.mockResolvedValue({ css, resolved: ['Narkisim'] });
+      await expect(probe.install(xml)).resolves.toEqual(['Narkisim']);
+      expect(probe.available('Narkisim')).toBe(false);
+      expect(probe.covers('Narkisim')).toBe(false);
+      probe.available('Aptos');
+      const write = vi.spyOn(document.getElementById(FONT_ALIAS_STYLE_ID)!, 'textContent', 'set');
+      let settled = false;
+      installing = probe.install(xml).then((missing) => { settled = true; return missing; });
+      await vi.waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+      expect(settled).toBe(false);
+      expect(write).not.toHaveBeenCalled();
+      probe.hebrew.add('Narkisim');
+      retry.resolve();
+      await installing;
+      expect(probe.available('Narkisim')).toBe(true);
+      expect(probe.covers('Narkisim')).toBe(true);
+      expect(probe.cached('Aptos')).toBe(false);
+      await probe.install(xml);
+      expect(load).toHaveBeenCalledTimes(2);
+      expect(tryCallMock).toHaveBeenCalledTimes(1);
+      expect(write).not.toHaveBeenCalled();
+      write.mockRestore();
+    } finally {
+      retry.resolve();
+      await installing;
+      probe.restore();
+    }
+  });
+
+  it.each(['remove', 'replace', 'clear'] as const)('אחרי %s של הסגנון ממתינים מחדש גם כשהבייטים שמורים', async (change) => {
+    const reloading = deferredFontLoad();
+    const load = vi.fn<FontFaceSet['load']>().mockResolvedValueOnce(LOADED_FONT_FACES)
+      .mockImplementation(() => reloading.promise);
+    const probe = await hostedFontProbe({ load });
+    let installing: Promise<string[]> | undefined;
+    try {
+      const xml = hostedTable('Narkisim');
+      const css = hostedCss('Narkisim');
+      tryCallMock.mockResolvedValue({ css, resolved: ['Narkisim'] });
+      await probe.install(xml);
+      const style = document.getElementById(FONT_ALIAS_STYLE_ID)!;
+      if (change === 'remove') style.remove();
+      else if (change === 'replace') style.replaceWith(style.cloneNode(true));
+      else await probe.install(null);
+      let settled = false;
+      installing = probe.install(xml).then((missing) => { settled = true; return missing; });
+      await vi.waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+      expect(settled).toBe(false);
+      expect(tryCallMock).toHaveBeenCalledTimes(1);
+      expect(document.getElementById(FONT_ALIAS_STYLE_ID)?.textContent).toBe(css);
+      reloading.resolve();
+      await installing;
+      await probe.install(xml);
+      expect(load).toHaveBeenCalledTimes(2);
+    } finally {
+      reloading.resolve();
+      await installing;
+      probe.restore();
+    }
+  });
+
+  it.each(['resolve', 'reject'] as const)('סיום ישן מסוג %s אינו מחזיר אליאסים של מסמך שהוחלף', async (outcome) => {
+    const oldLoad = deferredFontLoad();
+    const load = vi.fn<FontFaceSet['load']>().mockImplementationOnce(() => oldLoad.promise)
+      .mockResolvedValue(LOADED_FONT_FACES);
+    const probe = await hostedFontProbe({ load });
+    let oldInstallation: Promise<string[]> | undefined;
+    try {
+      const oldName = 'Narkisim';
+      const currentName = 'FrankRuhlCLM';
+      tryCallMock.mockResolvedValueOnce({ css: hostedCss(oldName), resolved: [oldName] });
+      tryCallMock.mockResolvedValueOnce({ css: hostedCss(currentName), resolved: [currentName] });
+      oldInstallation = probe.install(hostedTable(oldName));
+      await vi.waitFor(() => expect(load).toHaveBeenCalledTimes(1));
+      await probe.install(hostedTable(currentName));
+      probe.hebrew.add(currentName);
+      expect(probe.available(currentName)).toBe(true);
+      if (outcome === 'resolve') oldLoad.resolve();
+      else oldLoad.reject(new Error('obsolete font unavailable'));
+      await oldInstallation;
+      // The current font is an alias, so seeing it on canvas must not remove its rule.
+      await probe.install(hostedTable(currentName));
+      expect(document.getElementById(FONT_ALIAS_STYLE_ID)?.textContent).toBe(hostedCss(currentName));
+      expect(load).toHaveBeenCalledTimes(2);
+      expect(tryCallMock).toHaveBeenCalledTimes(2);
+      expect(probe.cached(currentName)).toBe(true);
+    } finally {
+      oldLoad.resolve();
+      await oldInstallation;
+      probe.restore();
+    }
+  });
+
+  it.each([undefined, {}])('בלי API טעינה נשארים ב-fallback, ועם הופעתו ממתינים לגופן', async (fontSet) => {
+    const loading = deferredFontLoad();
+    const load = vi.fn(() => loading.promise);
+    const probe = await hostedFontProbe(fontSet);
+    let installing: Promise<string[]> | undefined;
+    try {
+      const xml = hostedTable('Narkisim');
+      tryCallMock.mockResolvedValue({ css: hostedCss('Narkisim'), resolved: ['Narkisim'] });
+      await expect(probe.install(xml)).resolves.toEqual(['Narkisim']);
+      const write = vi.spyOn(document.getElementById(FONT_ALIAS_STYLE_ID)!, 'textContent', 'set');
+      Object.defineProperty(document, 'fonts', { configurable: true, value: { load } });
+      let settled = false;
+      installing = probe.install(xml).then((missing) => { settled = true; return missing; });
+      await vi.waitFor(() => expect(load).toHaveBeenCalledTimes(1));
+      expect(settled).toBe(false);
+      expect(write).not.toHaveBeenCalled();
+      loading.resolve();
+      await installing;
+      await probe.install(xml);
+      expect(load).toHaveBeenCalledTimes(1);
+      expect(tryCallMock).toHaveBeenCalledTimes(1);
+      write.mockRestore();
+    } finally {
+      loading.resolve();
+      await installing;
+      probe.restore();
+    }
+  });
+
   it('בסביבה בלי canvas שום גופן אינו נחשב חסר, ולכן אין מה להתקין', async () => {
     // הנפילה הבטוחה, מקצה לקצה: אין מדידה → אין החלפה → אין פנייה למארח.
     await expect(installDocumentFontAliases(REAL_FONT_TABLE)).resolves.toEqual([]);
     expect(tryCallMock).not.toHaveBeenCalled();
+  });
+
+  it('תשובה חלקית טוענת ומבטלת מטמון רק למה שסופק, ומנסה שוב עד תשובה מלאה', async () => {
+    const probe = await fontProbe([]);
+    const previousFonts = Object.getOwnPropertyDescriptor(document, 'fonts');
+    const load = vi.fn(async (_font: string, _text?: string) => LOADED_FONT_FACES);
+    Object.defineProperty(document, 'fonts', { configurable: true, value: { load } });
+    try {
+      const names = ['Narkisim', 'FrankRuhlCLM'];
+      const xml = names.map((name) => `<w:font w:name="${name}"><w:charset w:val="B1"/></w:font>`).join('');
+      const rules = names.map((name) => `@font-face{font-family:"${name}";src:url(data:font/woff2;base64,AA==)}`);
+      tryCallMock.mockResolvedValueOnce({ css: rules[0], resolved: ['Narkisim'] });
+      tryCallMock.mockResolvedValueOnce({ css: rules.join('\n'), resolved: names });
+      expect(probe.available('Narkisim')).toBe(false);
+      expect(probe.available('FrankRuhlCLM')).toBe(false);
+
+      await probe.install(xml);
+      expect(load).toHaveBeenCalledTimes(1);
+      expect(load.mock.calls[0][0]).toBe('72px "Narkisim"');
+      expect(probe.cached('Narkisim')).toBeUndefined();
+      // משפחה שלא קיבלה כלל אינה בבעלות הסגנון, והמטמון שלה נשאר תקף.
+      expect(probe.cached('FrankRuhlCLM')).toBe(false);
+      probe.hebrew.add('Narkisim');
+      expect(probe.available('Narkisim')).toBe(true);
+
+      await probe.install(xml);
+      expect(tryCallMock).toHaveBeenCalledTimes(2);
+      expect(load).toHaveBeenCalledTimes(3);
+      expect(load.mock.calls.slice(1).map(([font]) => font)).toEqual(['72px "Narkisim"', '72px "FrankRuhlCLM"']);
+      probe.hebrew.add('FrankRuhlCLM');
+      expect(probe.available('FrankRuhlCLM')).toBe(true);
+      const style = document.getElementById(FONT_ALIAS_STYLE_ID)!;
+      expect(style.textContent).toBe(rules.join('\n'));
+      const write = vi.spyOn(style, 'textContent', 'set');
+
+      // אחרי תשובה מלאה נשמרת יעילות הפתיחה החוזרת.
+      await probe.install(xml);
+      expect(tryCallMock).toHaveBeenCalledTimes(2);
+      expect(load).toHaveBeenCalledTimes(3);
+      expect(write).not.toHaveBeenCalled();
+      expect(probe.cached('FrankRuhlCLM')).toBe(true);
+      write.mockRestore();
+    } finally {
+      if (previousFonts) Object.defineProperty(document, 'fonts', previousFonts);
+      else Reflect.deleteProperty(document, 'fonts');
+      probe.restore();
+    }
+  });
+
+  it('CSS בלי רשימת שמות תקינה אינו מוזרק ואינו חוסם ניסיון חוזר', async () => {
+    const probe = await fontProbe([]);
+    try {
+      const xml = '<w:font w:name="Narkisim"><w:charset w:val="B1"/></w:font>';
+      const css = '@font-face{font-family:"Narkisim";src:url(data:font/woff2;base64,AA==)}';
+      tryCallMock.mockResolvedValueOnce({ css });
+      tryCallMock.mockResolvedValueOnce({ css, resolved: ['Narkisim'] });
+      await probe.install(xml);
+      expect(document.getElementById(FONT_ALIAS_STYLE_ID)?.textContent).toBe('');
+      expect(probe.cached('Narkisim')).toBe(false);
+      await probe.install(xml);
+      expect(tryCallMock).toHaveBeenCalledTimes(2);
+      expect(document.getElementById(FONT_ALIAS_STYLE_ID)?.textContent).toBe(css);
+      expect(probe.cached('Narkisim')).toBeUndefined();
+    } finally { probe.restore(); }
   });
 });
 
@@ -496,47 +809,53 @@ describe('isFamilyAvailable — מדידה, מטמון, והתיישנות', () 
     }
   });
 
-  it('הזרקת אליאסים מבטלת תשובה קודמת — אחרת היא שורדת את מה שהפך אותה לשגויה', async () => {
-    /*
-     * מה שנבדק כאן הוא **מפתח הדור**, ולא הניקוי: `installDocumentFontAliases`
-     * דורס את ה-`@font-face` בכל מסמך, כלומר שם שלא נפתר במסמך א' כן נפתר
-     * במסמך ב'. `familyProbeKey` נושא את הדור, ולכן דור חדש מחטיא וקורא מדידה
-     * טרייה. הבדיקה תאדים אם הדור יוסר מהמפתח — היא **לא** תאדים אם רק
-     * `familyAvailability.clear()` יימחק, וזה נכון: הניקוי הוא ניהול זיכרון.
-     */
-    const probe = await fontProbe([]);
+  it('אליאס חוזר אינו מוחק תשובות או מסיר את עצמו', async () => {
+    const probe = await fontProbe(['FrankRuhlCLM', 'Arial']);
     try {
+      const xml = '<w:font w:name="Narkisim"><w:charset w:val="B1"/></w:font>';
       expect(probe.available('Narkisim')).toBe(false);
-
+      expect(probe.available('Arial')).toBe(true);
+      await probe.install(xml);
       probe.hebrew.add('Narkisim');
-      expect(probe.available('Narkisim')).toBe(false); // עדיין מהמטמון
-
-      await probe.install(null);
-
       expect(probe.available('Narkisim')).toBe(true);
-    } finally {
-      probe.restore();
-    }
+      expect(probe.covers('Narkisim')).toBe(true);
+      const style = document.getElementById(FONT_ALIAS_STYLE_ID)!;
+      const css = style.textContent;
+      const write = vi.spyOn(style, 'textContent', 'set');
+      const measured = probe.measurements();
+      await probe.install(xml);
+      expect(style.textContent).toBe(css);
+      expect(css).toContain('font-family:"Narkisim"');
+      expect(write).not.toHaveBeenCalled();
+      expect(probe.cached('Narkisim')).toBe(true);
+      expect(probe.cachedCoverage('Narkisim')).toBe(true);
+      expect(probe.available('Arial')).toBe(true);
+      expect(probe.measurements()).toBe(measured);
+      await probe.install(null);
+      expect(probe.cached('Narkisim')).toBeUndefined();
+      expect(probe.cached('Arial')).toBe(true);
+      write.mockRestore();
+    } finally { probe.restore(); }
   });
 
-  it('המיזוג בלי כפיל באמת מודד — ולא רק מכריז', async () => {
-    /*
-     * הבדיקות ב-font-options.test.ts מזריקות `resolves`, ובצדק — אבל בכך הן
-     * מודדות את ההיגיון ולא את החיווט. כאן נקרא `mergeFontFamilies` **בלי**
-     * הפרמטר, מול canvas שיכול לומר `false`, וזו הבדיקה היחידה ברמת היחידה
-     * שמוכיחה שברירת המחדל מחוברת לפונקציה האמיתית.
-     */
+  it('הרכבת 300 שמות אינה מודדת canvas וקוראת תוצאות רק אחרי בדיקה', async () => {
     const probe = await fontProbe(['Arial']);
     try {
-      const merged = probe.merge([{ value: 'Aptos Display', label: 'Aptos Display' }]);
-      const row = merged.find((option) => option.value === 'Aptos Display');
-      const arial = merged.find((option) => option.value === 'Arial');
-
-      expect(row?.available).toBe(false);
-      expect(row?.previewFamily).toBeUndefined();
-      expect(arial?.available).toBe(true);
-    } finally {
-      probe.restore();
-    }
+      const families = Array.from({ length: 300 }, (_, i) => ({ value: `Family ${i}`, label: `Family ${i}` }));
+      const installed = { families, hebrew: new Set<string>(), unresolved: new Set<string>(), source: 'host' as const };
+      const slice = { options: [{ value: 'Aptos Display', label: 'Aptos Display' }] };
+      const merged = probe.compose(slice, installed).families;
+      expect(probe.measurements()).toBe(0);
+      expect(merged.find((font) => font.value === 'Arial')?.available).toBeUndefined();
+      expect(merged.find((font) => font.value === 'Family 299')?.hebrew).toBeUndefined();
+      probe.available('Arial');
+      probe.covers('Arial');
+      probe.available('Aptos Display');
+      const measured = probe.measurements();
+      const refreshed = probe.compose(slice, installed).families;
+      expect(refreshed.find((font) => font.value === 'Arial')).toMatchObject({ available: true, hebrew: true, measured: true });
+      expect(refreshed.find((font) => font.value === 'Aptos Display')?.available).toBe(false);
+      expect(probe.measurements()).toBe(measured);
+    } finally { probe.restore(); }
   });
 });

@@ -618,6 +618,7 @@ import {
   type FontAdvancedPatch,
 } from '../../../engine/font-advanced';
 import { readPageMargins } from '../../../engine/page-setup';
+import { invalidateDocumentReads, observeDocumentReadInvalidation } from '../../../engine/document-read-state';
 import {
   NUMBER_STYLE_LABELS,
   continuePreviousList,
@@ -653,8 +654,13 @@ const emit = defineEmits<{
  * והוא מסתכל בדיוק על הפקד הזה. ב-Word הוא נמצא ב„אפשרויות תיקון שגיאות”,
  * שהוא שלושה מסכים משם.
  */
-const props = withDefaults(defineProps<{ listAutoformatEnabled?: boolean }>(), {
+const props = withDefaults(defineProps<{
+  listAutoformatEnabled?: boolean;
+  /** Only visual paragraph reads pause; commands and shared font state stay live. */
+  readoutsVisible?: boolean;
+}>(), {
   listAutoformatEnabled: true,
+  readoutsVisible: true,
 });
 
 const SPACING_OPTIONS: SelectOption[] = [
@@ -1054,92 +1060,80 @@ const report = inject(COMMAND_REPORTER, fallbackReporter);
 /* חיווי „פעיל” של RTL/LTR                                             */
 /* ------------------------------------------------------------------ */
 
-/**
- * חיווי „פעיל” של RTL/LTR — לא מ-`dirRtlCmd.active`/`dirLtrCmd.active`.
- *
- * docs/button-audit.md (שורה ה', „קשה לתקן”) תיעד: „הכתיבה מצליחה; הפקודה
- * אינה מדווחת active”. **נמדד מחדש מול superdoc@2.10.0 (Chrome headless,
- * ה-dist הארוז) לפני שנגעו כאן — הבאג עדיין קיים.** לחיצה על „כיוון פסקה
- * מימין לשמאל" כותבת `<w:bidi/>` תקין, אבל `ui.commands.get('direction-rtl')
- * .getState()` המיידי שאחריה מחזיר `{supported:true, enabled:true,
- * active:false}` — בדיוק כמו שהתיעוד טען (scripts/qa/home-paragraph-qa.mjs,
- * מקטע „כיוון פסקה”).
- *
- * המעקף, כמו שהתיעוד המליץ: לקרוא `bidi` מה-`pPr` של הפסקה עצמה, ולא לסמוך
- * על הפקודה. בניגוד ל-`pageBreakBefore` (engine/page-break.ts) — ששם
- * `doc.get()` לא החזיר את התכונה בכלל וגרר מעקב מקומי — `bidi` **כן** חוזר
- * מ-`doc.get()` (נמדד שם, בהערת הפתיחה של page-break.ts: „תכונות אותה פסקה
- * בדיוק שחוזרות מ-doc.get() הן {bidi:true} בלבד"). כלומר אין צורך במעקב
- * מקומי: `readParagraphIndents` (engine/paragraph-format.ts) כבר קוראת בדיוק
- * את זה — היא אותה קריאה שהסרגל האופקי משתמש בה כדי לצייר את סמן ההזחה
- * (engine/page-ruler.ts), וכאן היא משמשת לצורך אחר: מקור אמת ל-`:active`.
- */
+/** The registry's direction active state is unreliable; use the targeted paragraph read shared with the ruler. */
 const paragraphBidi = shallowRef<boolean | null>(null);
-
-/** מונה דורות: קריאה א-סינכרונית שמתאפסת לא תדרוס תשובה טרייה יותר. */
+const BIDI_SELECTION_DEBOUNCE_MS = 150;
+let bidiSelectionTimer: ReturnType<typeof setTimeout> | undefined;
 let bidiGeneration = 0;
+let bidiDisposed = false;
+let unsubscribeBidiSelection: (() => void) | null = null;
+let unsubscribeBidiDocument: (() => void) | null = null;
+let bidiDocument: object | null | undefined;
+
+function bindBidiDocument(): void {
+  const doc = superdoc.value?.activeEditor?.doc;
+  if (bidiDocument === doc) return;
+  unsubscribeBidiDocument?.();
+  bidiDocument = doc;
+  unsubscribeBidiDocument = observeDocumentReadInvalidation(doc, scheduleBidiRefresh);
+}
 
 async function refreshParagraphBidi(): Promise<void> {
+  if (bidiDisposed || !props.readoutsVisible) return;
+  clearTimeout(bidiSelectionTimer);
+  bindBidiDocument();
   const mine = ++bidiGeneration;
   const reading = await readParagraphIndents(superdoc.value);
-  if (mine !== bidiGeneration) return;
+  if (mine !== bidiGeneration || bidiDisposed || !props.readoutsVisible) return;
   paragraphBidi.value = reading ? reading.indents.bidi : null;
 }
 
-/**
- * השהיית הקריאה אחרי תזוזת סמן — אותו ערך ואותה הנמקה כמו
- * `RULER_SELECTION_DEBOUNCE_MS`/`PAGE_BREAK_SELECTION_DEBOUNCE_MS`
- * (page-ruler.ts, InsertTab.vue): חיווי שמתעדכן חצי שנייה אחרי הסמן נראה
- * תקוע.
- */
-const BIDI_SELECTION_DEBOUNCE_MS = 150;
-let bidiSelectionTimer: ReturnType<typeof setTimeout> | undefined;
-
 function scheduleBidiRefresh(): void {
+  if (bidiDisposed || !props.readoutsVisible) return;
+  // Reject a previous response even while the next read is still debounced.
+  bidiGeneration += 1;
+  bindBidiDocument();
   clearTimeout(bidiSelectionTimer);
   bidiSelectionTimer = setTimeout(() => void refreshParagraphBidi(), BIDI_SELECTION_DEBOUNCE_MS);
 }
 
-/**
- * מנוי על תזוזת סמן, כדי שהחיווי יתעדכן כשהסמן עובר לפסקה אחרת בלי לחיצה על
- * הכפתור עצמו. אותו דפוס בדיוק כמו `pageBreakOn` ב-InsertTab.vue: `observe`
- * מחובר ישירות מהלשונית (הצרכן היחיד), ומתחלף בכל החלפת מסמך.
- *
- * פער ידוע, מאותה משפחה כמו זה שתועד ב-page-break.ts „QA עצמאי” ל-Undo/Redo:
- * Ctrl+Z שמבטל שינוי כיוון בלי להזיז את הסמן לא יריץ מחדש קריאה כאן, והחיווי
- * יישאר על הערך הישן עד תזוזת סמן הבאה. בניגוד ל-`PageBreakTracker` — שהיה
- * יכול להישאר שגוי **לצמיתות** כי הוא זיכרון מקומי — כאן זו קריאה חיה מהמסמך
- * בכל פעם שהיא כן רצה, כך שהפער נסגר מעצמו בתזוזת הסמן הבאה, ולא רק בלחיצה
- * נוספת על הכפתור.
- */
-let unsubscribeBidiSelection: (() => void) | null = null;
+function stopBidiReadout(): void {
+  bidiGeneration += 1;
+  clearTimeout(bidiSelectionTimer);
+  bidiSelectionTimer = undefined;
+  unsubscribeBidiSelection?.();
+  unsubscribeBidiSelection = null;
+  unsubscribeBidiDocument?.();
+  unsubscribeBidiDocument = null;
+  bidiDocument = undefined;
+}
 
 watch(
-  superdoc,
-  (host) => {
-    paragraphBidi.value = null;
-    unsubscribeBidiSelection?.();
-    unsubscribeBidiSelection = null;
-
-    const observeSelection = (host as SuperDoc | null | undefined)?.ui?.selection?.observe;
-    if (typeof observeSelection === 'function') {
+  [superdoc, () => props.readoutsVisible],
+  ([host, visible], [previousHost, wasVisible]) => {
+    stopBidiReadout();
+    if (host !== previousHost) paragraphBidi.value = null;
+    if (!visible) return;
+    bindBidiDocument();
+    const selection = host?.ui?.selection;
+    if (typeof selection?.observe === 'function') {
       try {
-        unsubscribeBidiSelection =
-          observeSelection.call((host as SuperDoc).ui.selection, scheduleBidiRefresh) ?? null;
+        unsubscribeBidiSelection = selection.observe(scheduleBidiRefresh) ?? null;
       } catch {
         unsubscribeBidiSelection = null;
       }
     }
-    // נפילה בטוחה למנוע בלי `observe`, וגם קריאה ראשונה שאינה תלויה ב„ירה
-    // מיד" של המנוע.
-    scheduleBidiRefresh();
+    // observe() may schedule its initial snapshot; the immediate reveal read
+    // clears that timer, so opening the ribbon requests one current reading.
+    if (wasVisible === false) void refreshParagraphBidi();
+    else scheduleBidiRefresh();
   },
-  { immediate: true }
+  { immediate: true, flush: 'sync' },
 );
 
 onUnmounted(() => {
-  unsubscribeBidiSelection?.();
-  clearTimeout(bidiSelectionTimer);
+  bidiDisposed = true;
+  stopBidiReadout();
 });
 
 /**
@@ -1163,12 +1157,18 @@ const dirLtrActive = computed(() =>
  * המיידי הזה `ui.selection.observe` שמעל לא היה יורה כלל.
  */
 async function runDirectionRtl(): Promise<void> {
+  const host = superdoc.value;
+  const doc = host?.activeEditor?.doc;
   await dirRtlCmd.run();
-  await refreshParagraphBidi();
+  invalidateDocumentReads(doc);
+  if (superdoc.value === host) await refreshParagraphBidi();
 }
 async function runDirectionLtr(): Promise<void> {
+  const host = superdoc.value;
+  const doc = host?.activeEditor?.doc;
   await dirLtrCmd.run();
-  await refreshParagraphBidi();
+  invalidateDocumentReads(doc);
+  if (superdoc.value === host) await refreshParagraphBidi();
 }
 
 const capabilities = shallowRef<DocCapabilityReport | null>(null);

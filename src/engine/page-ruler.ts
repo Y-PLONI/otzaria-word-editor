@@ -84,6 +84,7 @@
 import type { CommandOutcome } from './command-adapter';
 import {
   applyParagraphIndentation,
+  sameParagraphTarget,
   type ParagraphIndentReading,
   type ParagraphIndents,
   type ParagraphFormatTarget,
@@ -749,7 +750,7 @@ export function watchAllPageContentRects(options: AllPageContentRectsWatchOption
 export interface PageTextRun {
   /** `nodeValue` הגולמי של הצומת. */
   text: string;
-  /** מלבן אחד לכל שורה חזותית שהצומת פרוס עליה (עטיפה), בסדר מסמך. */
+  /** מלבן אחד לכל שורה חזותית, בסדר מסמך; מציין פסקה ריקה יכול להיות ברוחב אפס. */
   rects: readonly RawTextRect[];
   /**
    * מאיזה צד "אחרי התו האחרון" של **הריצה הזאת עצמה** — ראו `directionFromText`
@@ -828,7 +829,8 @@ export function measurePageTextRuns(pageEl: HTMLElement, reference: HTMLElement)
     const list = range.getClientRects();
     for (let i = 0; i < list.length; i++) {
       const r = list[i]!;
-      if (!(r.width > 0) || !(r.height > 0)) continue;
+      if (!isGlyphOrEmptyRunRect(node as Text, r)) continue;
+      // ¶ uses the real empty-paragraph anchor; only pointer snapping needs a wider hit box.
       rects.push({
         leftPx: r.left - referenceBox.left,
         topPx: r.top - referenceBox.top,
@@ -887,6 +889,21 @@ export function measureAllPageTextRuns(
     out.push(...measurePageTextRuns(el, reference));
   }
   return out;
+}
+
+/** Pages intersecting the viewport plus a short scroll-ahead margin. */
+export function visiblePageElements(host: HTMLElement, marginPx = 400): readonly HTMLElement[] {
+  const viewport = host.getBoundingClientRect();
+  return Array.from(host.querySelectorAll(`[${PAGE_INDEX_ATTRIBUTE}]`))
+    .filter((node): node is HTMLElement => node instanceof HTMLElement)
+    .map((el) => ({ el, index: Number(el.getAttribute(PAGE_INDEX_ATTRIBUTE)) }))
+    .filter(({ el, index }) => {
+      if (!Number.isInteger(index)) return false;
+      const box = el.getBoundingClientRect();
+      return box.bottom >= viewport.top - marginPx && box.top <= viewport.bottom + marginPx;
+    })
+    .sort((a, b) => a.index - b.index)
+    .map(({ el }) => el);
 }
 
 /**
@@ -1260,7 +1277,7 @@ export function measureAllPageTextSegments(
 /* גליפים של עמוד — להצמדת לחיצה (engine/pointer-snap.ts)             */
 /* ------------------------------------------------------------------ */
 
-/** מלבני הגליפים ביחס לפינת העמוד ברגע המדידה, והעמוד עצמו — עכשיו. */
+/** מלבני הגליפים ויעדי הסמן בשורות ריקות ביחס לפינת העמוד ברגע המדידה, והעמוד עצמו — עכשיו. */
 export interface PageGlyphMeasure {
   readonly rects: readonly RawTextRect[];
   /** מלבן העמוד ברגע הקריאה, בקואורדינטות חלון — גלילה מזיזה אותו. */
@@ -1315,21 +1332,36 @@ function glyphRects(node: Text, range: Range): DOMRectList | null {
   return typeof range.getClientRects === 'function' ? range.getClientRects() : null;
 }
 
+/** The engine's empty-paragraph NBSP keeps its caret height even when shell.css collapses its width. */
+function isGlyphOrEmptyRunRect(node: Text, rect: DOMRect): boolean {
+  if (!(rect.height > 0)) return false;
+  if (rect.width > 0) return true;
+  return rect.width === 0 && node.data === '\u00a0' && node.parentElement?.classList.contains('superdoc-empty-run') === true;
+}
+
 function pushGlyphRects(node: Text, out: RawTextRect[], origin: DOMRect, range: Range): boolean {
   const list = glyphRects(node, range);
   if (!list) return false;
   let found = false;
   for (let i = 0; i < list.length; i++) {
     const rect = list[i]!;
-    if (!(rect.width > 0) || !(rect.height > 0)) continue;
+    if (!isGlyphOrEmptyRunRect(node, rect)) continue;
     found = true;
-    out.push({ leftPx: rect.left - origin.left, topPx: rect.top - origin.top, widthPx: rect.width, heightPx: rect.height });
+    // A positive hit box centered on the caret lets pointer-snap keep the empty line.
+    // This changes measurement only: widening the actual span would move the caret or inflate line height.
+    const widthPx = rect.width === 0 ? 1 : rect.width;
+    out.push({
+      leftPx: rect.left - origin.left - (widthPx - rect.width) / 2,
+      topPx: rect.top - origin.top,
+      widthPx,
+      heightPx: rect.height,
+    });
   }
   return found;
 }
 
 /**
- * האם יש תחת האלמנט טקסט מצויר — כלומר זה היקף שאפשר להצמיד אליו. יוצאת
+ * האם יש תחת האלמנט טקסט מצויר או מציין שורה ריקה — היקף שאפשר להצמיד אליו. יוצאת
  * במלבן הראשון ואינה אוספת כלום: התשובה היא כן/לא.
  */
 function hasGlyphs(element: Element, range: Range): boolean {
@@ -1340,7 +1372,7 @@ function hasGlyphs(element: Element, range: Range): boolean {
     if (!list) continue;
     for (let i = 0; i < list.length; i++) {
       const rect = list[i]!;
-      if (rect.width > 0 && rect.height > 0) return true;
+      if (isGlyphOrEmptyRunRect(node as Text, rect)) return true;
     }
   }
   return false;
@@ -1507,11 +1539,7 @@ export interface RulerModelSource {
 
 export interface RulerModel {
   getState(): RulerReading | null;
-  /**
-   * הסרגל מוצג או מוסתר. סרגל מוסתר אינו קורא כלום — `doc.get()` סורק את
-   * המסמך כולו, וקריאה שלו על כל תזוזת סמן כשאיש אינו רואה את התוצאה היא
-   * עבודה מיותרת על מסמך של שמונים עמודים.
-   */
+  /** סרגל מוסתר אינו קורא את המסמך ואינו מחזיק תזמון רענון. */
   setEnabled(enabled: boolean): void;
   noteSelectionChanged(): void;
   noteDocumentChanged(): void;
@@ -1526,10 +1554,7 @@ export interface RulerModel {
  */
 export const RULER_SELECTION_DEBOUNCE_MS = 150;
 
-/**
- * השהיית הקריאה אחרי שינוי במסמך. ארוכה יותר — הקלדה אינה משנה כניסות,
- * והקריאה סורקת את המסמך כולו.
- */
+/** שינוי תוכן בלבד יכול להמתין; אירוע בחירה באותו רצף מקצר את ההשהיה. */
 export const RULER_DOCUMENT_DEBOUNCE_MS = 500;
 
 /**
@@ -1544,8 +1569,10 @@ export function createRulerModel(source: RulerModelSource): RulerModel {
   let enabled = false;
   let disposed = false;
   let generation = 0;
-  let selectionTimer: ReturnType<typeof setTimeout> | undefined;
-  let documentTimer: ReturnType<typeof setTimeout> | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let scheduledDelay = Infinity;
+  let running = false;
+  let rerun = false;
 
   /**
    * כל שדה של הדף נבדק, ולא רק אלה שהסרגל האופקי צריך.
@@ -1574,7 +1601,7 @@ export function createRulerModel(source: RulerModelSource): RulerModel {
       a.indents?.firstLineTwips === b.indents?.firstLineTwips &&
       a.indents?.hangingTwips === b.indents?.hangingTwips &&
       a.indents?.bidi === b.indents?.bidi &&
-      a.target?.nodeId === b.target?.nodeId
+      sameParagraphTarget(a.target, b.target)
     );
   }
 
@@ -1584,77 +1611,96 @@ export function createRulerModel(source: RulerModelSource): RulerModel {
     source.onChange(next);
   }
 
-  async function read(): Promise<void> {
-    const mine = ++generation;
-    if (!enabled) {
-      publish(null);
-      return;
-    }
-
-    let page: PageMarginsState | null = null;
-    try {
-      page = await source.readPage();
-    } catch {
-      page = null;
-    }
-    if (disposed || mine !== generation) return;
-    if (!page) {
-      publish(null);
-      return;
-    }
-
-    let paragraph: ParagraphIndentReading | null = null;
-    try {
-      paragraph = await source.readIndents();
-    } catch {
-      paragraph = null;
-    }
-    if (disposed || mine !== generation) return;
-
-    publish({
-      page,
-      indents: paragraph?.indents ?? null,
-      target: paragraph?.target ?? null,
-    });
+  function cancelTimer(): void {
+    clearTimeout(timer);
+    timer = undefined;
+    scheduledDelay = Infinity;
   }
 
-  function schedule(which: 'selection' | 'document'): void {
+  async function read(): Promise<void> {
     if (disposed || !enabled) return;
-    if (which === 'selection') {
-      clearTimeout(selectionTimer);
-      selectionTimer = setTimeout(() => void read(), RULER_SELECTION_DEBOUNCE_MS);
+    if (running) {
+      rerun = true;
       return;
     }
-    clearTimeout(documentTimer);
-    documentTimer = setTimeout(() => void read(), RULER_DOCUMENT_DEBOUNCE_MS);
+    running = true;
+    const mine = generation;
+    try {
+      let page: PageMarginsState | null = null;
+      try {
+        page = await source.readPage();
+      } catch {
+        // A failed background read clears the readout without reporting a command error.
+      }
+      if (disposed || mine !== generation) return;
+      if (!page) {
+        publish(null);
+        return;
+      }
+
+      let paragraph: ParagraphIndentReading | null = null;
+      try {
+        paragraph = await source.readIndents();
+      } catch {
+        // The page is still useful when there is no readable paragraph selection.
+      }
+      if (disposed || mine !== generation) return;
+      publish({ page, indents: paragraph?.indents ?? null, target: paragraph?.target ?? null });
+    } finally {
+      running = false;
+      // Keep at most one read in flight and one request to read the latest state.
+      if (rerun && timer === undefined && !disposed && enabled) {
+        rerun = false;
+        void read();
+      }
+    }
+  }
+
+  function schedule(delay: number): void {
+    if (disposed || !enabled) return;
+    // Invalidate immediately, not only when the debounce expires.
+    generation += 1;
+    rerun = false;
+    scheduledDelay = Math.min(scheduledDelay, delay);
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      timer = undefined;
+      scheduledDelay = Infinity;
+      void read();
+    }, scheduledDelay);
+  }
+
+  function refreshNow(): void {
+    generation += 1;
+    cancelTimer();
+    void read();
   }
 
   return {
     getState: () => reading,
 
     setEnabled(next) {
-      if (enabled === next) return;
+      if (disposed || enabled === next) return;
       enabled = next;
+      generation += 1;
+      cancelTimer();
+      rerun = false;
       if (!enabled) {
-        // הדור עולה כדי שקריאה שבאוויר לא תדווח אחרי הכיבוי.
-        generation += 1;
-        clearTimeout(selectionTimer);
-        clearTimeout(documentTimer);
         publish(null);
         return;
       }
       void read();
     },
 
-    noteSelectionChanged: () => schedule('selection'),
-    noteDocumentChanged: () => schedule('document'),
-    refreshNow: () => void read(),
+    noteSelectionChanged: () => schedule(RULER_SELECTION_DEBOUNCE_MS),
+    noteDocumentChanged: () => schedule(RULER_DOCUMENT_DEBOUNCE_MS),
+    refreshNow,
 
     dispose() {
       disposed = true;
       generation += 1;
-      clearTimeout(selectionTimer);
-      clearTimeout(documentTimer);
+      rerun = false;
+      cancelTimer();
     },
   };
 }

@@ -52,14 +52,16 @@ export function onInterrupt(cleanup) {
   interruptCleanups.add(cleanup);
   return () => interruptCleanups.delete(cleanup);
 }
-process.once('SIGINT', () => {
-  for (const cleanup of interruptCleanups) {
-    try {
-      cleanup();
-    } catch {
-      /* ניקוי שנכשל אינו סיבה לא להריץ את השאר */
-    }
-  }
+process.once('SIGINT', async () => {
+  // Native CDP probes must undo their injected listeners before disconnecting.
+  // Existing synchronous browser cleanups still run immediately. A dead host
+  // cannot hold Ctrl+C indefinitely, so asynchronous cleanup gets five seconds.
+  let timeout;
+  await Promise.race([
+    Promise.allSettled([...interruptCleanups].map(async cleanup => cleanup())),
+    new Promise(resolve => { timeout = setTimeout(resolve, 5000); }),
+  ]);
+  clearTimeout(timeout);
   process.exit(130);
 });
 
@@ -113,7 +115,7 @@ function sweepStaleProfiles() {
   }
 }
 
-async function connect(url) {
+export async function connect(url) {
   const socket = new WebSocket(url);
   await new Promise((resolve, reject) => {
     socket.addEventListener('open', resolve, { once: true });
@@ -147,7 +149,8 @@ async function connect(url) {
       });
       const result = response.result?.result;
       if (response.result?.exceptionDetails) {
-        throw new Error(`CDP: הביטוי זרק — ${result?.description ?? 'ללא פירוט'}`);
+        const details = response.result.exceptionDetails;
+        throw new Error(`CDP: הביטוי זרק — ${details.exception?.description ?? result?.description ?? details.text ?? 'ללא פירוט'}`);
       }
       return result?.value;
     },
@@ -180,7 +183,7 @@ async function portHolder(port) {
   return null;
 }
 
-export async function openPage(fileUrl, { port = Number(process.env.CDP_PORT ?? 9333), label = '0' } = {}) {
+export async function openPage(fileUrl, { port = Number(process.env.CDP_PORT ?? 9333), label = '0', waitForLoad = true } = {}) {
   const profile = join(tmpdir(), `${PROFILE_PREFIX}${label}`);
   discard(profile);
   sweepStaleProfiles();
@@ -365,7 +368,7 @@ export async function openPage(fileUrl, { port = Number(process.env.CDP_PORT ?? 
      * צריכה להיכשל אצל מי שמודד, עם מה שהוא מודד, ולא כאן — דף שאינו מגיע
      * ל-`complete` הוא עדיין דף שאפשר לשאול אותו שאלות.
      */
-    for (let waited = 0; waited < 15_000; waited += 100) {
+    for (let waited = 0; waitForLoad && waited < 15_000; waited += 100) {
       if ((await cdp.evaluate('document.readyState')) === 'complete') break;
       await sleep(100);
     }

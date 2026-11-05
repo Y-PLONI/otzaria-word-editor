@@ -420,7 +420,7 @@ describe('הטיוטה', () => {
     const written = lastEntry(h.persisted)?.draft;
 
     h.dirty = false;
-    await h.keeper.noteSaved(8_192);
+    await h.keeper.noteSaved(h.keeper.captureSave(), { sourceSize: 8_192 });
 
     expect(h.removals, 'אין קריאת מחיקה — ההעברה היא החלפת מצביע').toBe(0);
     expect(lastEntry(h.persisted)?.draft).toBeNull();
@@ -434,7 +434,7 @@ describe('הטיוטה', () => {
     await h.tick(DRAFT_DELAY_MS);
 
     h.dirty = false;
-    await h.keeper.noteSaved(8_192);
+    await h.keeper.noteSaved(h.keeper.captureSave(), { sourceSize: 8_192 });
     const previous = lastEntry(h.persisted)?.previousDraft?.path;
 
     h.dirty = true;
@@ -452,7 +452,7 @@ describe('הטיוטה', () => {
       h.keeper.noteChange();
       await h.tick(DRAFT_DELAY_MS);
       h.dirty = false;
-      await h.keeper.noteSaved(8_192);
+      await h.keeper.noteSaved(h.keeper.captureSave(), { sourceSize: 8_192 });
     }
 
     expect(h.draftPaths).toEqual([DRAFT_PATHS[0], DRAFT_PATHS[1], DRAFT_PATHS[0]]);
@@ -476,10 +476,10 @@ describe('הטיוטה', () => {
     h.keeper.noteChange();
     await h.tick(DRAFT_DELAY_MS);
     h.dirty = false;
-    await h.keeper.noteSaved(8_192);
+    await h.keeper.noteSaved(h.keeper.captureSave(), { sourceSize: 8_192 });
     const previous = lastEntry(h.persisted)?.previousDraft;
 
-    await h.keeper.noteSaved(9_000);
+    await h.keeper.noteSaved(h.keeper.captureSave(), { sourceSize: 9_000 });
 
     expect(lastEntry(h.persisted)?.previousDraft).toEqual(previous);
   });
@@ -491,7 +491,7 @@ describe('הטיוטה', () => {
     h.keeper.noteChange();
     await h.tick(DRAFT_DELAY_MS);
     h.dirty = false;
-    await h.keeper.noteSaved(8_192);
+    await h.keeper.noteSaved(h.keeper.captureSave(), { sourceSize: 8_192 });
 
     h.keeper.setDocument(null, { keepDraft: true });
 
@@ -566,7 +566,7 @@ describe('הטיוטה', () => {
     await h.tick(DRAFT_DELAY_MS);
 
     h.dirty = false;
-    await h.keeper.noteSaved(1_500);
+    await h.keeper.noteSaved(h.keeper.captureSave(), { sourceSize: 1_500 });
 
     h.dirty = true;
     h.keeper.noteChange();
@@ -584,7 +584,7 @@ describe('הטיוטה', () => {
     h.keeper.noteChange();
 
     const writing = h.tick(DRAFT_DELAY_MS);
-    const saving = h.keeper.noteSaved(2_000);
+    const saving = h.keeper.noteSaved(h.keeper.captureSave(), { sourceSize: 2_000 });
     await Promise.all([writing, saving]);
     await h.tick(0);
 
@@ -652,6 +652,126 @@ describe('הסמן מול החלפת מסמך', () => {
     await h.tick(0);
 
     expect(lastEntry(h.persisted)?.caret).toEqual(anchor);
+  });
+});
+
+describe('נקודת השמירה', () => {
+  it('נקודה של זוכר אחר אינה משנה את היעד או צורכת את הנקודה אצל בעליה', async () => {
+    const a = harness(); const b = harness();
+    a.keeper.setDocument({ token: 'a', name: 'A.docx', writable: true });
+    b.keeper.setDocument({ token: 'b', name: 'B.docx', writable: true });
+    a.dirty = true; a.keeper.noteChange();
+    await a.tick(DRAFT_DELAY_MS);
+    const point = a.keeper.captureSave();
+    const before = b.keeper.state;
+
+    await b.keeper.noteSaved(point, {
+      sourceSize: 999,
+      document: { token: 'foreign', name: 'Foreign.docx', writable: true },
+    });
+    expect(b.keeper.state).toBe(before);
+    a.dirty = false;
+    await a.keeper.noteSaved(point, { sourceSize: 100 });
+    expect(activeEntry(a.keeper.state)?.draft).toBeNull();
+    expect(activeEntry(a.keeper.state)?.previousDraft).not.toBeNull();
+  });
+
+  it('נקודה ממסמך קודם אינה משנה את היעד, הגודל או תזמון הטיוטה החדשה', async () => {
+    const h = harness();
+    h.keeper.setDocument({ token: 'a', name: 'A.docx', writable: true }, { sourceSize: 100 });
+    h.dirty = true; h.keeper.noteChange();
+    const point = h.keeper.captureSave();
+    h.keeper.setDocument({ token: 'b', name: 'B.docx', writable: true }, { sourceSize: 200 });
+    h.keeper.noteChange();
+
+    await h.keeper.noteSaved(point, {
+      sourceSize: 999,
+      document: { token: 'stale', name: 'Stale.docx', writable: true },
+    });
+    await h.tick(DRAFT_DELAY_MS);
+    expect(activeEntry(h.keeper.state)?.document?.token).toBe('b');
+    expect(activeEntry(h.keeper.state)?.draft).toMatchObject({ documentToken: 'b', sourceSize: 200 });
+    expect(h.keeper.hasUnwrittenWork).toBe(false);
+  });
+
+  it.each(['replace', 'dispose'] as const)('נקודה שהתיישנה בזמן ההמתנה בתור אינה נרשמת (%s)', async (operation) => {
+    const h = harness();
+    h.keeper.setDocument({ token: 'a', name: 'A.docx', writable: true });
+    await h.tick(0);
+    const point = h.keeper.captureSave();
+    let release!: (value: CaretAnchor | null) => void;
+    const pending = new Promise<CaretAnchor | null>(resolve => { release = resolve; });
+    h.deps.readCaret = vi.fn().mockReturnValueOnce(pending).mockResolvedValue(null);
+    h.keeper.noteCaretMoved();
+    await h.tick(PERSIST_DELAY_MS);
+    expect(h.deps.readCaret).toHaveBeenCalledOnce();
+    const saved = h.keeper.noteSaved(point, {
+      sourceSize: 999,
+      document: { token: 'stale', name: 'Stale.docx', writable: true },
+    });
+    if (operation === 'replace') {
+      h.keeper.setDocument({ token: 'b', name: 'B.docx', writable: true });
+    } else h.keeper.dispose();
+    const expected = h.keeper.state;
+    release(null); await saved; await h.tick(0);
+    expect(h.keeper.state).toBe(expected);
+    expect(h.persisted.every(state => activeEntry(state)?.document?.token !== 'stale')).toBe(true);
+  });
+
+  it('נקודה שכבר נרשמה אינה ניתנת להפעלה חוזרת אחרי עריכה חדשה', async () => {
+    const h = harness();
+    h.keeper.setDocument({ token: 'a', name: 'A.docx', writable: true });
+    const point = h.keeper.captureSave();
+    await h.keeper.noteSaved(point, { sourceSize: 100 });
+    h.dirty = true; h.keeper.noteChange();
+    await h.tick(DRAFT_DELAY_MS);
+    const before = h.keeper.state;
+    await h.keeper.noteSaved(point, {
+      sourceSize: 999,
+      document: { token: 'replayed', name: 'Replayed.docx', writable: true },
+    });
+    expect(h.keeper.state).toBe(before);
+    expect(activeEntry(h.keeper.state)?.draft).toMatchObject({ documentToken: 'a', sourceSize: 100 });
+  });
+
+  it('כשל טיוטה מאוחרת שומר את העותק הקודם ומאפשר ניסיון חוזר', async () => {
+    const h = harness();
+    h.keeper.setDocument({ token: 'a', name: 'A.docx', writable: true });
+    h.dirty = true; h.keeper.noteChange();
+    await h.tick(DRAFT_DELAY_MS);
+    const oldDraft = activeEntry(h.keeper.state)?.draft;
+    const point = h.keeper.captureSave();
+    h.keeper.noteChange();
+    await h.keeper.noteSaved(point, { sourceSize: 200 });
+    h.writeResult = 'failed';
+    await h.tick(DRAFT_DELAY_MS);
+
+    expect(activeEntry(h.keeper.state)?.previousDraft).toEqual(oldDraft);
+    expect(activeEntry(h.keeper.state)?.draft).toBeNull();
+    expect(h.keeper.hasUnwrittenWork).toBe(true);
+    h.writeResult = 'written';
+    await h.keeper.flush();
+    expect(activeEntry(h.keeper.state)?.previousDraft).toEqual(oldDraft);
+    expect(activeEntry(h.keeper.state)?.draft).toMatchObject({ documentToken: 'a', sourceSize: 200 });
+    expect(h.keeper.hasUnwrittenWork).toBe(false);
+    expect(h.draftPaths).toEqual([DRAFT_PATHS[0], DRAFT_PATHS[1]]);
+  });
+
+  it('שמירת snapshot ישן אינה מאריכה את תקרת ההמתנה של הקלדה רצופה', async () => {
+    const h = harness();
+    h.dirty = true; h.keeper.noteChange();
+    const point = h.keeper.captureSave();
+    for (let edit = 0; edit < 6; edit += 1) {
+      await h.tick(9_000);
+      h.keeper.noteChange();
+    }
+    await h.tick(1_000);
+    await h.keeper.noteSaved(point, { sourceSize: 100 });
+    await h.tick(DRAFT_MAX_WAIT_MS - 55_000 - 1);
+    expect(h.exports).toBe(0);
+    await h.tick(1);
+    expect(h.exports).toBe(1);
+    expect(activeEntry(h.keeper.state)?.draft).not.toBeNull();
   });
 });
 
@@ -1030,7 +1150,7 @@ describe('checkpoint', () => {
 
     // המסמך נשמר, ולכן אין טיוטה.
     h.dirty = false;
-    await h.keeper.noteSaved(1_000);
+    await h.keeper.noteSaved(h.keeper.captureSave(), { sourceSize: 1_000 });
 
     // לפני הכלי — עותק.
     await h.keeper.checkpoint();
@@ -1042,7 +1162,7 @@ describe('checkpoint', () => {
     h.keeper.noteChange();
     await h.tick(DRAFT_DELAY_MS);
     h.dirty = false;
-    await h.keeper.noteSaved(2_000);
+    await h.keeper.noteSaved(h.keeper.captureSave(), { sourceSize: 2_000 });
 
     // וזו הנקודה: אחרי שהתוצאה הרעה בקובץ, עדיין יש לאן לחזור.
     expect(lastEntry(h.persisted)?.previousDraft?.path).toBe(DRAFT_PATHS[1]);

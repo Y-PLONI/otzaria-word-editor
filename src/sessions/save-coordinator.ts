@@ -58,8 +58,8 @@ export interface SaveCommitOutput {
 }
 
 export interface SaveCoordinatorDeps {
-  /** מייצא את המסמך הפעיל. */
-  exportDocument: () => Promise<Blob>;
+  /** מייצא snapshot של המסמך; האות מבטל עיבוד ששייך ל-epoch שהתיישן. */
+  exportDocument: (signal?: AbortSignal) => Promise<Blob>;
   beginWrite: (expectedSize: number) => Promise<SaveTicket>;
   upload: (uploadUrl: string, blob: Blob) => Promise<void>;
   commit: (input: SaveCommitInput) => Promise<SaveCommitOutput>;
@@ -233,6 +233,8 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
   let inFlightEpoch = -1;
   /** הבקשות של השרשרת שרצה. ראו `saveLoop`. */
   let inFlightRequests: ChainRequests | null = null;
+  /** Only the export/package phase is cancellable; upload tickets keep their existing cleanup. */
+  let exportController: AbortController | null = null;
   let autosaveTimer: ReturnType<typeof setTimeout> | undefined;
   /**
    * מתג המשתמש. `reset` (מעבר מסמך) אינו מאפס אותו בכוונה: זו העדפה של מי
@@ -390,6 +392,8 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
     forceSaveAs: boolean,
     suggestedName?: string,
   ): Promise<SaveOutcome> {
+    // A queued save may belong to an epoch replaced before its predecessor ended.
+    if (disposed || mine !== epoch) return { status: 'stale' };
     // מצולם לפני הייצוא: מה שהמשתמש יקליד מכאן והלאה אינו בקובץ הזה.
     const exportedRevision = dirtyRevision;
     // וגם היעד מצולם. קריאה שלו בזמן ה-commit הייתה נותנת את היעד של המסמך
@@ -406,13 +410,19 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
     };
 
     let blob: Blob;
+    const controller = new AbortController();
+    exportController = controller;
     try {
       stage('exporting');
-      blob = await deps.exportDocument();
+      if (mine !== epoch) return { status: 'stale' };
+      blob = await deps.exportDocument(controller.signal);
     } catch (error) {
       if (mine !== epoch) return { status: 'stale' };
       return fail(error, 'ייצוא המסמך נכשל');
+    } finally {
+      if (exportController === controller) exportController = null;
     }
+    if (mine !== epoch) return { status: 'stale' };
 
     let ticket: SaveTicket;
     try {
@@ -670,6 +680,8 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
       restoreRelease = null;
       // כל סבב שבאוויר שייך למסמך הקודם, ומכאן והלאה התוצאה שלו נזרקת.
       epoch += 1;
+      exportController?.abort();
+      exportController = null;
       dirtyRevision = 0;
       savedRevision = 0;
       state = 'idle';
@@ -686,6 +698,8 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
       // כמו מעבר מסמך: כל סבב שבאוויר הופך ל-stale, ולכן לא יעשה commit ולא
       // יאמץ יעד אחרי הפירוק.
       epoch += 1;
+      exportController?.abort();
+      exportController = null;
       holdCount = 0;
       restoreRelease = null;
       cancelAutosave();

@@ -45,15 +45,14 @@
  * ## שני מקורות
  *
  *   1. **מה לצייר** — `blocks` (`FormattingMarksBlock[]`, engine/formatting-marks.ts),
- *      נקרא מ-`doc.blocks.list({includeText:true})` — Document API ציבורי,
- *      לא selector. `null`/ריק כשאין Document API — אין מה לצייר.
- *   2. **איפה לצייר** — `runs` (`PageTextRun[]`, engine/page-ruler.ts,
- *      `watchAllPageTextRuns`), נמדד כאן פנימית מ-`host`/`viewport-source` —
- *      אותם props בדיוק כמו הסרגל וגבולות העמוד. העיגון (`data-page-index`)
- *      יושב אך ורק ב-page-ruler.ts, לא כאן.
+ *      נקרא מ-`doc.blocks.list` לפי מזהי סופי הפסקאות שבחלון. `null`/ריק
+ *      כשאין Document API — אין מה לצייר.
+ *   2. **איפה לצייר** — חלון של סופי פסקאות מזוהים, דרך
+ *      `watchFormattingMarksWindow`. עיגוני העמוד נשארים ב-page-ruler.ts,
+ *      ועיגוני זהות הפסקה ב-painted-lines.ts. כאן אין selectors של מנוע.
  *
- * ההרכבה (התאמת-הרצף בין הבלוקים לריצות) היא engine/formatting-marks-layer.ts —
- * כאן רק ציור.
+ * ההרכבה לפי מזהה היא engine/formatting-marks-layer.ts. בלי מיפוי תקין
+ * נשמר fallback עם שני הרצפים המלאים; אין סינון של צד אחד בלבד.
  *
  * ## `visible` עוצר את המדידה, לא רק את הציור
  *
@@ -71,16 +70,15 @@
  * תקין (נמדד: `active` מתהפך כראוי), ולכן אין צורך ברענון מפורש על הפקודה
  * עצמה; App.vue קורא `formattingMarksModel.setEnabled(active)` על כל שינוי.
  * עריכת טקסט/reflow מגיעים דרך `noteDocumentChanged()` (App.vue, `onUpdate`)
- * וגם דרך `watchAllPageTextRuns` עצמו (גלילה, שינוי גודל, `viewport.observe`).
+ * וגם דרך `watchFormattingMarksWindow` (גלילה, שינוי גודל, `viewport.observe`).
  */
-import { computed, shallowRef, watch } from 'vue';
+import { computed, onBeforeUnmount, shallowRef, watch } from 'vue';
 import {
-  watchAllPageTextRuns,
-  type PageTextRun,
   type PageRectWatch,
   type ViewportSource,
 } from '../../engine/page-ruler';
-import { buildPilcrowMarks, type FormattingMarksBlock, type PilcrowMark } from '../../engine/formatting-marks-layer';
+import { watchFormattingMarksWindow, type FormattingMarksWindow } from '../../engine/formatting-marks-viewport';
+import { buildMappedPilcrowMarks, buildPilcrowMarks, type FormattingMarksBlock, type PilcrowMark } from '../../engine/formatting-marks-layer';
 
 const props = withDefaults(
   defineProps<{
@@ -101,8 +99,13 @@ const props = withDefaults(
   },
 );
 
+const emit = defineEmits<{
+  /** null means the complete legacy sequence, never a one-sided window. */
+  (e: 'scope-change', nodeIds: readonly string[] | null): void;
+}>();
+
 const rootRef = shallowRef<HTMLElement | null>(null);
-const runs = shallowRef<readonly PageTextRun[]>([]);
+const painted = shallowRef<FormattingMarksWindow | null>(null);
 
 let watcher: PageRectWatch | null = null;
 
@@ -112,17 +115,18 @@ function stopWatching(): void {
 }
 
 watch(
-  [() => props.host, rootRef, () => props.visible],
+  [() => props.host, rootRef, () => props.visible, () => props.viewportSource],
   ([host, root, visible]) => {
     stopWatching();
-    runs.value = [];
-    if (!host || !root || !visible) return;
-    watcher = watchAllPageTextRuns({
+    painted.value = null;
+    if (!host || !root || !visible) { emit('scope-change', []); return; }
+    watcher = watchFormattingMarksWindow({
       host,
       reference: root,
       ui: props.viewportSource,
       onChange: (next) => {
-        runs.value = next;
+        painted.value = next;
+        emit('scope-change', next.mode === 'mapped' ? [...new Set(next.endings.map((end) => end.nodeId))] : null);
       },
     });
   },
@@ -133,10 +137,13 @@ watch(
 // את הגיאומטריה גם אם אף אחד מגלילה/שינוי-גודל/`viewport.observe` לא ירה:
 // רשת ביטחון לאותה מלכודת שכבר נתפסה ב-DocumentRuler/PageBorderOverlay.
 watch(() => props.blocks, () => watcher?.measure());
+onBeforeUnmount(stopWatching);
 
 const marks = computed<PilcrowMark[]>(() => {
-  if (!props.visible || !props.blocks) return [];
-  return buildPilcrowMarks(props.blocks, runs.value);
+  if (!props.visible || !props.blocks || !painted.value) return [];
+  return painted.value.mode === 'mapped'
+    ? buildMappedPilcrowMarks(props.blocks, painted.value.endings)
+    : buildPilcrowMarks(props.blocks, painted.value.runs);
 });
 </script>
 

@@ -38,6 +38,7 @@ import {
   type SuperdocLike,
   type SuperdocMacroHost,
 } from 'superdoc-macros';
+import type { CommandAdapter } from './command-adapter';
 
 // הודעות הריצה של החבילה בעברית — פעם אחת, בטעינת המודול. ברירת המחדל שלה
 // (מ-0.3.0) אנגלית, וכשל מאקרו מגיע לשורת המצב כמו כל כשל אחר בממשק — קול
@@ -157,6 +158,8 @@ function seedDefaultSnippet(kit: MacroKit, persistMarker = true): void {
 }
 
 export interface InstallMacrosOptions {
+  /** Shared dispatcher: even a replay already in flight must respect an opening lock. */
+  commands?: Pick<CommandAdapter, 'run'>;
   /**
    * דיאלוג האישור להקלטה לא-שלמה (פעולה שאינה ניתנת להקלטה — למשל הכנסת
    * תמונה, שה-payload שלה הוא הקובץ כולו). בלעדיו — או כשהוא מחזיר false —
@@ -194,6 +197,8 @@ export function installMacros(
     superdoc: editor.superdoc as unknown as SuperdocLike,
     container,
   });
+  const commands = options.commands;
+  if (commands) host.commands.execute = (id, payload) => commands.run(id, payload);
 
   const allowScripts = scriptsEnabled();
 

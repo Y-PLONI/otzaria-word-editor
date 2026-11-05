@@ -314,10 +314,10 @@ describe('createRulerModel', () => {
       onChange: (next: RulerReading | null) => readings.push(next),
       ...overrides,
     };
-    return { adapter: createRulerModel(source), readings, source, readPage };
+    return { adapter: createRulerModel(source), readings, source, readPage, readIndents };
   }
 
-  it('סרגל מוסתר אינו קורא כלום — `doc.get` סורק את המסמך כולו', async () => {
+  it('סרגל מוסתר אינו קורא כלום', async () => {
     const { adapter, source } = model();
     adapter.noteSelectionChanged();
     await vi.advanceTimersByTimeAsync(1000);
@@ -436,6 +436,97 @@ describe('createRulerModel', () => {
 
     expect(readings).toEqual([]);
   });
+  it('coalesces document and selection events into one trailing read', async () => {
+    const { adapter, readPage, readIndents } = model();
+    adapter.setEnabled(true);
+    await vi.advanceTimersByTimeAsync(0);
+    readPage.mockClear();
+    readIndents.mockClear();
+    adapter.noteDocumentChanged();
+    adapter.noteSelectionChanged();
+    adapter.noteDocumentChanged();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(readPage).toHaveBeenCalledTimes(1);
+    expect(readIndents).toHaveBeenCalledTimes(1);
+    adapter.dispose();
+  });
+
+  it('refreshNow cancels the pending debounced read', async () => {
+    const { adapter, readPage } = model();
+    adapter.setEnabled(true);
+    await vi.advanceTimersByTimeAsync(0);
+    readPage.mockClear();
+    adapter.noteDocumentChanged();
+    adapter.noteSelectionChanged();
+    adapter.refreshNow();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(readPage).toHaveBeenCalledTimes(1);
+    adapter.dispose();
+  });
+
+  it('rejects an old response immediately after a new event, before its debounce expires', async () => {
+    let resolve!: (value: ParagraphIndentReading) => void;
+    const { adapter, readings } = model({
+      readIndents: vi.fn(() => new Promise<ParagraphIndentReading>((done) => { resolve = done; })),
+    });
+    adapter.setEnabled(true);
+    await vi.advanceTimersByTimeAsync(0);
+    adapter.noteSelectionChanged();
+    resolve(PARAGRAPH);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readings).toEqual([]);
+    adapter.dispose();
+  });
+
+  it('serializes refreshes while an old read is pending and reads the latest state once', async () => {
+    let resolve!: (value: PageMarginsState) => void;
+    const readPage = vi.fn(async () => PAGE).mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    const { adapter, readings } = model({ readPage });
+    adapter.setEnabled(true);
+    adapter.noteDocumentChanged();
+    adapter.noteSelectionChanged();
+    await vi.advanceTimersByTimeAsync(1000);
+    adapter.refreshNow();
+    adapter.refreshNow();
+    expect(readPage).toHaveBeenCalledTimes(1);
+    resolve(PAGE);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readPage).toHaveBeenCalledTimes(2);
+    expect(readings).toHaveLength(1);
+    adapter.dispose();
+  });
+
+  it('publishes a changed write target even when the story has an identical paragraph ID and indents', async () => {
+    let paragraph = PARAGRAPH;
+    const { adapter, readings } = model({ readIndents: vi.fn(async () => paragraph) });
+    adapter.setEnabled(true);
+    await vi.advanceTimersByTimeAsync(0);
+    paragraph = { ...PARAGRAPH, target: { ...PARAGRAPH.target, story: { kind: 'story', storyType: 'headerFooterPart', refId: 'header1' } } };
+    adapter.refreshNow();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readings).toHaveLength(2);
+    expect(adapter.getState()?.target).toEqual(paragraph.target);
+    paragraph = { ...paragraph, target: { ...paragraph.target, nodeType: 'heading' } };
+    adapter.refreshNow();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readings).toHaveLength(3);
+    adapter.dispose();
+  });
+
+  it('does not dispatch a queued refresh after disabling the ruler', async () => {
+    let resolve!: (value: PageMarginsState) => void;
+    const readPage = vi.fn(() => new Promise<PageMarginsState>((done) => { resolve = done; }));
+    const { adapter, readings } = model({ readPage });
+    adapter.setEnabled(true);
+    adapter.refreshNow();
+    adapter.setEnabled(false);
+    resolve(PAGE);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(readPage).toHaveBeenCalledTimes(1);
+    expect(readings).toEqual([]);
+    adapter.dispose();
+  });
+
 });
 
 /* ------------------------------------------------------------------ */
@@ -745,7 +836,8 @@ describe('measurePageGlyphs', () => {
       const node = this.startContainer;
       const element = node.nodeType === Node.TEXT_NODE ? node.parentElement : (node as Element);
       const rect = element ? element.getBoundingClientRect() : null;
-      const list = rect && rect.width > 0 && rect.height > 0 ? [rect] : [];
+      // Chrome returns a positive-height, zero-width range for the collapsed NBSP.
+      const list = rect && rect.width >= 0 && rect.height > 0 ? [rect] : [];
       return Object.assign(list, { item: (i: number) => list[i] ?? null }) as unknown as DOMRectList;
     };
     restoreRects = () => {
@@ -802,6 +894,41 @@ describe('measurePageGlyphs', () => {
     const measured = measurePageGlyphs(host, runs[2]!.firstChild, 680, 360);
     expect(measured!.rects).toHaveLength(1);
     expect(measured!.rects[0]).toMatchObject({ leftPx: 573 });
+  });
+
+  it.each([196, 447, 698])('keeps a collapsed empty table paragraph at its own caret position (%s)', (left) => {
+    const { host, page: pageEl, lines, runs } = page();
+    const cell = document.createElement('div');
+    cell.append(lines[0]!.parentElement!, lines[1]!.parentElement!);
+    pageEl.appendChild(cell);
+    runs[1]!.classList.add('superdoc-empty-run');
+    withRect(runs[1]!, left, 0, 332, 17);
+    // Double spacing must not replace the measured glyph/caret height with the line height.
+    withRect(lines[1]!, 196, 600, 332, 36.8);
+
+    const expected = [{ leftPx: left - 100 - 0.5, topPx: 132, widthPx: 1, heightPx: 17 }];
+    expect(measurePageGlyphs(host, lines[1]!, 400, 350)!.rects).toEqual(expected);
+    expect(measurePageGlyphs(host, runs[1]!.firstChild, left, 340)!.rects).toEqual(expected);
+    // Page-wide snapping/dragging must keep the empty line alongside ordinary text.
+    expect(measurePageGlyphs(host, pageEl, 400, 350)!.rects).toEqual([
+      { leftPx: 573, topPx: 151, widthPx: 25, heightPx: 17 },
+      { leftPx: 440, topPx: 114, widthPx: 158, heightPx: 17 },
+      ...expected,
+    ]);
+  });
+
+  it.each([
+    { text: '\u00a0', className: '', height: 17 },
+    { text: '\u200b', className: 'superdoc-empty-run', height: 17 },
+    { text: '\u00a0', className: 'superdoc-empty-run', height: 0 },
+  ])('does not invent targets for other zero-width/hidden text ($text, $className, $height)', ({ text, className, height }) => {
+    const { host, page: pageEl, lines, runs } = page();
+    runs[1]!.textContent = text;
+    runs[1]!.className = className;
+    withRect(runs[1]!, 698, 0, 332, height);
+
+    expect(measurePageGlyphs(host, lines[1]!, 400, 340)).toBeNull();
+    expect(measurePageGlyphs(host, pageEl, 400, 340)!.rects.map((rect) => rect.topPx)).toEqual([114, 151]);
   });
 
   it('מטרה על העמוד — כל השורות', () => {

@@ -15,6 +15,8 @@ import { mount, type VueWrapper } from '@vue/test-utils';
 import { nextTick, shallowRef } from 'vue';
 import type { SuperDoc } from 'superdoc';
 import { ACTIVE_SUPERDOC } from '../../src/engine/document-api';
+import { FONT_PROBE_PRIORITIES } from '../../src/composables/keys';
+import { withCurrent } from '../../src/composables/picker-value';
 import RibbonCombo from '../../src/ui/ribbon/common/RibbonCombo.vue';
 import type { ComboOption } from '../../src/ui/ribbon/font-search';
 
@@ -925,5 +927,84 @@ describe('גופן שאינו מותקן', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].classes()).toContain('unavailable');
     expect(rows[0].attributes('data-tip-title')).toBeTruthy();
+  });
+});
+
+describe('background font verification', () => {
+  it.each([true, false])('refreshes an open current-only family when availability becomes %s', async (available) => {
+    const current = 'CurrentOnlyFont';
+    const pending = withCurrent([], current, { preview: true, available: () => undefined });
+    const verified = withCurrent([], current, { preview: true, available: () => available });
+    // היצרן משמיט pending כשהתשובה ידועה; הוא אינו כותב pending:false.
+    expect(verified[0]).not.toHaveProperty('pending');
+    await combo.setProps({ modelValue: current, options: [...pending, ...OPTIONS], sample: 'טקסט לדוגמה' });
+    await open();
+    const before = optionValues();
+    const row = () => combo.find(`[data-value="${current}"]`);
+    expect(row().attributes('data-availability')).toBe('pending');
+    await combo.setProps({ options: [...OPTIONS, ...verified] });
+    expect(optionValues()).toEqual(before);
+    expect(row().attributes('data-availability')).toBe(available ? 'measured' : 'missing');
+    expect(row().classes()).not.toContain('pending');
+    expect(row().classes().includes('unavailable')).toBe(!available);
+    expect(combo.find('.ribbon-combo-sample').text()).toBe('טקסט לדוגמה');
+    if (available) {
+      expect(row().attributes('style')).toContain(`font-family: ${current}`);
+    } else {
+      expect(row().attributes('style')).toBeUndefined();
+      expect(row().attributes('aria-label')).toContain('הגופן אינו מותקן');
+    }
+    combo.unmount();
+  });
+
+  it('updates pending rows and samples while preserving the open list order', async () => {
+    const pending: ComboOption = { value: 'New font', label: 'New font', hebrew: true, pending: true, measured: false };
+    await combo.setProps({ modelValue: 'New font', options: [pending, ...OPTIONS], sample: 'טקסט לדוגמה' });
+    await open();
+    const before = optionValues();
+    const row = () => combo.find('[data-value="New font"]');
+    expect(row().attributes('data-availability')).toBe('pending');
+    expect(row().classes()).not.toContain('unavailable');
+    expect(row().attributes('style')).toBeUndefined();
+    expect(combo.find('.ribbon-combo-sample').text()).toBe('הדגימה טרם נבדקה');
+    await combo.setProps({ options: [...OPTIONS, { ...pending, group: 'עברית', pending: false, measured: true, preview: '"New font"' }] });
+    expect(optionValues()).toEqual(before);
+    expect(row().attributes('data-availability')).toBe('measured');
+    expect(row().attributes('style')).toContain('font-family: "New font"');
+    expect(combo.find('.ribbon-combo-sample').text()).toBe('טקסט לדוגמה');
+    expect(combo.find('.ribbon-combo-sample').attributes('style')).toContain('font-family: "New font"');
+    combo.unmount();
+  });
+
+  it('prioritizes selected and visible families, and disconnects on close', async () => {
+    const prioritize = vi.fn();
+    const disconnect = vi.fn();
+    const observe = vi.fn();
+    let notify!: IntersectionObserverCallback;
+    vi.stubGlobal('IntersectionObserver', class {
+      constructor(callback: IntersectionObserverCallback) { notify = callback; }
+      disconnect = disconnect;
+      observe = observe;
+    });
+    const picker = mount(RibbonCombo, {
+      props: { modelValue: 'B', options: ['A', 'B', 'C'].map((value) => ({ value, label: value, pending: true })) },
+      global: { provide: { [FONT_PROBE_PRIORITIES as symbol]: prioritize } },
+    });
+    try {
+      expect(prioritize).toHaveBeenCalledWith(['B']);
+      await picker.find('input').trigger('focus');
+      await nextTick();
+      expect(observe).toHaveBeenCalledTimes(3);
+      notify([
+        { isIntersecting: true, target: picker.find('[data-value="C"]').element },
+        { isIntersecting: false, target: picker.find('[data-value="A"]').element },
+      ] as unknown as IntersectionObserverEntry[], {} as IntersectionObserver);
+      expect(prioritize).toHaveBeenLastCalledWith(['C']);
+      await picker.find('input').trigger('keydown', { key: 'Escape' });
+      expect(disconnect).toHaveBeenCalledTimes(1);
+    } finally {
+      picker.unmount();
+      vi.unstubAllGlobals();
+    }
   });
 });

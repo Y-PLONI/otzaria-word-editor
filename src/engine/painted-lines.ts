@@ -391,6 +391,35 @@ export function findFragment(host: HTMLElement, blockId: string, caretOffset: nu
   return best ? { fragment: best, caretPm } : null;
 }
 
+/**
+ * שורה של נקודה זכורה אחרי גלילה או פריסה מחדש. זהות השורה מכריעה בתפר
+ * בין שורות; אם היא הוחלפה, אפשר לשחזר רק כשנותרה מועמדת יחידה להיסט.
+ * ה-y הישן אינו ראיה למיקום אחרי שינוי פריסה.
+ */
+export function findPaintedLine(
+  host: HTMLElement,
+  blockId: string,
+  pm: number,
+  preferred: Element,
+): { fragment: HTMLElement; line: Element; caretPm: number } | null {
+  const contains = (line: Element): boolean => pm >= attr(line, 'data-pm-start') && pm <= attr(line, 'data-pm-end');
+  const parent = preferred.parentElement;
+  if (parent && parent.matches(FRAGMENT_SELECTOR) && host.contains(preferred)
+    && blockIdOf(parent) === blockId && contains(preferred)) {
+    return { fragment: parent, line: preferred, caretPm: pm };
+  }
+  let found: { fragment: HTMLElement; line: Element; caretPm: number } | null = null;
+  for (const fragment of Array.from(host.querySelectorAll<HTMLElement>(FRAGMENT_SELECTOR))) {
+    if (blockIdOf(fragment) !== blockId) continue;
+    for (const line of linesOf(fragment)) {
+      if (!contains(line)) continue;
+      if (found) return null;
+      found = { fragment, line, caretPm: pm };
+    }
+  }
+  return found;
+}
+
 const isPage = (el: Element | null): boolean => !!el && el.classList.contains(PAGE_CLASS);
 
 /**
@@ -480,7 +509,7 @@ export function lineAt(lines: readonly Element[], caretPm: number, caretY: numbe
   return best;
 }
 
-/** מלבן הבחירה ש-`getSelectionAnchorRect()` מחזיר, בקואורדינטות המסך. */
+/** מלבן בקואורדינטות המסך. */
 export interface SelectionRect {
   left: number;
   right: number;
@@ -637,6 +666,40 @@ export function paintedFirstBlockId(host: ParentNode | null | undefined): string
     firstId = id || null;
   }
   return firstId;
+}
+
+export interface PaintedParagraphEnd {
+  blockId: string;
+  element: HTMLElement;
+  continuesFromPrevious: boolean;
+}
+
+/**
+ * Identity-mapped body endings on one painted page, for ¶. Only the final
+ * fragment can contain a paragraph mark. Header/footer stories are excluded;
+ * tables have no top-level paragraph identity and are left to the engine.
+ * null means the expected mapping is unavailable, so callers must retain the
+ * complete legacy sequence instead of matching a filtered DOM to all blocks.
+ */
+export function paintedParagraphEnds(page: HTMLElement): readonly PaintedParagraphEnd[] | null {
+  const fragments = Array.from(page.querySelectorAll('.superdoc-fragment[data-layout-story="body"]'));
+  if (fragments.length === 0) return null;
+  const result: PaintedParagraphEnd[] = [];
+  for (const fragment of fragments) {
+    const blockId = fragment.getAttribute('data-source-node-id');
+    if (!blockId) {
+      // Verified on 2.23: table fragments carry boundaries but no paragraph ID.
+      // A paragraph without identity is an unavailable map, not an empty page.
+      if (fragment.hasAttribute('data-table-boundaries')) continue;
+      return null;
+    }
+    if (flag(fragment, CONTINUES_ON_NEXT)) continue;
+    const start = attr(fragment, 'data-pm-start');
+    const end = attr(fragment, 'data-pm-end');
+    if (!(fragment instanceof HTMLElement) || !Number.isFinite(start) || !Number.isFinite(end) || end < start) return null;
+    result.push({ blockId, element: fragment, continuesFromPrevious: flag(fragment, CONTINUES_FROM_PREV) });
+  }
+  return result;
 }
 
 /* ------------------------------------------------------------------ */

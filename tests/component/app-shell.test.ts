@@ -28,23 +28,39 @@
  * `openDocument`, מטפל המקלדת, ו-`host/files`/`otzaria-client` (הם ניגשים
  * ל-`window.Otzaria` שאינו קיים ומחזירים כשל בשקט — בדיוק כמו בדפדפן).
  */
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { mount } from '@vue/test-utils';
+import { nextTick, shallowRef } from 'vue';
 import {
   autoUnmount,
   buttonByTip,
   createCommandDouble,
   createSuperdocDouble,
-  settle,
+  settle as settleShell,
   type CommandDouble,
   type SuperdocDouble,
 } from './harness';
+
 import type { SaveCoordinatorDeps, SaveSnapshot } from '../../src/sessions/save-coordinator';
 import { COMPLEX_SCRIPT_BOLD_NOTICE } from '../../src/engine/docx-preflight';
 import { NO_VBA, type DocumentVba } from '../../src/engine/vba-import';
 import { COMMAND_REPORTER, STATUS_NOTIFIER, type CommandReporter } from '../../src/composables/keys';
 import type { DocMetrics } from '../../src/engine/doc-metrics';
+import type { MacrosHandle } from '../../src/engine/macros';
 import FindReplaceDialog from '../../src/ui/panels/FindReplaceDialog.vue';
+import TitleBar from '../../src/ui/shell/TitleBar.vue';
+import Ribbon from '../../src/ui/ribbon/Ribbon.vue';
+import DocumentRuler from '../../src/ui/shell/DocumentRuler.vue';
+import VerticalRuler from '../../src/ui/shell/VerticalRuler.vue';
+
+/** A requested panel now crosses an actual import() boundary. Wait for that
+ * boundary as well as Vue's queue; a fixed number of microtasks cannot load it.
+ * Closed panels are never imported just to make the shell tests synchronous. */
+async function settle(turns?: number): Promise<void> {
+  await settleShell(turns);
+  await vi.dynamicImportSettled();
+  await settleShell(2);
+}
 
 /**
  * המצב המשותף לכפילים. `vi.hoisted` נדרש: מפעלי ה-`vi.mock` מורמים אל מעל
@@ -58,6 +74,10 @@ const stub = vi.hoisted(() => ({
   markDirtyCalls: 0,
   /** האם „החלף הכל” של הכפיל זורק. */
   replaceAllFails: false,
+  replaces: [] as string[],
+  replaceAlls: [] as string[],
+  searchAvailable: false,
+  macros: null as MacrosHandle | null,
   /** כמה פעמים המעטפת סימנה „שוחזר מטיוטה” — ולא „נערך”. */
   markRestoredCalls: 0,
   /** הקפאות ושחרורים של פעולה כבדה, לפי הסדר. */
@@ -109,6 +129,7 @@ const stub = vi.hoisted(() => ({
   workspaceWrites: [] as Array<{ path: string; bytes: Uint8Array }>,
   /** רשומת הגיבוי של „לא לשמור” שה-storage מחזיר בעלייה. */
   storedDiscardBackups: null as unknown,
+  discardHistoryFailure: false,
   /** כל מה שנכתב לרשומת הגיבוי, לפי הסדר. */
   persistedDiscardBackups: [] as unknown[],
   /** כמה פעמים נמחקה הטיוטה. */
@@ -129,6 +150,8 @@ const stub = vi.hoisted(() => ({
    * „פתוח לקריאה”, וסדר העדיפות ביניהם הוא מה שנמדד למטה.
    */
   preflight: { notice: null as string | null, vba: null as DocumentVba | null },
+  preflightGate: null as Promise<void> | null,
+  preflightSignals: [] as AbortSignal[],
   /** כמה מנועים שוחררו כדי לעמוד בתקרת הזיכרון (`swap.close`). */
   closedEngines: 0,
   /**
@@ -183,6 +206,8 @@ vi.mock('../../src/sessions/editor-swap', async (importOriginal) => ({
       get isOpening() {
         return false;
       },
+      // These tests hold preflight before swap.open creates an engine candidate.
+      cancel: () => false,
       open: async (source?: unknown) => {
         stub.openSources.push(source);
         if (stub.openFailures > 0) {
@@ -221,12 +246,16 @@ vi.mock('../../src/sessions/editor-swap', async (importOriginal) => ({
  */
 vi.mock('../../src/engine/docx-preflight', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../src/engine/docx-preflight')>()),
-  preflightSource: async (source: unknown) => ({
-    source,
-    fontTable: null,
-    vba: stub.preflight.vba ?? { hasMacroPart: false, modules: [], autoRun: [], warnings: [], status: null, unreadable: false },
-    notice: stub.preflight.notice,
-  }),
+  preflightSource: async (source: unknown, options?: { signal?: AbortSignal }) => {
+    if (options?.signal) stub.preflightSignals.push(options.signal);
+    if (stub.preflightGate) await stub.preflightGate;
+    return {
+      source,
+      fontTable: null,
+      vba: stub.preflight.vba ?? { hasMacroPart: false, modules: [], autoRun: [], warnings: [], status: null, unreadable: false },
+      notice: stub.preflight.notice,
+    };
+  },
 }));
 
 vi.mock('../../src/host/files', async (importOriginal) => ({
@@ -303,7 +332,8 @@ vi.mock('../../src/sessions/save-coordinator', async (importOriginal) => ({
         stub.saveNowCalls.push(options);
         // הכפיל מודיע על השמירה כמו הקואורדינטור האמיתי. בלי זה כל בדיקה
         // כאן הייתה מודדת מעטפת שאינה שומעת שמירה אוטומטית בכלל.
-        stub.saveDeps?.onSaved?.({ token: 'token-1', name: 'מסמך.docx', size: 4_096 });
+        await deps.exportDocument();
+        deps.onSaved?.({ token: 'token-1', name: 'מסמך.docx', size: 4_096 });
         return { status: 'saved', token: 'token-1', name: 'מסמך.docx', size: 4_096 };
       },
       dispose: () => {},
@@ -316,23 +346,36 @@ vi.mock('../../src/engine/command-adapter', async (importOriginal) => ({
   createCommandAdapter: () => (stub.adapterFactory ? stub.adapterFactory() : stub.adapter),
 }));
 
+vi.mock('../../src/engine/macros', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/engine/macros')>();
+  return {
+    ...actual,
+    installMacros: (...args: Parameters<typeof actual.installMacros>) => stub.macros ?? actual.installMacros(...args),
+  };
+});
+
 vi.mock('../../src/engine/search', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/engine/search')>();
+  const state = () => ({ ...actual.idleSearchState(), available: stub.searchAvailable, canReplace: stub.searchAvailable });
   return {
     ...actual,
     createSearchAdapter: () => ({
-      getState: () => actual.idleSearchState(),
+      getState: state,
       subscribe: () => () => {},
       open: () => {
         stub.searchOpens += 1;
-        return { ok: true, snapshot: actual.idleSearchState() };
+        return { ok: true, snapshot: state() };
       },
       close: () => {},
       clear: () => {},
       find: () => ({ ok: true, snapshot: actual.idleSearchState() }),
       findDebounced: () => {},
-      replace: async () => ({ ok: true, snapshot: actual.idleSearchState() }),
-      replaceAll: async () => {
+      replace: async (replacement: string) => {
+        stub.replaces.push(replacement);
+        return { ok: true, snapshot: actual.idleSearchState() };
+      },
+      replaceAll: async (replacement: string) => {
+        stub.replaceAlls.push(replacement);
         if (stub.replaceAllFails) throw new Error('ההחלפה נכשלה');
         return { ok: true, snapshot: actual.idleSearchState() };
       },
@@ -433,7 +476,10 @@ vi.mock('../../src/host/settings', () => ({
   saveRecentDocuments: async (list: unknown) => {
     stub.persistedRecents.push(list);
   },
-  loadDiscardBackups: async () => stub.storedDiscardBackups,
+  loadDiscardBackups: async () => {
+    if (stub.discardHistoryFailure) throw new Error('offline');
+    return stub.storedDiscardBackups;
+  },
   saveDiscardBackups: async (list: unknown) => {
     stub.persistedDiscardBackups.push(list);
   },
@@ -513,6 +559,10 @@ beforeEach(() => {
   for (const path of Object.keys(stub.draftsByPath)) delete stub.draftsByPath[path];
   stub.draftRemovals = 0;
   stub.replaceAllFails = false;
+  stub.replaces.length = 0;
+  stub.replaceAlls.length = 0;
+  stub.searchAvailable = false;
+  stub.macros = null;
   stub.markRestoredCalls = 0;
   stub.holdCalls = 0;
   stub.releaseCalls = 0;
@@ -520,6 +570,7 @@ beforeEach(() => {
   stub.storedRecents = null;
   stub.persistedRecents.length = 0;
   stub.storedDiscardBackups = null;
+  stub.discardHistoryFailure = false;
   stub.persistedDiscardBackups.length = 0;
   stub.workspaceWrites.length = 0;
   stub.caretApplied.length = 0;
@@ -527,6 +578,8 @@ beforeEach(() => {
   stub.forgotLastDocument = false;
   stub.openFailures = 0;
   stub.preflight = { notice: null, vba: null };
+  stub.preflightGate = null;
+  stub.preflightSignals.length = 0;
   stub.closedEngines = 0;
   stub.markDirtyCalls = 0;
   stub.resetCalls = 0;
@@ -541,10 +594,17 @@ beforeEach(() => {
   stub.metricsFactory = null;
   stub.disposeOrder.length = 0;
   stub.refreshCalls.length = 0;
-  stub.adapter = createCommandDouble();
+  stub.adapter = createCommandDouble({ states: { 'document-mode': { value: 'editing' } } });
   stub.superdoc = createSuperdocDouble();
+  const adapter = stub.adapter as CommandDouble;
+  stub.superdoc.host.setDocumentMode = vi.fn(mode => adapter.setState('document-mode', { value: mode }));
+  // גם שמירה מזויפת עוברת בייצוא, כדי לתפוס את נקודת השחזור לפני commit.
+  Object.assign(stub.superdoc.host, {
+    export: async () => new Blob([new Uint8Array(4_096)]),
+  });
   stub.session = {
     superdoc: stub.superdoc.host,
+    container: document.createElement('div'),
     // ה-controller המזויף: רק מה שהמעטפת נוגעת בו ישירות. שאר הקוראים
     // (`observeZoom`, `observeFontOptions`, `observeStyleGallery`) מתוכננים
     // ליפול לברירת מחדל כשה-handle חסר, וזה מה שנמדד בבדיקות שלהם.
@@ -585,6 +645,17 @@ describe('הרכבת המעטפת', () => {
     expect(stub.superdoc?.ops(), 'הפתיחה ביקשה מהמנוע להחזיר את הסמן').toContain('focus');
   });
 
+  it('Escape סוגר את מנהל הקיצורים גם לפני שהחלון נטען', async () => {
+    const wrapper = await mountShell();
+    wrapper.findComponent({ name: 'Ribbon' }).vm.$emit('shortcuts-manage');
+    await nextTick();
+    expect(wrapper.find('.panel-load-state').exists()).toBe(true);
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', key: 'Escape', bubbles: true }));
+    await settle();
+    expect(wrapper.find('.panel-load-state').exists()).toBe(false);
+    expect(wrapper.find('.shortmgr-dialog').exists()).toBe(false);
+  });
+
   it('פתיחה אינה חוטפת את הפוקוס משדה שמקלידים בו', async () => {
     // הפתיחה אסינכרונית ויכולה להימשך שניות. אם בינתיים המשתמש הקליד בשורת
     // החיפוש (שאינה מודאלית ונשארת פתוחה מעל המסמך), קפיצה לגוף המסמך הייתה
@@ -604,6 +675,394 @@ describe('הרכבת המעטפת', () => {
     expect(stub.resetCalls, 'המסמך החדש אכן נפתח').toBe(2);
     // הדיאלוג מחזיר את המיקוד למי שפתח אותו — שדה החיפוש — ולא לגוף המסמך.
     expect(stub.superdoc?.ops(), 'הפוקוס נשאר בשדה החיפוש').not.toContain('focus');
+  });
+});
+
+describe('נעילת העורך הקודם בזמן פתיחה', () => {
+  function containers(): { previous: HTMLElement; next: HTMLElement } {
+    const previous = document.createElement('div'), next = document.createElement('div');
+    previous.inert = next.inert = false;
+    const base = stub.session as object;
+    let opened = 0;
+    stub.sessionFactory = () => ({ ...base, container: opened++ === 0 ? previous : next });
+    return { previous, next };
+  }
+
+  function holdPreflight(): () => void {
+    let release!: () => void;
+    stub.preflightGate = new Promise<void>(resolve => { release = resolve; });
+    return release;
+  }
+
+  async function beginBlank(beforeChoose?: () => void): Promise<AbortSignal> {
+    const count = stub.preflightSignals.length;
+    pressCtrl('KeyN');
+    await settle(8);
+    const card = document.querySelector<HTMLButtonElement>('.tpl-card');
+    expect(card, 'בורר המסמך הריק פתוח').not.toBeNull();
+    beforeChoose?.();
+    card!.click();
+    await vi.waitFor(() => expect(stub.preflightSignals).toHaveLength(count + 1));
+    return stub.preflightSignals[count]!;
+  }
+
+  it('locks the real Ribbon, title actions, and rulers while preflight waits, then restores them on Skip', async () => {
+    const { previous } = containers();
+    const wrapper = await mountShell();
+    const adapter = stub.adapter as CommandDouble;
+    adapter.setState('document-mode', { value: 'suggesting' });
+    const release = holdPreflight();
+    const titleBar = wrapper.getComponent(TitleBar);
+    const originalTitle = titleBar.props('title');
+    try {
+      expect((buttonByTip(wrapper, 'מודגש').element as HTMLButtonElement).disabled).toBe(false);
+      await beginBlank();
+      expect(previous.inert).toBe(true);
+      expect(adapter.getState('document-mode').value).toBe('viewing');
+      expect(wrapper.get('.shell-top').attributes('inert')).toBeDefined();
+      expect(wrapper.getComponent(DocumentRuler).props('editable')).toBe(false);
+      expect(wrapper.getComponent(VerticalRuler).props('editable')).toBe(false);
+      const bold = buttonByTip(wrapper, 'מודגש');
+      expect((bold.element as HTMLButtonElement).disabled).toBe(true);
+      adapter.reset();
+      await bold.trigger('click');
+      titleBar.vm.$emit('undo');
+      titleBar.vm.$emit('redo');
+      titleBar.vm.$emit('update-title', 'must not rename the old document');
+      await settle(8);
+      expect(adapter.calls).toEqual([]);
+      expect(titleBar.props('title')).toBe(originalTitle);
+      const skip = wrapper.get('.status-load__skip');
+      expect(skip.element.closest('[inert]'), 'Skip remains outside the locked shell').toBeNull();
+      await skip.trigger('click');
+      expect(adapter.getState('document-mode').value).toBe('suggesting');
+      expect(previous.inert).toBe(false);
+      expect(wrapper.getComponent(DocumentRuler).props('editable')).toBe(true);
+      expect(wrapper.getComponent(VerticalRuler).props('editable')).toBe(true);
+      expect((bold.element as HTMLButtonElement).disabled).toBe(false);
+      await bold.trigger('click');
+      expect(adapter.calls.map(call => call.id)).toEqual(['bold']);
+    } finally { release(); await settle(12); }
+  });
+
+  it('Developer replay and record cannot bypass the opening lock through emitted events', async () => {
+    containers();
+    const replayLast = vi.fn(), toggleRecording = vi.fn();
+    stub.macros = {
+      kit: {
+        listRecordings: () => [], listSnippets: () => [], listScripts: () => [], listTools: () => [], registerTool: () => {},
+      } as unknown as MacrosHandle['kit'],
+      recording: shallowRef(false), scriptsEnabled: false, replayLast, toggleRecording, dispose: () => {},
+    };
+    const wrapper = await mountShell();
+    const ribbon = wrapper.getComponent(Ribbon);
+    ribbon.vm.$emit('update:activeTab', 'developer');
+    await settle(8);
+    const play = wrapper.findAll('button').find(button => button.text() === 'נגן אחרון')!;
+    expect(play.exists()).toBe(true);
+    expect((play.element as HTMLButtonElement).disabled).toBe(false);
+    const release = holdPreflight();
+    try {
+      await beginBlank();
+      expect((play.element as HTMLButtonElement).disabled).toBe(true);
+      ribbon.vm.$emit('macro-play');
+      ribbon.vm.$emit('macro-record');
+      await settle(8);
+      expect(replayLast).not.toHaveBeenCalled();
+      expect(toggleRecording).not.toHaveBeenCalled();
+      await wrapper.get('.status-load__skip').trigger('click');
+      expect((play.element as HTMLButtonElement).disabled).toBe(false);
+      await play.trigger('click');
+      expect(replayLast).toHaveBeenCalledOnce();
+    } finally { release(); await settle(12); }
+  });
+
+  it('keeps suggesting→protected→Skip→unprotect state and will not open across a pending protection write', async () => {
+    containers();
+    const adapter = stub.adapter as CommandDouble;
+    adapter.setState('document-mode', { value: 'suggesting' });
+    const run = adapter.run.bind(adapter);
+    adapter.run = async (id, payload) => {
+      const outcome = await run(id, payload);
+      if (outcome.ok && id === 'document-mode') adapter.setState(id, { value: (payload as { mode: string }).mode });
+      return outcome;
+    };
+    let enforced = false;
+    let finishSet!: () => void;
+    const setReply = new Promise<void>(resolve => { finishSet = resolve; });
+    const setProtection = vi.fn(async () => { await setReply; enforced = true; return { success: true }; });
+    Object.assign(stub.superdoc!.host.activeEditor!.doc!.protection, {
+      get: () => ({ editingRestriction: { mode: enforced ? 'readOnly' : 'none', enforced } }),
+      setEditingRestriction: setProtection,
+      clearEditingRestriction: () => { enforced = false; return { success: true }; },
+    });
+    const wrapper = await mountShell();
+    wrapper.getComponent(Ribbon).vm.$emit('update:activeTab', 'review');
+    await settle(8);
+    const protect = wrapper.findAll('button').find(button => button.text() === 'הגבל עריכה')!;
+    let release = (): void => {};
+    try {
+      await protect.trigger('click');
+      await protect.trigger('click');
+      expect(setProtection).toHaveBeenCalledOnce();
+      const openings = stub.preflightSignals.length;
+      pressCtrl('KeyN');
+      await settle(8);
+      expect(document.querySelector('.tpl-card'), 'opening waits for XML + runtime protection to settle').toBeNull();
+      expect(stub.preflightSignals).toHaveLength(openings);
+      expect(adapter.getState('document-mode').value).toBe('suggesting');
+      finishSet();
+      await settle(12);
+      expect(adapter.getState('document-mode').value).toBe('viewing');
+      expect(enforced).toBe(true);
+
+      release = holdPreflight();
+      await beginBlank();
+      expect(adapter.getState('document-mode').value).toBe('viewing');
+      await wrapper.get('.status-load__skip').trigger('click');
+      await settle(12);
+      expect(adapter.getState('document-mode').value).toBe('viewing');
+      expect(enforced).toBe(true);
+      await protect.trigger('click');
+      await settle(12);
+      expect(enforced).toBe(false);
+      expect(adapter.getState('document-mode').value).toBe('suggesting');
+    } finally { finishSet(); release(); await settle(12); }
+  });
+
+  it('an open nonmodal Replace panel preserves its query but cannot write until Skip', async () => {
+    containers();
+    stub.searchAvailable = true;
+    const wrapper = await mountShell();
+    wrapper.getComponent(Ribbon).vm.$emit('open-replace');
+    await settle(8);
+    const panel = wrapper.getComponent(FindReplaceDialog);
+    const query = panel.get<HTMLInputElement>('#fr-search-input');
+    await query.setValue('original query');
+    await panel.get('#fr-replace-input').setValue('replacement');
+    query.element.focus();
+    const release = holdPreflight();
+    try {
+      await beginBlank();
+      expect(panel.props('readOnly')).toBe(true);
+      const replaceButtons = panel.findAll('.fr-btn').filter(button => button.text().startsWith('החלף'));
+      expect(replaceButtons).toHaveLength(2);
+      expect(replaceButtons.every(button => (button.element as HTMLButtonElement).disabled)).toBe(true);
+      await panel.get('#fr-replace-input').trigger('keydown', { key: 'Enter' });
+      panel.vm.$emit('replace', 'must not write');
+      panel.vm.$emit('replace-all', 'must not write');
+      await settle(8);
+      expect(stub.replaces).toEqual([]);
+      expect(stub.replaceAlls).toEqual([]);
+      expect(stub.holdCalls).toBe(0);
+      query.element.focus();
+      await wrapper.get('.status-load__skip').trigger('click');
+      expect(document.activeElement).toBe(query.element);
+      expect(query.element.value).toBe('original query');
+      expect(panel.get<HTMLInputElement>('#fr-replace-input').element.value).toBe('replacement');
+      expect(panel.props('readOnly')).toBe(false);
+      await replaceButtons[0]!.trigger('click');
+      expect(stub.replaces).toEqual(['replacement']);
+    } finally { release(); await settle(12); }
+  });
+
+  it('נועלת רק את הישן ומשאירה את המועמד החדש זמין למיקוד', async () => {
+    const { previous, next } = containers();
+    const candidate = createSuperdocDouble();
+    candidate.host.setDocumentMode = vi.fn();
+    const base = stub.session as object;
+    let opens = 0, adapters = 0;
+    stub.sessionFactory = () => ++opens === 1
+      ? { ...base, container: previous }
+      : { ...base, superdoc: candidate.host, container: next };
+    stub.adapterFactory = () => ++adapters === 1 ? stub.adapter
+      : createCommandDouble({ states: { 'document-mode': { value: 'editing' } } });
+    const wrapper = await mountShell();
+    const release = holdPreflight();
+    try {
+      await beginBlank();
+      expect(previous.inert).toBe(true);
+      expect(next.inert).toBe(false);
+      expect((wrapper.get('.editor-stack').element as HTMLElement).inert).not.toBe(true);
+      stub.superdoc!.reset();
+      stub.caretApplied.length = 0;
+      release();
+      await vi.waitFor(() => expect(stub.resetCalls).toBe(2));
+      await settle(12);
+      expect(previous.inert).toBe(false);
+      expect(next.inert).toBe(false);
+      expect(candidate.ops()).toContain('focus');
+      expect(candidate.host.setDocumentMode).not.toHaveBeenCalled();
+      expect(stub.caretApplied, 'the unleased candidate also gets a usable initial caret').toEqual([{
+        kind: 'selection',
+        start: { kind: 'text', blockId: 'block-1', offset: 0 },
+        end: { kind: 'text', blockId: 'block-1', offset: 0 },
+      }]);
+    } finally { release(); }
+  });
+
+  it.each([false, true])('ביטול משחזר מיד את inert המקורי (%s), לפני תשובה מאוחרת', async (prior) => {
+    const { previous } = containers();
+    const wrapper = await mountShell();
+    const release = holdPreflight();
+    try {
+      // Ctrl+N itself is blocked on an inert editor. Preserve a lock that was
+      // applied after the chooser opened, before the opening attempt starts.
+      const signal = await beginBlank(() => { previous.inert = prior; });
+      expect(previous.inert).toBe(true);
+      await wrapper.get('.status-load__skip').trigger('click');
+      expect(signal.aborted).toBe(true);
+      expect(previous.inert).toBe(prior);
+      release();
+      await settle(12);
+      expect(stub.openSources).toHaveLength(1);
+      expect(previous.inert).toBe(prior);
+    } finally { release(); }
+  });
+
+  it('כשל פתיחת המנוע משחרר את העורך שנשאר', async () => {
+    const { previous } = containers();
+    const wrapper = await mountShell();
+    const release = holdPreflight();
+    const adapter = stub.adapter as CommandDouble;
+    adapter.setState('document-mode', { value: 'suggesting' });
+    try {
+      stub.openFailures = 1;
+      await beginBlank();
+      expect(previous.inert).toBe(true);
+      (document.activeElement as HTMLElement | null)?.blur();
+      stub.superdoc!.reset();
+      release();
+      await vi.waitFor(() => expect(wrapper.find('.word-statusbar').text()).toContain('פתיחת המסמך נכשלה'));
+      await settle(8);
+      expect(previous.inert).toBe(false);
+      expect(adapter.getState('document-mode').value).toBe('suggesting');
+      expect(stub.superdoc!.ops()).toContain('focus');
+      expect(stub.resetCalls).toBe(1);
+    } finally { release(); }
+  });
+
+  it('קיצורים מה-body וכיוון פסקה אינם משנים את הישן, בעוד F6 ו־Escape נשארים זמינים', async () => {
+    const { previous } = containers();
+    const wrapper = await mountShell();
+    const release = holdPreflight();
+    const adapter = stub.adapter as CommandDouble;
+    const key = (init: KeyboardEventInit, target: HTMLElement = document.body): KeyboardEvent => {
+      const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
+      target.dispatchEvent(event);
+      return event;
+    };
+    const direction = (): void => {
+      const init = { code: 'ShiftLeft', key: 'Shift', ctrlKey: true, bubbles: true, cancelable: true };
+      document.body.dispatchEvent(new KeyboardEvent('keydown', init));
+      document.body.dispatchEvent(new KeyboardEvent('keyup', init));
+    };
+    try {
+      await beginBlank();
+      adapter.reset(); stub.superdoc!.reset();
+      expect(key({ code: 'KeyB', ctrlKey: true }).defaultPrevented).toBe(true);
+      expect(key({ code: 'Enter', ctrlKey: true }).defaultPrevented).toBe(true);
+      direction();
+      await settle(8);
+      expect(adapter.calls).toEqual([]);
+      expect(stub.superdoc!.ops()).not.toContain('format.paragraph.setFlowOptions');
+
+      const ribbon = wrapper.get('.word-ribbon-container').element as HTMLElement;
+      ribbon.tabIndex = -1; ribbon.focus();
+      expect(key({ code: 'F6' }, ribbon).defaultPrevented).toBe(true);
+      expect(wrapper.get('.word-statusbar').element.contains(document.activeElement)).toBe(true);
+      expect(stub.superdoc!.ops(), 'F6 מדלג על העורך הנעול').not.toContain('focus');
+      (document.activeElement as HTMLElement).blur();
+      expect(key({ code: 'F6' }).defaultPrevented).toBe(true);
+      expect(wrapper.get('.word-statusbar').element.contains(document.activeElement), 'F6 skips the inert titlebar and Ribbon from body too').toBe(true);
+
+      key({ code: 'Slash', ctrlKey: true });
+      await settle(8);
+      expect(document.querySelector('[aria-modal="true"]')).not.toBeNull();
+      expect(key({ code: 'Escape' }).defaultPrevented).toBe(true);
+      await settle(8);
+      expect(document.querySelector('[aria-modal="true"]')).toBeNull();
+      expect(previous.inert).toBe(true);
+
+      await wrapper.get('.status-load__skip').trigger('click');
+      expect(previous.inert).toBe(false);
+      key({ code: 'KeyB', ctrlKey: true });
+      key({ code: 'Enter', ctrlKey: true });
+      direction();
+      await settle(12);
+      expect(adapter.calls.map(call => call.id)).toEqual(['bold', 'direction-ltr']);
+      expect(stub.superdoc!.ops()).toContain('format.paragraph.setFlowOptions');
+    } finally { release(); }
+  });
+
+  it('פירוק משחרר מיד ומונע תוצאה מאוחרת מלפתוח מנוע', async () => {
+    const { previous } = containers();
+    const wrapper = await mountShell();
+    const release = holdPreflight();
+    try {
+      const signal = await beginBlank();
+      wrapper.unmount();
+      expect(signal.aborted).toBe(true);
+      expect(previous.inert).toBe(false);
+      release();
+      await settle(12);
+      expect(stub.openSources).toHaveLength(1);
+    } finally { release(); }
+  });
+
+  it('Tell Me שכבר פתוח אינו עוקף את הנעילה, ושדה החיפוש נשמר', async () => {
+    containers();
+    const wrapper = await mountShell();
+    const release = holdPreflight();
+    const adapter = stub.adapter as CommandDouble;
+    const title = wrapper.getComponent(TitleBar);
+    try {
+      await beginBlank();
+      await wrapper.get('.tell-me-input').setValue('בדיקת חיפוש');
+      adapter.reset(); stub.superdoc!.reset();
+      title.vm.$emit('run-command', 'bold');
+      title.vm.$emit('run-action', 'page-break');
+      title.vm.$emit('custom-action', 'about');
+      await settle(8);
+      expect(adapter.calls).toEqual([]);
+      expect(stub.superdoc!.ops()).not.toContain('format.paragraph.setFlowOptions');
+      expect(document.querySelector('[aria-modal="true"]')).toBeNull();
+
+      await wrapper.get('.status-load__skip').trigger('click');
+      expect((wrapper.get('.tell-me-input').element as HTMLInputElement).value).toBe('בדיקת חיפוש');
+      title.vm.$emit('run-command', 'bold');
+      title.vm.$emit('run-action', 'page-break');
+      title.vm.$emit('custom-action', 'about');
+      await settle(12);
+      expect(adapter.calls.map(call => call.id)).toContain('bold');
+      expect(stub.superdoc!.ops()).toContain('format.paragraph.setFlowOptions');
+      expect(document.querySelector('[aria-modal="true"]')).not.toBeNull();
+    } finally { release(); }
+  });
+
+  it('finally מאוחר של פתיחה שבוטלה אינו משחרר פתיחה חדשה על אותו container', async () => {
+    const { previous } = containers();
+    const wrapper = await mountShell();
+    const releaseA = holdPreflight();
+    let releaseB = (): void => {};
+    try {
+      await beginBlank();
+      await wrapper.get('.status-load__skip').trigger('click');
+      expect(previous.inert).toBe(false);
+      releaseB = holdPreflight();
+      const signalB = await beginBlank();
+      expect(previous.inert).toBe(true);
+      releaseA();
+      await settle(12);
+      expect(previous.inert).toBe(true);
+      expect(signalB.aborted).toBe(false);
+      expect(wrapper.find('.status-load__skip').exists()).toBe(true);
+      releaseB();
+      await vi.waitFor(() => expect(stub.resetCalls).toBe(2));
+      await settle(12);
+      expect(previous.inert).toBe(false);
+      expect(stub.openSources).toHaveLength(2);
+    } finally { releaseA(); releaseB(); }
   });
 });
 
@@ -1131,6 +1590,7 @@ describe('חזרה למה שהיה', () => {
     await mountShell();
     expect(stub.draftRemovals, 'עוד לא נשמר דבר').toBe(0);
 
+    await stub.saveDeps?.exportDocument();
     stub.saveDeps?.onSaved?.({ token: 'tok', name: 'חידושים.docx', size: 250 });
     await settle(6);
 
@@ -1544,6 +2004,32 @@ describe('שחזור כל הטאבים', () => {
     expect(ledger.map((entry) => entry.slot), 'החדש ראשון, והישן נשאר').toEqual([1, 0]);
   });
 
+  it('טעינת גיבויים מאוחרת אינה חוסמת פתיחה ואינה דורסת גיבוי שנוסף בינתיים', async () => {
+    let release!: (value: unknown) => void;
+    stub.storedDiscardBackups = new Promise(resolve => { release = resolve; });
+    stub.storedSession = twoTabs(SECOND_DRAFT);
+    stub.draftsByPath[SECOND_DRAFT.path] = new Uint8Array([80, 75, 3, 4]);
+    const old = [{ slot: 0, name: 'ישן', size: 4, discardedAt: 1, token: null }];
+    const wrapper = await mountShell();
+    try {
+      expect(stub.openSources).toHaveLength(1);
+      await wrapper.findAll('.word-doctab')[1]!.find('.word-doctab-close').trigger('click');
+      await settle(12);
+      await answerUnsaved('discard');
+      expect(stub.workspaceWrites.filter(write => write.path.startsWith('discarded-'))).toHaveLength(0);
+      release(old);
+      await settle(24);
+      expect(lastDiscardBackups().map(item => item.slot)).toEqual([1, 0]);
+      pressCtrl('KeyO');
+      await settle(8);
+      expect(wrapper.find('.open-discarded').text()).toContain('(2)');
+    } finally {
+      release(old);
+      await settle(12);
+      wrapper.unmount();
+    }
+  });
+
   it('סגירת טאב שממתין ואין בו מה לאבד אינה שואלת, ומורידה אותו מהרשומה', async () => {
     stub.storedSession = twoTabs();
     const wrapper = await mountShell();
@@ -1832,6 +2318,30 @@ describe('שחזור כל הטאבים', () => {
     expect(wrapper.findAll('.word-doctab')).toHaveLength(1);
   });
 
+  it.each(['forget', 'open'])('כשל בקריאת היסטוריית גיבויים ב-%s משאיר את הרשומה לניסיון נוסף', async (action) => {
+    stub.storedDiscardBackups = [
+      { slot: 1, name: 'עותק', size: 10, discardedAt: Date.now(), token: null },
+    ];
+    const wrapper = await mountShell();
+    pressCtrl('KeyO');
+    await settle(8);
+    document.querySelector<HTMLButtonElement>('.open-discarded')!.click();
+    await settle(8);
+    stub.discardHistoryFailure = true;
+    document.querySelector<HTMLButtonElement>(`.discarded-${action}`)!.click();
+    await settle(12);
+    expect(stub.persistedDiscardBackups).toHaveLength(0);
+    expect(stub.removedDrafts).not.toContain('discarded-1.docx');
+    expect(document.querySelector('.discarded-name')?.textContent).toBe('עותק');
+    expect(wrapper.find('.word-statusbar').text()).toContain('אפשר לנסות שוב');
+    expect(wrapper.find('.word-statusbar').text()).not.toContain('השורה הוסרה');
+    expect(document.querySelector<HTMLButtonElement>('.discarded-forget')!.disabled).toBe(false);
+    stub.discardHistoryFailure = false;
+    document.querySelector<HTMLButtonElement>('.discarded-forget')!.click();
+    await settle(12);
+    expect(stub.removedDrafts).toContain('discarded-1.docx');
+  });
+
   it('שורה שהעותק שלה נעלם מוסרת במקום לפתוח מסמך ריק', async () => {
     // קובץ שנמחק מבחוץ. שורה שאי אפשר לפתוח היא שורה שילחצו עליה שוב.
     stub.storedDiscardBackups = [
@@ -2070,8 +2580,10 @@ describe('קישוריות בין טאבים', () => {
   function engineSession(): unknown {
     const disposers: Array<() => void> = [];
     const superdoc = createSuperdocDouble();
+    superdoc.host.setDocumentMode = vi.fn();
     return {
       superdoc: superdoc.host,
+      container: document.createElement('div'),
       ui: {
         selection: { observe: () => () => {}, apply: () => ({ ok: true }) },
         viewport: { scrollIntoView: async () => ({ success: true }) },
@@ -2101,7 +2613,7 @@ describe('קישוריות בין טאבים', () => {
     const pages = [3, 7];
     stub.sessionFactory = engineSession;
     stub.adapterFactory = () => {
-      const adapter = createCommandDouble();
+      const adapter = createCommandDouble({ states: { 'document-mode': { value: 'editing' } } });
       adapters.push(adapter);
       return adapter;
     };
@@ -2638,6 +3150,344 @@ describe('הגרסה שלפני השמירה האחרונה', () => {
   });
 });
 
+describe('explicit startup opening before engine restoration', () => {
+  const scope = window as unknown as Record<string, unknown>;
+  const view = { zoom: null, focusMode: false, ribbonTab: null, ribbonCollapsed: false };
+  const draft = { path: 'session-draft-doc-1.docx', savedAt: 1, documentToken: 'tok-1', sourceSize: 100 };
+
+  function previous(options: { draft?: boolean; writable?: boolean; caret?: boolean } = {}) {
+    const stored = {
+      version: 2,
+      documents: [{
+        id: 'doc-1', document: { ...FIRST_DOC, writable: options.writable !== false },
+        caret: options.caret ? { start: { blockId: 'b9', ordinal: 8, offset: 4 }, end: null } : null,
+        draft: options.draft ? draft : null,
+      }],
+      activeId: 'doc-1', view,
+    };
+    stub.storedSession = stored;
+    stub.resolvedFile = (token: string) => TAB_FILES[token] ?? null;
+    if (options.draft) stub.draftsByPath[draft.path] = new Uint8Array([80, 75, 3, 4]);
+    return stored;
+  }
+
+  function book(token = 'tok-2') {
+    return {
+      itemId: 'otzaria-word-edit-book', context: 'reader-text', bookUid: token,
+      currentBook: token === 'tok-1' ? 'ראשון' : 'שני', currentType: 'docx', currentSource: 'user',
+    };
+  }
+
+  function host(reply?: (token: string) => Promise<unknown>) {
+    const listeners = new Map<string, (event: unknown) => void>();
+    window.Otzaria = {
+      call: async (method: string, payload: { bookUid?: string }) => {
+        if (method === 'library.openBookFile') {
+          const token = payload.bookUid!;
+          return reply ? reply(token) : { success: true, data: { ...TAB_FILES[token] as object, access: 'readwrite' } };
+        }
+        return { success: true, data: {} };
+      },
+      on: (name: string, listener: (event: unknown) => void) => listeners.set(name, listener),
+      off: (name: string) => listeners.delete(name),
+    } as never;
+    return (name: string, event: unknown) => listeners.get(name)!(event);
+  }
+
+  function pendingBooks(...events: unknown[]) {
+    scope.__otzariaToolbarClicks = { queue: events, live: false };
+  }
+
+  afterEach(() => {
+    delete scope.__otzariaToolbarClicks;
+    delete scope.__otzariaContextMenuClicks;
+    delete scope.__otzariaPageOpened;
+    delete (window as Partial<Window>).Otzaria;
+  });
+
+  it('opens B first while A and its draft stay unloaded until A is selected', async () => {
+    previous({ draft: true }); host(); pendingBooks(book());
+    const wrapper = await mountShell();
+    await settle(12);
+    expect(stub.openSources).toEqual(['loopback://second']);
+    expect(wrapper.findAll('.word-doctab')).toHaveLength(2);
+    expect(wrapper.find('.word-doctab.active .word-doctab-title').text()).toBe('שני');
+    const record = stub.persistedSessions[stub.persistedSessions.length - 1] as {
+      documents: Array<{ id: string; draft: unknown }>;
+    };
+    expect(record.documents.find(item => item.id === 'doc-1')?.draft).toEqual(draft);
+    expect(stub.removedDrafts).toEqual([]);
+    await wrapper.findAll('.word-doctab')[0]!.trigger('click');
+    await settle(16);
+    expect(stub.openSources).toHaveLength(2);
+    expect(stub.openSources[1]).toBeInstanceOf(Blob);
+    expect(stub.markRestoredCalls).toBe(1);
+  });
+
+  it('keeps an unloaded read-only A instead of replacing its metadata with B', async () => {
+    previous({ writable: false }); host(); pendingBooks(book());
+    const wrapper = await mountShell(); await settle(12);
+    expect(stub.openSources).toEqual(['loopback://second']);
+    expect(wrapper.findAll('.word-doctab')).toHaveLength(2);
+    await wrapper.findAll('.word-doctab')[0]!.trigger('click'); await settle(16);
+    expect(stub.openSources).toEqual(['loopback://second', 'loopback://first']);
+  });
+
+  it.each([true, false])('deduplicates two requests for A and restores its draft (writable=%s)', async (writable) => {
+    previous({ draft: true, writable }); host(); pendingBooks(book('tok-1'), book('tok-1'));
+    const wrapper = await mountShell(); await settle(20);
+    expect(stub.openSources).toHaveLength(1);
+    expect(stub.openSources[0]).toBeInstanceOf(Blob);
+    expect(wrapper.findAll('.word-doctab')).toHaveLength(1);
+    expect(stub.markRestoredCalls).toBe(1);
+    expect(stub.removedDrafts).toEqual([]);
+  });
+
+  it('accepts an explicit request arriving while startup preferences are pending', async () => {
+    const stored = previous();
+    let release!: (value: unknown) => void;
+    stub.storedSession = new Promise(resolve => { release = resolve; });
+    const emit = host();
+    const wrapper = await mountShell();
+    try {
+      expect(stub.openSources).toEqual([]);
+      emit('reader.toolbar_item_clicked', book());
+      release(stored); await settle(20);
+      expect(stub.openSources).toEqual(['loopback://second']);
+    } finally { release(stored); await settle(4); wrapper.unmount(); }
+  });
+
+  it.each(['rejected', 'host-failed', 'engine-failed'])('restores A once after a %s request', async (failure) => {
+    previous();
+    host(failure === 'host-failed' ? async () => ({ success: false, error: { message: 'RPC failed' } }) : undefined);
+    pendingBooks(failure === 'rejected' ? { ...book(), currentType: 'txt' } : book());
+    if (failure === 'engine-failed') stub.openFailures = 1;
+    const wrapper = await mountShell(); await settle(20);
+    expect(stub.openSources.filter(source => source === 'loopback://first')).toHaveLength(1);
+    expect(stub.openSources).toHaveLength(failure === 'engine-failed' ? 2 : 1);
+    expect(wrapper.findAll('.word-doctab')).toHaveLength(1);
+    expect(wrapper.find('.word-statusbar').text()).toMatch(/אינו קובץ Word|RPC failed|לא נפתח/);
+  });
+
+  it('does not retry a failed explicit opening of the old active A', async () => {
+    previous({ draft: true }); host(); pendingBooks(book('tok-1'));
+    stub.openFailures = 1;
+    const wrapper = await mountShell(); await settle(20);
+    expect(stub.openSources).toHaveLength(2);
+    expect(stub.openSources[0]).toBeInstanceOf(Blob);
+    expect(stub.openSources[1]).toBeUndefined();
+    expect(wrapper.findAll('.word-doctab')).toHaveLength(1);
+    expect(stub.removedDrafts).toEqual([]);
+  });
+
+  it('a received file opens first and preserves both its recovery draft and old A', async () => {
+    previous({ draft: true }); host();
+    scope.__otzariaPageOpened = {
+      queue: [{ param: { name: 'מתוסף.docx', dataUrl: 'data:application/octet-stream;base64,UEsDBA==' } }], live: false,
+    };
+    const descriptor = Object.getOwnPropertyDescriptor(Blob.prototype, 'arrayBuffer');
+    Object.defineProperty(Blob.prototype, 'arrayBuffer', {
+      configurable: true,
+      value(this: Blob) {
+        return new Promise<ArrayBuffer>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as ArrayBuffer);
+          reader.onerror = () => reject(reader.error);
+          reader.readAsArrayBuffer(this);
+        });
+      },
+    });
+    let wrapper: Awaited<ReturnType<typeof mountShell>> | undefined;
+    try {
+      wrapper = await mountShell(); await settle(24);
+      expect(stub.openSources).toHaveLength(1);
+      expect(stub.openSources[0]).toBeInstanceOf(Blob);
+      expect(wrapper.findAll('.word-doctab')).toHaveLength(2);
+      expect(wrapper.find('.word-doctab.active .word-doctab-title').text()).toBe('מתוסף');
+      await vi.waitFor(() => expect(stub.workspaceWrites.some(write => write.path.startsWith('session-draft-'))).toBe(true));
+      const record = stub.persistedSessions[stub.persistedSessions.length - 1] as {
+        documents: Array<{ id: string; document: unknown; draft: unknown }>;
+      };
+      expect(record.documents.find(item => item.id === 'doc-1')?.draft).toEqual(draft);
+      expect(record.documents.find(item => item.id !== 'doc-1')).toMatchObject({ document: null, draft: expect.any(Object) });
+      expect(stub.removedDrafts).toEqual([]);
+    } finally {
+      wrapper?.unmount();
+      if (descriptor) Object.defineProperty(Blob.prototype, 'arrayBuffer', descriptor);
+      else delete (Blob.prototype as { arrayBuffer?: unknown }).arrayBuffer;
+    }
+  });
+
+  it('an earlier blank fallback is not mistaken for an already opened file', async () => {
+    previous({ writable: false }); const emit = host();
+    stub.openFailures = 1;
+    const wrapper = await mountShell(); await settle(12);
+    expect(stub.openSources).toEqual(['loopback://first', undefined]);
+    emit('reader.toolbar_item_clicked', book('tok-1')); await settle(20);
+    expect(stub.openSources).toEqual(['loopback://first', undefined, 'loopback://first']);
+    expect(wrapper.find('.word-doctab.active .word-doctab-title').text()).toBe('ראשון');
+  });
+
+  it('preserves request order and skips the old engine for the first explicit request', async () => {
+    previous(); host(); pendingBooks(book(), book('tok-1'), book());
+    const wrapper = await mountShell(); await settle(28);
+    expect(stub.openSources).toEqual(['loopback://second', 'loopback://first']);
+    expect(wrapper.findAll('.word-doctab')).toHaveLength(2);
+    expect(wrapper.find('.word-doctab.active .word-doctab-title').text()).toBe('שני');
+  });
+
+  it('sends text once to restored A after caret restoration, before processing B', async () => {
+    previous({ caret: true }); host(); pendingBooks(book());
+    scope.__otzariaContextMenuClicks = {
+      queue: [{ itemId: 'otzaria-word-send-to-document', selectedText: 'קטע לבדיקה' }], live: false,
+    };
+    const inserted: Array<{ source: unknown; caret: unknown }> = [];
+    const doc = stub.superdoc!.host.activeEditor!.doc as unknown as { insert(input: unknown): unknown };
+    doc.insert = () => {
+      inserted.push({ source: stub.openSources[stub.openSources.length - 1], caret: stub.caretApplied[0] });
+      return { success: true };
+    };
+    await mountShell(); await settle(28);
+    expect(stub.openSources).toEqual(['loopback://first', 'loopback://second']);
+    expect(inserted).toEqual([{
+      source: 'loopback://first',
+      caret: { kind: 'selection', start: { kind: 'text', blockId: 'b9', offset: 4 }, end: { kind: 'text', blockId: 'b9', offset: 4 } },
+    }]);
+  });
+
+  it('independent QA: early B with no stored session reuses the initial placeholder', async () => {
+    host(); pendingBooks(book());
+    const wrapper = await mountShell();
+    await vi.waitFor(() => expect(stub.openSources).toEqual(['loopback://second']));
+    expect(wrapper.findAll('.word-doctab')).toHaveLength(1);
+    expect(wrapper.find('.word-doctab.active .word-doctab-title').text()).toBe('שני');
+    const record = stub.persistedSessions[stub.persistedSessions.length - 1] as {
+      documents: Array<{ document: { token: string } | null }>;
+    };
+    expect(record.documents).toHaveLength(1);
+    expect(record.documents[0]?.document?.token).toBe('tok-2');
+  });
+
+  it('independent QA: two received blobs keep their order and individual recovery drafts', async () => {
+    previous({ draft: true }); host();
+    scope.__otzariaPageOpened = {
+      queue: [
+        { param: { name: 'בית.docx', dataUrl: 'data:application/octet-stream;base64,UEsDBA==' } },
+        { param: { name: 'גימל.docx', dataUrl: 'data:application/octet-stream;base64,UEsDBQ==' } },
+      ], live: false,
+    };
+    const descriptor = Object.getOwnPropertyDescriptor(Blob.prototype, 'arrayBuffer');
+    Object.defineProperty(Blob.prototype, 'arrayBuffer', {
+      configurable: true,
+      value(this: Blob) {
+        return new Promise<ArrayBuffer>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as ArrayBuffer);
+          reader.onerror = () => reject(reader.error);
+          reader.readAsArrayBuffer(this);
+        });
+      },
+    });
+    let wrapper: Awaited<ReturnType<typeof mountShell>> | undefined;
+    try {
+      wrapper = await mountShell();
+      await vi.waitFor(() => {
+        const record = stub.persistedSessions[stub.persistedSessions.length - 1] as {
+          documents: Array<{ id: string; draft: unknown }>;
+        };
+        expect(record.documents.filter(item => item.id !== 'doc-1' && item.draft)).toHaveLength(2);
+      });
+      expect(stub.openSources).toHaveLength(2);
+      expect(Array.from(new Uint8Array(await (stub.openSources[0] as Blob).arrayBuffer()))).toEqual([80, 75, 3, 4]);
+      expect(Array.from(new Uint8Array(await (stub.openSources[1] as Blob).arrayBuffer()))).toEqual([80, 75, 3, 5]);
+      const record = stub.persistedSessions[stub.persistedSessions.length - 1] as {
+        documents: Array<{ id: string; document: unknown; draft: { path: string } | null }>;
+      };
+      expect(record.documents.find(item => item.id === 'doc-1')?.draft).toEqual(draft);
+      const added = record.documents.filter(item => item.id !== 'doc-1');
+      expect(added.every(item => item.document === null)).toBe(true);
+      expect(new Set(added.map(item => item.draft!.path)).size).toBe(2);
+      expect(stub.removedDrafts).toEqual([]);
+      expect(wrapper.findAll('.word-doctab')).toHaveLength(3);
+      expect(wrapper.find('.word-doctab.active .word-doctab-title').text()).toBe('גימל');
+    } finally {
+      wrapper?.unmount();
+      if (descriptor) Object.defineProperty(Blob.prototype, 'arrayBuffer', descriptor);
+      else delete (Blob.prototype as { arrayBuffer?: unknown }).arrayBuffer;
+    }
+  });
+
+  it('independent QA: pending startup opening does not create a new session after unmount', async () => {
+    previous();
+    let release!: () => void;
+    let resolving = false;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    host(async token => { resolving = true; await gate; return { success: true, data: { ...TAB_FILES[token] as object, access: 'readwrite' } }; });
+    pendingBooks(book());
+    const wrapper = await mountShell();
+    try {
+      await vi.waitFor(() => expect(resolving).toBe(true));
+      const sessions = scope.__otzariaEditors as Map<string, unknown>;
+      expect(stub.openSources).toEqual([]);
+      const count = sessions.size;
+      wrapper.unmount();
+      release(); await settle(28);
+      expect(stub.openSources, 'no engine may be created after its owner unmounted').toEqual([]);
+      expect(sessions.size, 'no new detached DocumentSession may survive').toBe(count);
+    } finally { release(); await settle(4); wrapper.unmount(); }
+  });
+
+  it('independent QA: late send keeps an originally empty target separate from explicit B', async () => {
+    stub.storedSession = {
+      version: 2, activeId: 'doc-1', view,
+      documents: [{ id: 'doc-1', document: null, draft: null, caret: null }],
+    };
+    let release!: () => void;
+    let resolving = false;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const emit = host(async token => { resolving = true; await gate; return { success: true, data: { ...TAB_FILES[token] as object, access: 'readwrite' } }; });
+    pendingBooks(book());
+    const inserted: unknown[] = [];
+    const doc = stub.superdoc!.host.activeEditor!.doc as unknown as { insert(input: unknown): unknown };
+    doc.insert = () => { inserted.push(stub.openSources[stub.openSources.length - 1]); return { success: true }; };
+    const wrapper = await mountShell();
+    try {
+      await vi.waitFor(() => expect(resolving).toBe(true));
+      emit('contextMenu.itemClicked', { itemId: 'otzaria-word-send-to-document', selectedText: 'קטע' });
+      release(); await settle(28);
+      expect(inserted).toEqual([undefined]);
+      expect(stub.openSources).toEqual(['loopback://second', undefined]);
+    } finally { release(); await settle(4); wrapper.unmount(); }
+  });
+
+  it('independent QA: invalid empty send does not preempt a valid explicit opening', async () => {
+    previous(); host(); pendingBooks(book());
+    scope.__otzariaContextMenuClicks = {
+      queue: [{ itemId: 'otzaria-word-send-to-document', selectedText: '' }], live: false,
+    };
+    await mountShell(); await settle(28);
+    expect(stub.openSources).toEqual(['loopback://second']);
+  });
+
+  it('a send arriving during B resolution still goes to the original A', async () => {
+    previous();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const emit = host(async token => { await gate; return { success: true, data: { ...TAB_FILES[token] as object, access: 'readwrite' } }; });
+    pendingBooks(book());
+    const inserted: unknown[] = [];
+    const doc = stub.superdoc!.host.activeEditor!.doc as unknown as { insert(input: unknown): unknown };
+    doc.insert = () => { inserted.push(stub.openSources[stub.openSources.length - 1]); return { success: true }; };
+    const wrapper = await mountShell();
+    try {
+      emit('contextMenu.itemClicked', { itemId: 'otzaria-word-send-to-document', selectedText: 'קטע' });
+      release(); await settle(28);
+      expect(stub.openSources).toEqual(['loopback://second', 'loopback://first']);
+      expect(inserted).toEqual(['loopback://first']);
+    } finally { release(); await settle(4); wrapper.unmount(); }
+  });
+});
+
 describe('פתיחת ספר Word מסרגל הקורא', () => {
   function host(bookReply: () => Promise<unknown>) {
     const listeners = new Map<string, (event: unknown) => void>();
@@ -2797,5 +3647,48 @@ describe('פתיחת ספר Word מסרגל הקורא', () => {
       await wrapper.find('.word-doctabs-new').trigger('click'); await settle(12);
       expect(wrapper.findAll('.word-doctab')).toHaveLength(2);
     } finally { wrapper.unmount(); window.Otzaria = undefined as never; }
+  });
+});
+
+describe('startup history outside the opening barrier', () => {
+  it('opens a stored file before either history reply and merges the early recent entry', async () => {
+    let releaseRecents!: (value: unknown) => void;
+    let releaseBackups!: (value: unknown) => void;
+    stub.storedRecents = new Promise(resolve => { releaseRecents = resolve; });
+    stub.storedDiscardBackups = new Promise(resolve => { releaseBackups = resolve; });
+    stub.storedSession = {
+      version: 2,
+      documents: [{ id: 'doc-1', document: FIRST_DOC, caret: null, draft: null }],
+      activeId: 'doc-1',
+      view: { zoom: null, focusMode: false, ribbonTab: null, ribbonCollapsed: false },
+    };
+    stub.resolvedFile = TAB_FILES['tok-1'];
+    const oldRecents = [
+      { ...FIRST_DOC, size: 1, openedAt: 1, pinned: true },
+      { token: 'older', name: 'ישן.docx', writable: false, size: 3, openedAt: 2, pinned: false },
+    ];
+    const wrapper = await mountShell();
+    try {
+      expect(stub.openSources).toContain('loopback://first');
+      expect(stub.persistedRecents).toHaveLength(0);
+      pressCtrl('KeyO');
+      await settle(8);
+      expect(wrapper.text()).toContain('טוען מסמכים אחרונים');
+      expect(wrapper.find('.open-browse').attributes('disabled')).toBeUndefined();
+      releaseRecents(oldRecents);
+      releaseBackups([]);
+      await settle(20);
+      const saved = stub.persistedRecents[stub.persistedRecents.length - 1] as Array<Record<string, unknown>>;
+      expect(saved.map(item => item.token)).toEqual(['tok-1', 'older']);
+      expect(saved[0]).toMatchObject({ pinned: true, writable: true, size: 100 });
+      expect(saved[0]!.openedAt).toBeGreaterThan(2);
+      expect(wrapper.findAll('.rec-open')).toHaveLength(2);
+      expect(wrapper.text()).not.toContain('טוען מסמכים אחרונים');
+    } finally {
+      releaseRecents(oldRecents);
+      releaseBackups([]);
+      await settle(12);
+      wrapper.unmount();
+    }
   });
 });

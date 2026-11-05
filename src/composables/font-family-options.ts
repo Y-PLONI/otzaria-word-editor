@@ -23,7 +23,7 @@
  * השורה הזאת היא הדרך, והיא גם מה שאומר את המצב במילים במקום בהיעדר טקסט.
  */
 import { computed, type ComputedRef } from 'vue';
-import { isFamilyAvailable } from '../engine/docx-fonts';
+import { cachedFamilyAvailability } from '../engine/docx-fonts';
 import type { FontFamilyChoice } from '../engine/font-options';
 import { withCurrent, type PickerOption } from './picker-value';
 import { useFontOptions } from './useFontOptions';
@@ -57,6 +57,7 @@ export function familyPickerOptions(
        */
       unavailable: option.available === false,
       measured: option.measured,
+      pending: option.available === undefined,
       // מותקן שאינו מצוייר — הפקד אומר עליו משהו אחר מ„אינו מותקן”. ראו
       // `installedNotDrawable` ב-engine/font-options.ts.
       installedNotDrawable: option.installedNotDrawable,
@@ -68,7 +69,7 @@ export function familyPickerOptions(
      * השורה המשקרת: הוא נגיש בהקלדת שם חופשי, ואז השורה והתיבה הסגורה היו
      * מציירות שם שאינו קיים ב-fallback.
      */
-    { preview: true, available: isFamilyAvailable },
+    { preview: true, available: cachedFamilyAvailability },
   );
 }
 

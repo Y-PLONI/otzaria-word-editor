@@ -17,6 +17,9 @@ import { applyTheme } from './host/theme';
 import { setMenuLocale } from './ui/ribbon/i18n';
 import { setCanvasDefaultColor } from './composables/canvas-color';
 import type { ThemePayload } from './types/otzaria_plugin';
+import { beginPerformanceSpan, markPerformance } from './diagnostics/performance';
+
+markPerformance('app.entry');
 
 /** ערכת הנושא, וגם הפס בבורר „צבע רקע” — הבד בלי העדפה נגזר ממנה. */
 function applyOtzariaTheme(theme: ThemePayload): void {
@@ -37,7 +40,9 @@ async function main(): Promise<void> {
   installRecentErrors();
 
   // התקנת גופנים ארוזים ראשונה
+  const fontsTiming = beginPerformanceSpan('bundled-fonts');
   installBundledFonts();
+  fontsTiming?.end('registered');
 
   if (import.meta.env.DEV) {
     const { installDevStub } = await import('./host/dev-stub');
@@ -45,6 +50,7 @@ async function main(): Promise<void> {
   }
 
   // שחזור או קבלת אירוע boot
+  const bootTiming = beginPerformanceSpan('boot.resolve');
   const bootPromise = resolveBoot();
 
   await domReady();
@@ -52,6 +58,7 @@ async function main(): Promise<void> {
   // הרכבת אפליקציית Vue
   const app = createApp(App);
   app.mount('#app');
+  markPerformance('shell.mounted');
   splashStage(SPLASH_STAGES.shellMounted, 'מכין את סביבת העריכה…');
 
   // תוצאת האתחול, על שורש ה-HTML: 'event' — האירוע נתפס ב-latch; 'recovered' —
@@ -64,6 +71,7 @@ async function main(): Promise<void> {
   const root = document.documentElement;
   try {
     const info = await bootPromise;
+    bootTiming?.end(info.source);
     applyOtzariaTheme(info.theme);
     // שפת התפריטים לפי שפת המשתמש (`app.language` — 'he' / 'en'; ראו
     // docs/plugin-sdk). נקבעת גם במסלול „recovered", כי `app.getInfo`
@@ -79,6 +87,7 @@ async function main(): Promise<void> {
       console.warn('[otzaria-word] plugin.boot אבד; מצב האתחול שוחזר ב-RPC');
     }
   } catch (error) {
+    bootTiming?.end('failed');
     root.dataset.boot = 'failed';
     console.error('[otzaria-word] כשל באתחול ערכת הנושא של אוצריא:', error);
   }
