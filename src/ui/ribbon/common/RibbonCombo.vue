@@ -84,6 +84,7 @@
             chosen: row.option.value === modelValue,
             hebrew: row.option.hebrew === true,
             unavailable: row.option.unavailable === true,
+            pending: row.option.pending === true,
           }"
           role="option"
           :aria-selected="row.option.value === modelValue"
@@ -129,7 +130,7 @@
         dir="auto"
         :style="sampleStyle"
       >
-        <span>{{ sample }}</span>
+        <span>{{ samplePending ? menuString('הדגימה טרם נבדקה') : sample }}</span>
       </li>
     </ul>
   </div>
@@ -186,11 +187,12 @@
  * `aria-label` על השורה העברית: Chrome מכליל תוכן של `::before` בשם הנגיש,
  * וקורא מסך היה מכריז „אבגד Narkisim”. הדגימה היא מראה בלבד, והשם הוא השם.
  */
-import { computed, inject, nextTick, ref, shallowRef, watch } from 'vue';
+import { computed, inject, nextTick, onUnmounted, ref, shallowRef, watch } from 'vue';
 import type { SuperDoc } from 'superdoc';
 import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
 import { focusDocument } from '../../../engine/focus';
 import { usePopoverPosition } from '../../../composables/popover-position';
+import { FONT_PROBE_PRIORITIES } from '../../../composables/keys';
 import SvgIcon from '../../icons/SvgIcon.vue';
 import { menuString } from '../i18n';
 import {
@@ -337,7 +339,7 @@ const optionId = (index: number) => `${uid}-opt-${index}`;
 const shown = computed(() => query.value ?? props.modelValue);
 
 /**
- * האפשרויות כפי שהיו ברגע הפתיחה — והרשימה אינה מסתכלת על אחרות עד שתיסגר.
+ * הסדר והקבוצות כפי שהיו ברגע הפתיחה; תשובות מדידה מתעדכנות גם כשהיא פתוחה.
  *
  * זו רגרסיה שנצפתה, ולא זהירות: המנוע מרכיב את קבוצת „אחרונים” מהגופנים
  * שהמסמך משתמש בהם, והתצוגה החיה משנה בדיוק את זה. כלומר כל שורה שרוחפים
@@ -348,7 +350,15 @@ const shown = computed(() => query.value ?? props.modelValue);
  * שאי אפשר לכוון אליה. מנייה שנוחתת בזמן שהיא פתוחה תיראה בפתיחה הבאה.
  */
 const frozen = shallowRef<readonly ComboOption[] | null>(null);
-const built = computed(() => buildComboRows(frozen.value ?? props.options, query.value ?? ''));
+const built = computed(() => {
+  if (!frozen.value) return buildComboRows(props.options, query.value ?? '');
+  // סדר וקבוצות נשארים קפואים, אבל תשובות המדידה מגיעות גם כשהבורר פתוח.
+  const live = new Map(props.options.map((option) => [option.value, option]));
+  const options = frozen.value.map((option) => ({
+    ...(live.get(option.value) ?? option), group: option.group, label: option.label,
+  }));
+  return buildComboRows(options, query.value ?? '');
+});
 
 /**
  * מה שהסימון עומד עליו, כל עוד הרשימה פתוחה.
@@ -365,6 +375,41 @@ const highlighted = computed<string | null>(() => {
 });
 
 watch(highlighted, (value) => emit('preview', value));
+
+
+const prioritizeFonts = inject(FONT_PROBE_PRIORITIES, undefined);
+const isFontPicker = computed(() => props.options.some((option) => option.measured !== undefined || option.pending !== undefined));
+watch([() => props.modelValue, isFontPicker], ([value, fontPicker]) => {
+  if (fontPicker && value) prioritizeFonts?.([value]);
+}, { immediate: true });
+watch(highlighted, (value) => {
+  if (isFontPicker.value && value) prioritizeFonts?.([value]);
+});
+let visibleFonts: IntersectionObserver | undefined;
+let visibilityGeneration = 0;
+watch([open, query], async () => {
+  const generation = ++visibilityGeneration;
+  visibleFonts?.disconnect();
+  visibleFonts = undefined;
+  if (!open.value || !prioritizeFonts || !isFontPicker.value) return;
+  await nextTick();
+  if (generation !== visibilityGeneration || !open.value || !listRef.value) return;
+  const rows = listRef.value.querySelectorAll<HTMLElement>('[role="option"]');
+  if (typeof IntersectionObserver === 'undefined') {
+    prioritizeFonts([...rows].slice(0, 12).map((row) => row.dataset.value!));
+    return;
+  }
+  visibleFonts = new IntersectionObserver((entries) => {
+    if (generation !== visibilityGeneration || !open.value) return;
+    prioritizeFonts(entries.filter((entry) => entry.isIntersecting)
+      .map((entry) => (entry.target as HTMLElement).dataset.value!));
+  }, { root: listRef.value });
+  for (const row of rows) visibleFonts.observe(row);
+});
+onUnmounted(() => {
+  visibilityGeneration += 1;
+  visibleFonts?.disconnect();
+});
 
 /**
  * מה שנאמר על שורה שהדפדפן אינו פותר את הגופן שלה.
@@ -413,7 +458,7 @@ const unavailableReason = (option: ComboOption): string =>
 /**
  * מה השורה יודעת על הזמינות שלה — ומי רשאי לבדוק אותה.
  *
- * שלושה מצבים ולא שניים, וזה מה שמאפשר לשער QA למדוד את **המוצר** ולא את
+ * `pending` טרם נבדק. שלושת המצבים האחרים מאפשרים לשער QA למדוד את המוצר ואת
  * הסביבה: `declared` היא שורה שהוכרזה זמינה בלי מדידה (חמשת הגופנים שאוצריא
  * מזריקה), והיא באמת אינה נפתרת בכרום נקי שאין בו מארח. שער שדרש הסכמה בין
  * ההכרזה לדפדפן על כל שורה נכשל עליהן תמיד — נמדד.
@@ -421,12 +466,14 @@ const unavailableReason = (option: ComboOption): string =>
  * הרשימה נגזרת מהמוצר ולא מטבלה בשער, ובכוונה: טבלה כזאת הייתה נשברת בכל
  * גופן חדש, והתשובה הייתה „להרחיב את הטבלה”.
  */
-const availabilityOf = (option: ComboOption): 'declared' | 'measured' | 'missing' => {
+const availabilityOf = (option: ComboOption): 'pending' | 'declared' | 'measured' | 'missing' => {
+  if (option.pending === true) return 'pending';
   if (option.measured !== true) return 'declared';
   return option.unavailable === true ? 'missing' : 'measured';
 };
 
 const rowAria = (option: ComboOption): string | undefined => {
+  if (option.pending === true) return `${menuString(option.label)} — ${menuString('הדגימה טרם נבדקה')}`;
   const unavailable = option.unavailable === true;
   if (!unavailable && option.hebrew !== true) return undefined;
   const name = menuString(option.label);
@@ -458,7 +505,7 @@ const highlightedOption = computed(() => {
  * שהתשובה תהיה אחת ולא שלוש.
  */
 const paintFamily = (option: ComboOption | undefined): string | undefined =>
-  option && option.unavailable !== true ? option.preview : undefined;
+  option && option.unavailable !== true && option.pending !== true ? option.preview : undefined;
 
 /** מה שהשורה מצוירת בו. `undefined` — ואז אין `style` כלל, ולא `style` ריק. */
 const rowStyle = (option: ComboOption): Record<string, string> | undefined => {
@@ -475,7 +522,8 @@ const sampleFamily = computed<string | undefined>(() => paintFamily(highlightedO
  * את הטקסט של המשתמש בגופן הממשק, ב-24px, ונראה בדיוק כמו דגימה אמיתית. הוא
  * מעומעם בדיוק כמו השורה, ומאותו טוקן, כדי שהשניים יאמרו אותו דבר.
  */
-const sampleUnavailable = computed(() => highlightedOption.value?.unavailable === true);
+const samplePending = computed(() => highlightedOption.value?.pending === true);
+const sampleUnavailable = computed(() => highlightedOption.value?.unavailable === true || samplePending.value);
 
 /**
  * הסגנון של פס הדגימה: הגופן שהסימון עומד עליו, ובגודל שבמסמך (`sampleSize`).
@@ -982,7 +1030,8 @@ watch(activeIndex, async (index) => {
   ממשיכים להתחיל באותו קו לאורך הקבוצה. הסתרה הייתה מזיזה שורה אחת שמאלה
   בדיוק לפי אילו גופנים מותקנים במכונה.
 */
-.ribbon-combo-option.unavailable.hebrew::before {
+.ribbon-combo-option.unavailable.hebrew::before,
+.ribbon-combo-option.pending.hebrew::before {
   content: "";
 }
 

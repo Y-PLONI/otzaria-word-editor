@@ -430,6 +430,7 @@ import {
   FONT_MEMORY,
   HEAVY_ACTION_GUARD,
   FONT_OPTIONS,
+  FONT_PROBE_PRIORITIES,
   PAGE_MARKING,
   READOUT_SELECTION,
   SPELLCHECK,
@@ -487,16 +488,20 @@ import {
 } from './engine/style-gallery';
 import {
   composeFontOptions,
+  LATIN_FONT_FAMILIES,
+  OTZARIA_FONT_FAMILIES,
   fallbackFontOptions,
   observeFontSlice,
   type FontOptions,
   type FontsSliceLike,
 } from './engine/font-options';
 import { onPickerFontsChanged } from './engine/picker-fonts';
+import { createFontProbeQueue } from './engine/font-probes';
 import {
   emptyInstalledFonts,
   loadReportedFonts,
-  verifyInstalledFonts,
+  cachedInstalledFonts,
+  MEASURED_CANDIDATES,
   type InstalledFontsSnapshot,
 } from './engine/system-fonts';
 import {
@@ -568,7 +573,7 @@ import {
 } from './engine/autocorrect';
 import { installOtzariaLinkClicks } from './engine/otzaria-link-click';
 import { preflightSource } from './engine/docx-preflight';
-import { installDocumentFontAliases } from './engine/docx-fonts';
+import { forgetFamilyAvailability, installDocumentFontAliases } from './engine/docx-fonts';
 import {
   anchorPageIndex,
   createDocMetrics,
@@ -776,29 +781,6 @@ const editorStackRef = ref<HTMLElement | null>(null);
 const shellRef = ref<HTMLElement | null>(null);
 
 /**
- * תקרה ל-`whenIdle`. אחרי הזמן הזה העבודה רצה בין אם החוט התפנה ובין אם לא.
- *
- * „idle” בלי תקרה עלול לא להגיע לעולם במסמך שמקלידים בו בלי הפסקה, והעבודה
- * שנדחית כאן אינה קוסמטית לגמרי — היא מה שמסמן בבורר שם שהדפדפן אינו פותר.
- * שתי שניות הן זמן שבו כל פתיחת מסמך סבירה כבר הסתיימה.
- */
-const IDLE_TIMEOUT_MS = 2000;
-
-/**
- * מריצה כשהחוט פנוי — או בתקרה, המוקדם מביניהם.
- *
- * `requestIdleCallback` אינו קיים בכל דפדפן (ולא ב-jsdom), ולכן `setTimeout`
- * הוא הגיבוי: לא ה„פנוי” האמיתי, אבל כן דחייה מחוץ למסלול העלייה.
- */
-function whenIdle(work: () => void): void {
-  if (typeof requestIdleCallback === 'function') {
-    requestIdleCallback(() => work(), { timeout: IDLE_TIMEOUT_MS });
-    return;
-  }
-  setTimeout(work, IDLE_TIMEOUT_MS);
-}
-
-/**
  * לחיצה על רקע של פס מעטפת אינה לוקחת את הסמן מהמסמך — ראו
  * ui/shell/caret-keeper.ts, ובו גם מה שנמדד בכל פס. אזור המסמך יוצא מהכלל:
  * שם לחיצה כן מזיזה סמן, ומה שקורה בשטח האפור שבתוכו מטופל
@@ -857,8 +839,9 @@ const installedFonts = shallowRef<InstalledFontsSnapshot>(emptyInstalledFonts())
  * שנדרש כאן הוא לומר „הרכב שוב”.
  */
 const drawableFontEpoch = shallowRef(0);
-const stopPickerFontsChanged = onPickerFontsChanged(() => {
+const stopPickerFontsChanged = onPickerFontsChanged((family) => {
   drawableFontEpoch.value += 1;
+  fontProbes.enqueue([family], true);
 });
 watchEffect(() => {
   // הקריאה היא המנוי: בלעדיה `watchEffect` אינו תלוי במונה כלל.
@@ -970,6 +953,32 @@ const hasDocument = computed(() => activeSuperdoc.value !== null);
 
 const title = ref('מסמך חדש');
 const isOpening = ref(false);
+
+let fontFacesReady = false;
+let fontWorkDisposed = false;
+const declaredFontKeys = new Set(OTZARIA_FONT_FAMILIES.map((font) => font.value.toLowerCase()));
+const fontProbes = createFontProbeQueue({
+  isPaused: () => !fontFacesReady || isOpening.value || !activeSuperdoc.value || document.fonts?.status === 'loading',
+  skip: (family) => declaredFontKeys.has(family.toLowerCase()),
+  reportedFonts: () => installedFonts.value,
+  onMeasured: () => {
+    if (installedFonts.value.source !== 'host') installedFonts.value = cachedInstalledFonts();
+    drawableFontEpoch.value += 1;
+  },
+});
+provide(FONT_PROBE_PRIORITIES, (families) => fontProbes.enqueue(families, true));
+watch(engineFontSlice, (slice) => {
+  fontProbes.enqueue((slice?.options ?? []).map((font) => font.value), true);
+});
+const onFontCompositionStart = () => fontProbes.setComposing(true);
+const onFontCompositionEnd = () => fontProbes.setComposing(false);
+function onFontFacesLoaded(event: FontFaceSetLoadEvent): void {
+  const families = event.fontfaces.map((face) => face.family.replace(/^(['"])(.*)\1$/, '$2'));
+  for (const family of families) forgetFamilyAvailability(family);
+  fontProbes.enqueue(families, true);
+  drawableFontEpoch.value += 1;
+}
+
 /** מונע כניסה שנייה לסגירה הא-סינכרונית של כל הטאבים. */
 const isExiting = ref(false);
 /**
@@ -6103,29 +6112,21 @@ function registerEditBook(): void {
 }
 
 onMounted(async () => {
-  /**
-   * המנייה של גופני המכונה — ראשונה, ובלי `await`, ובשני שלבים.
-   *
-   * בלי `await` מפני שהיא אינה תנאי לשום דבר: עד שהיא נוחתת הבורר מציג את
-   * הרשימה הקבועה, וברגע שהיא נוחתת `watchEffect` מרכיב מחדש והבורר מתמלא.
-   * פתיחת המסמך הראשון אינה אמורה להמתין למנייה של מאות משפחות.
-   *
-   * **ובשני שלבים, וזה תוקן אחרי מדידה:** „בלי `await`” אינו „בחינם”.
-   * המדידה של שלב ב' נמדדה 6.46 שניות ל-287 משפחות, ומקטע של עד 68ms גם
-   * אחרי הוויתור על החוט — כלומר היא מתחרה עם ההקלדה על ה-main thread בדיוק
-   * בשניות הראשונות שאחרי פתיחת המסמך. שלב א' (`loadReportedFonts`) הוא
-   * קריאת RPC אחת, והוא מה שממלא את הבורר; האימות נדחה ל-`whenIdle`.
-   *
-   * מה שחסר בין השניים הוא הסימון של שמות שהדפדפן אינו פותר — שורה שתיראה
-   * זמינה עד שהמדידה תנחת, לא שורה חסרה. ראו engine/system-fonts.ts.
-   */
+  // המנייה ממלאת שמות בלבד; כל מדידות הבורר עוברות דרך אותו תור מושהה.
+  document.addEventListener('keydown', fontProbes.noteActivity, true);
+  document.addEventListener('beforeinput', fontProbes.noteActivity, true);
+  document.addEventListener('input', fontProbes.noteActivity, true);
+  document.addEventListener('compositionstart', onFontCompositionStart, true);
+  document.addEventListener('compositionend', onFontCompositionEnd, true);
+  document.fonts?.addEventListener('loadingdone', onFontFacesLoaded);
+  void Promise.resolve(document.fonts?.ready).then(() => { fontFacesReady = true; });
+  fontProbes.enqueue(LATIN_FONT_FAMILIES.map((font) => font.value));
   void loadReportedFonts().then((reported) => {
+    if (fontWorkDisposed) return;
     installedFonts.value = reported;
-    whenIdle(() => {
-      void verifyInstalledFonts(reported).then((verified) => {
-        installedFonts.value = verified;
-      });
-    });
+    fontProbes.enqueue(reported.source === 'host'
+      ? reported.families.map((font) => font.value)
+      : MEASURED_CANDIDATES.map((font) => font.name));
   });
 
   /*
@@ -6339,6 +6340,14 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  fontWorkDisposed = true;
+  fontProbes.dispose();
+  document.removeEventListener('keydown', fontProbes.noteActivity, true);
+  document.removeEventListener('beforeinput', fontProbes.noteActivity, true);
+  document.removeEventListener('input', fontProbes.noteActivity, true);
+  document.removeEventListener('compositionstart', onFontCompositionStart, true);
+  document.removeEventListener('compositionend', onFontCompositionEnd, true);
+  document.fonts?.removeEventListener('loadingdone', onFontFacesLoaded);
   stopPickerFontsChanged();
   // מי שממתין לתשובה מקבל „ביטול” ואינו נשאר תלוי — ראו use-unsaved-prompt.ts.
   unsavedPrompt.dispose();

@@ -749,6 +749,7 @@ const EN: Readonly<Record<string, string>> = {
     'Page check failed: no saved marking for this document — mark it first',
   'סימון העמודים הוסר': 'Page marking removed',
   'מתחיל…': 'Starting…',
+  'הדגימה טרם נבדקה': 'The preview has not been checked yet',
   'הגופן אינו מותקן במכונה — אין דגימה להציג':
     'The font is not installed on this machine — no sample to show',
   'הגופן מותקן אך הדפדפן אינו מצייר אותו — אין דגימה להציג':
