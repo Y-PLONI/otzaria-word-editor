@@ -30,8 +30,10 @@
  * מסלול אחד בלבד: **`discardDraft`**, כלומר המשתמש אמר במפורש „למחוק את
  * השינויים”. בקובץ הזה מוחקים רק כשנאמר.
  *
- * **`noteSaved` אינו מוחק — הוא מעביר.** הטיוטה עוברת ל-`previousDraft`,
- * ונשארת שם עד השמירה הבאה. עד כאן היא נמחקה, בהיגיון נכון כשלעצמו — העבודה
+ * **`noteSaved` אינו מוחק — הוא מעביר.** טיוטה שנכללה ב-snapshot השמור
+ * עוברת ל-`previousDraft`; טיוטה מאוחרת ממנו נשארת פעילה. נקודת השמירה
+ * נתפסת לפני הייצוא. העותק בקודמת נשאר עד השמירה הבאה. בעבר הוא נמחק,
+ * בהיגיון נכון כשלעצמו — העבודה
  * בדיסק, והשארתה הייתה גורמת לפתיחה הבאה להעדיף עותק ישן על הקובץ עצמו. מה
  * שההיגיון הזה פספס: כשמה שהגיע לדיסק הוא בדיוק מה שהמשתמש רצה לבטל, לא
  * נשאר בשום מקום עותק של „לפני”. ההפרדה לשני שדות היא מה שמאפשר את שניהם —
@@ -159,6 +161,19 @@ export interface SetDocumentOptions {
   keepDraft?: boolean;
 }
 
+declare const savePointBrand: unique symbol;
+
+/** נקודת הייצוא שייכת לזוכר ולמסמך שלו, ואינה מונה של SaveCoordinator. */
+export interface KeeperSavePoint {
+  readonly [savePointBrand]: true;
+}
+
+export interface NoteSavedOptions {
+  sourceSize?: number | null;
+  /** „שמור בשם” מחליף יעד של אותה עריכה חיה, בלי לאפס את מוני הטיוטה. */
+  document?: SessionDocument;
+}
+
 export interface SessionKeeper {
   /** הרשומה כפי שהיא בזיכרון. */
   readonly state: SessionState;
@@ -180,7 +195,7 @@ export interface SessionKeeper {
   readonly hasUnwrittenWork: boolean;
   /** מאמצת רשומה שנקראה בעלייה, לפני שמשהו נכתב עליה. */
   adopt(state: SessionState | null): void;
-  /** מסמך נפתח, נשמר בשם, או נסגר. מבטלת טיוטה של המסמך הקודם. */
+  /** מסמך נפתח או נסגר. מבטלת עבודה מתוזמנת של המסמך הקודם. */
   setDocument(document: SessionDocument | null, options?: SetDocumentOptions): void;
   /** שומרת בייטים שנפתחו בלי קובץ מקור. אינה מייצאת ואינה תלויה בהקפאת autosave. */
   storeOpenedDraft(content: Blob, name: string): Promise<WorkspaceWrite>;
@@ -201,8 +216,10 @@ export interface SessionKeeper {
    * הרשומה נשארת.
    */
   noteCaretMoved(): void;
-  /** המסמך נשמר לדיסק: הטיוטה אינה נדרשת יותר. */
-  noteSaved(sourceSize?: number | null): Promise<void>;
+  /** נקראת מיד לפני ייצוא snapshot לשמירה, ולא אחרי שהכתיבה הסתיימה. */
+  captureSave(): KeeperSavePoint;
+  /** רק הטיוטה שנכללה ב-snapshot השמור עוברת לקודמת; עריכות מאוחרות נשארות. */
+  noteSaved(point: KeeperSavePoint, options?: NoteSavedOptions): Promise<void>;
   /**
    * כותבת עכשיו עותק של המסמך כפי שהוא — לפני פעולה שאין ממנה דרך חזרה אם
    * התוסף קורס תוך כדי.
@@ -267,6 +284,7 @@ export function createSessionKeeper(deps: SessionKeeperDeps): SessionKeeper {
    */
   let revision = 0;
   let draftedRevision = 0;
+  const savePoints = new WeakMap<KeeperSavePoint, { epoch: number; revision: number }>();
 
   function clearTimer(timer: ReturnType<typeof setTimeout> | undefined): undefined {
     if (timer !== undefined) clearTimeout(timer);
@@ -603,22 +621,43 @@ export function createSessionKeeper(deps: SessionKeeperDeps): SessionKeeper {
       schedulePersist();
     },
 
-    async noteSaved(size = null) {
-      draftTimer = clearTimer(draftTimer);
-      draftDeadline = null;
-      sourceSize = size ?? sourceSize;
+    captureSave() {
+      const point = {} as KeeperSavePoint;
+      savePoints.set(point, { epoch, revision });
+      return point;
+    },
 
-      // המצב נקרא ומשתנה **בתוך** התור ולא לפניו. לפניו הוא היה מתאר את
-      // הרגע שבו השמירה הסתיימה, בעוד המחיקה עצמה רצה אחרי סבב טיוטה שכבר
-      // המתין — כלומר הרשומה הצביעה לקובץ שנמחק אחריה.
+    async noteSaved(point, options = {}) {
+      const saved = savePoints.get(point);
+      savePoints.delete(point);
+      if (!saved || disposed || saved.epoch !== epoch) return;
+
+      // גם הזזת המצביעים וגם שינוי היעד רצים בתור: טיוטה מאוחרת עשויה
+      // להמתין לסיום השמירה ולהיכתב לפני שהרישום הזה מגיע לתורו.
       await run(async () => {
+        if (disposed || saved.epoch !== epoch) return;
+        sourceSize = options.sourceSize ?? sourceSize;
         const entry = activeEntry(state);
+        const document = options.document ?? entry?.document ?? null;
+        const sameDocument = (entry?.document?.token ?? null) === (document?.token ?? null);
+        state = withActiveEntry(state, {
+          document,
+          caret: sameDocument ? (entry?.caret ?? null) : null,
+        });
         if (entry?.draft) {
-          // **לא מוחקים — מעבירים מצביע.** עד כאן הטיוטה נמחקה בכל שמירה
-          // מוצלחת, ולכן אחרי autosave לא נשאר בשום מקום עותק של „לפני”:
-          // פעולה שהמשתמש לא רצה נכנסה לקובץ בלי דרך חזרה. ההעברה עצמה היא
-          // החלפת שדה ברשומה ותו לא — אפס בייטים בגשר, כי הקובץ כבר במקומו.
-          state = withActiveEntry(state, { draft: null, previousDraft: entry.draft });
+          state = draftedRevision > saved.revision
+            ? withActiveEntry(state, {
+              draft: { ...entry.draft, documentToken: document?.token ?? null, sourceSize },
+            })
+            : withActiveEntry(state, { draft: null, previousDraft: entry.draft });
+        }
+        if (revision <= saved.revision) {
+          draftTimer = clearTimer(draftTimer);
+          draftDeadline = null;
+        } else if (draftTimer === undefined && revision !== draftedRevision) {
+          // אין איפוס של timer/deadline של הקלדה מאוחרת. אם סבב שכבר היה
+          // בתור נכשל, נחדש ניסיון בלי להכריז שהעבודה החדשה נמצאת בטיוטה.
+          scheduleDraft();
         }
         await persistNow();
       });

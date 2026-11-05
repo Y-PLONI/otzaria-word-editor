@@ -1,4 +1,4 @@
-import { DOCX_MIME } from './export';
+import { DOCX_MIME } from './docx-mime';
 import { preflightPackage } from './docx-preflight-core';
 import { runPackageTask } from './docx-package-client';
 import type { PackageResults } from './docx-package-protocol';

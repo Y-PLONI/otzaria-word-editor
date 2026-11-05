@@ -20,14 +20,15 @@
 import type { SuperDoc } from 'superdoc';
 import type { Bytes } from './docx-parts';
 import { postflightDocx } from './docx-postflight';
+import { runPackageTask } from './docx-package-client';
+import { DOCX_MIME } from './docx-mime';
+
+export { DOCX_MIME } from './docx-mime';
 
 /** הסיומות של חבילות OOXML לעיבוד תמלילים שהתוסף מכיר. */
 export const WORD_EXTENSIONS = ['docx', 'docm', 'dotx', 'dotm'] as const;
 
 export type WordExtension = (typeof WORD_EXTENSIONS)[number];
-
-export const DOCX_MIME =
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
 /** ה-MIME של כל סיומת. `docm`/`dotm` הם טיפוסים נפרדים, לא וריאנט של `docx`. */
 export const MIME_FOR_EXTENSION: Readonly<Record<WordExtension, string>> = {
@@ -56,12 +57,16 @@ const EXTENSION_PATTERN = new RegExp(`\\.(${WORD_EXTENSIONS.join('|')})$`, 'i');
  * התו הניטרלי הסוגר, מזהי מספור) לפני שהם נכתבים. ראו engine/docx-postflight.ts.
  */
 export async function exportDocx(superdoc: SuperDoc, options: ExportDocxOptions = {}): Promise<Blob> {
+  throwIfCancelled(options.signal);
   const blob = await superdoc.export({ exportType: ['docx'], triggerDownload: false });
+  throwIfCancelled(options.signal);
   if (!(blob instanceof Blob)) throw new Error('הייצוא לא החזיר קובץ');
-  return options.postflight === false ? blob : applyPostflight(blob);
+  return options.postflight === false ? blob : applyPostflight(blob, options.signal);
 }
 
 export interface ExportDocxOptions {
+  /** Cancels this export's package work; engine export itself has no abort API. */
+  signal?: AbortSignal;
   /**
    * `false` — הבייטים כפי שהמנוע כתב אותם. לטיוטת השחזור בלבד: היא נטענת
    * חזרה **לעורך**, שאינו צריך את התיקונים של Word, והיא נכתבת עשר שניות
@@ -111,9 +116,17 @@ export interface ExportDocxOptions {
  * `arrayBuffer` נבדק ולא מונח: ב-jsdom הוא אינו קיים, ובלי הבדיקה כל בדיקת
  * יחידה שנוגעת בייצוא הייתה זורקת `TypeError` במקום לרוץ.
  */
-async function blobBytes(blob: Blob): Promise<Bytes | null> {
+async function blobBuffer(blob: Blob): Promise<ArrayBuffer | null> {
   if (typeof blob.arrayBuffer !== 'function') return null;
-  return new Uint8Array(await blob.arrayBuffer()) as Bytes;
+  return blob.arrayBuffer();
+}
+
+function throwIfCancelled(signal?: AbortSignal): void {
+  // Only the owning save can cancel. A Blob/codec AbortError with a live signal
+  // is still a processing failure and keeps the existing recovery policy.
+  if (signal?.aborted) {
+    throw new DOMException('Document processing cancelled', 'AbortError');
+  }
 }
 
 /**
@@ -123,12 +136,28 @@ async function blobBytes(blob: Blob): Promise<Bytes | null> {
  * — Blob שאינו נקרא, zip שאינו נפרס, דוחס שאינו קיים — מחזיר את המקור כמות
  * שהוא. נקודה בצד הלא נכון היא באג; שמירה שנכשלת היא אובדן עבודה.
  */
-async function applyPostflight(blob: Blob): Promise<Blob> {
+async function applyPostflight(blob: Blob, signal?: AbortSignal): Promise<Blob> {
   try {
-    const bytes = await blobBytes(blob);
-    const marked = bytes && (await postflightDocx(bytes));
+    const buffer = await blobBuffer(blob);
+    throwIfCancelled(signal);
+    if (buffer === null) return blob;
+    let marked: ArrayBuffer | Bytes | null;
+    try {
+      marked = (await runPackageTask('postflight', buffer, signal)).bytes;
+    } catch (error) {
+      throwIfCancelled(signal);
+      console.warn('[otzaria-word] worker התיקון היוצא נכשל; מנסה עיבוד מקומי', error);
+      // Keep the immutable export Blob. A transferred buffer is detached; only
+      // in that failure case read it again, never export a newer document state.
+      const recovered = buffer.byteLength || blob.size === 0 ? buffer : await blob.arrayBuffer();
+      throwIfCancelled(signal);
+      marked = await postflightDocx(new Uint8Array(recovered));
+    }
+    throwIfCancelled(signal);
     return marked ? new Blob([marked], { type: blob.type || DOCX_MIME }) : blob;
   } catch (error) {
+    // Cancellation belongs to the caller's obsolete save, not to recovery.
+    throwIfCancelled(signal);
     // **ומיומן.** בלי השורה הזאת, מקרה קצה שמפיל את התיקון על מסמך אחד
     // מוריד אותו מ**כל** שמירה של המשתמש ההוא בשקט: הסימפטום שדווח חוזר,
     // ואין שום שורה ביומן להתחיל ממנה — בעוד שער ה-QA, שרץ על קובץ משלו,

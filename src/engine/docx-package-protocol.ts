@@ -1,8 +1,9 @@
 import type { PreflightPackage } from './docx-preflight-core';
 
-/** Versioned package operations; postflight can extend this map and the dispatcher. */
+/** Both package transformations use the same versioned, owned transport. */
 export interface PackageResults {
   preflight: Omit<PreflightPackage, 'bytes'> & { bytes: ArrayBuffer | null };
+  postflight: { bytes: ArrayBuffer | null };
 }
 
 export type PackageOperation = keyof PackageResults;
@@ -30,6 +31,10 @@ const validators: { [K in PackageOperation]: (value: unknown) => boolean } = {
       && (result.notice === null || typeof result.notice === 'string')
       && Array.isArray(result.notes) && result.notes.every(note => typeof note === 'string')
       && !!result.vba && typeof result.vba.hasMacroPart === 'boolean';
+  },
+  postflight(value) {
+    const result = value as PackageResults['postflight'] | null;
+    return !!result && (result.bytes === null || result.bytes instanceof ArrayBuffer);
   },
 };
 

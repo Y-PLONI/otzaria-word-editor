@@ -11,7 +11,7 @@ import {
 let nextRequestId = 0;
 
 /**
- * One worker per request: an obsolete opening can terminate its work immediately,
+ * One worker per request: obsolete document work can terminate immediately,
  * without cancelling another document. Vite's IIFE inline worker is classic and
  * starts from a Blob URL, including in the opaque origin of the packaged file:// UI.
  */
@@ -21,7 +21,7 @@ export function runPackageTask<K extends PackageOperation>(
   signal?: AbortSignal,
 ): Promise<PackageResults[K]> {
   return new Promise((resolve, reject) => {
-    const aborted = (): DOMException => new DOMException('Document opening cancelled', 'AbortError');
+    const aborted = (): DOMException => new DOMException('Document processing cancelled', 'AbortError');
     if (signal?.aborted) { reject(aborted()); return; }
     const id = ++nextRequestId;
     const worker = new PackageWorker({ name: `otzaria-docx-${operation}` });
@@ -39,7 +39,7 @@ export function runPackageTask<K extends PackageOperation>(
     function cancel(): void { finish(aborted()); }
 
     worker.onmessage = ({ data }: MessageEvent<PackageResponse<K>>) => {
-      // A stale or unrelated response can never settle another opening.
+      // A stale or unrelated response can never settle another request.
       if (!data || data.id !== id || data.operation !== operation) return;
       if (data.version !== PACKAGE_PROTOCOL_VERSION) {
         finish(new Error('Unsupported package worker protocol')); return;
