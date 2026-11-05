@@ -1166,6 +1166,14 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
      * `readParagraphFormat` הוא הקורא היחיד כרגע, והוא מחפש `id === nodeId`
      * ואת ה-props תחת המפתח של סוג הבלוק.
      */
+    getNodeById: route('getNodeById', () => ({
+      node: { id: blockId, kind: 'paragraph', paragraph: { inlines: [], props: options.paragraphProps ?? {} } },
+      address: { kind: 'block', nodeType: 'paragraph', nodeId: blockId },
+    })),
+    getNode: route('getNode', (input) => ({
+      node: { id: blockId, kind: 'paragraph', paragraph: { inlines: [], props: options.paragraphProps ?? {} } },
+      address: input,
+    })),
     get: route('get', () => ({
       body: [
         {

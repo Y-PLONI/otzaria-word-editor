@@ -121,6 +121,7 @@
  * את הטקסט שנמחק ושותק.
  */
 import { PASTE_STARTED } from './paste-events';
+import { invalidateDocumentReads } from './document-read-state';
 import type { SuperDoc } from 'superdoc';
 import type { DocReceipt, MaybePromise } from './document-api';
 import { planListAutoformat, type ListAutoformat } from './list-autoformat';
@@ -663,7 +664,9 @@ export function installListAutoformat(options: ListAutoformatOptions): ListAutof
         break;
       }
     }
-    await Promise.allSettled(calls);
+    // This app-owned history path bypasses the engine's first-party keyboard
+    // route. Invalidate after settlement, even when no editor-update was emitted.
+    await Promise.allSettled(calls).finally(() => invalidateDocumentReads(doc));
     forgetKinds();
     const after = await historyDepth(doc);
     if (whole && group && after) {
@@ -895,6 +898,7 @@ export function installListAutoformat(options: ListAutoformatOptions): ListAutof
     } finally {
       applying = false;
       lastTyped = null;
+      invalidateDocumentReads(doc);
     }
   }
 

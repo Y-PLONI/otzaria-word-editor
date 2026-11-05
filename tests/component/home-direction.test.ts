@@ -1,26 +1,7 @@
-/**
- * חיווי „פעיל” של כפתורי „כיוון פסקה מימין לשמאל”/„משמאל לימין” ב-HomeTab.vue.
- *
- * docs/button-audit.md, שורה ה' (‏„קשה לתקן”): „הכתיבה מצליחה; הפקודה אינה
- * מדווחת active”. **נמדד מחדש מול superdoc@2.10.0** (Chrome headless, ה-dist
- * הארוז, scripts/qa/home-paragraph-qa.mjs) לפני שנגעו כאן — הבאג עדיין קיים:
- * `<w:bidi/>` נכתב נכון, אבל `ui.commands.get('direction-rtl').getState()`
- * חוזר `active:false` תמיד. `createCommandDouble` שבכפילי הבדיקה משקף בדיוק
- * את זה — ברירת המחדל שלו היא `active:false` לכל פקודה, ואין לה שום דרך
- * לדעת על `bidi`.
- *
- * המעקף (HomeTab.vue) קורא `bidi` ישירות מ-`doc.get()` דרך
- * `readParagraphIndents` (engine/paragraph-format.ts, נבדקת בנפרד ביחידה
- * ב-tests/unit/paragraph-format.test.ts) — ולכן הבדיקות כאן מגדירות את
- * `paragraphProps` של כפיל המסמך, לא את מצב הפקודה של כפיל האדפטר.
- *
- * מה שאין כאן: מעבר בין פסקאות דרך `ui.selection.observe` בזמן אמת — כפיל
- * ה-`ui.selection` בהרכבה חושף רק `getSnapshot`/`apply`, בלי `observe` (כמו
- * במנוע האמיתי בבדיקות האלה, שאין להן חיבור ל-DOM/מנוע אמיתי). זה בדיוק
- * הפער שבין בדיקת קומפוננטה לשער QA בדפדפן אמיתי: „מעבר בין פסקאות מעדכן
- * חי” נמדד ב-scripts/qa/home-paragraph-qa.mjs מול דפדפן אמיתי, לא כאן.
- */
+/** Direction readouts must follow document changes even when the engine emits no selection/onUpdate event. */
 import { describe, expect, it, vi } from 'vitest';
+import { invalidateDocumentReads } from '../../src/engine/document-read-state';
+import type { ParagraphFormatDocumentApi } from '../../src/engine/paragraph-format';
 import HomeTab from '../../src/ui/ribbon/tabs/HomeTab.vue';
 import { autoUnmount, buttonByTip, createSuperdocDouble, mountUi, settle } from './harness';
 
@@ -118,4 +99,80 @@ describe('כיוון פסקה — חיווי „פעיל” נקרא מה-pPr, �
       vi.useRealTimers();
     }
   });
+  it('refreshes after formatting/Undo/Redo invalidation without a selection event', async () => {
+    vi.useFakeTimers();
+    try {
+      const props = { bidi: true };
+      const superdoc = createSuperdocDouble({ paragraphProps: props });
+      const doc = superdoc.host.activeEditor!.doc;
+      const harness = mountUi(HomeTab, { superdoc });
+      await vi.advanceTimersByTimeAsync(150);
+      await settle();
+      expect(buttonByTip(harness.wrapper, RTL_TIP).attributes('aria-pressed')).toBe('true');
+      for (const bidi of [false, true, false]) {
+        props.bidi = bidi;
+        invalidateDocumentReads(doc);
+        await vi.advanceTimersByTimeAsync(150);
+        await settle();
+        expect(buttonByTip(harness.wrapper, RTL_TIP).attributes('aria-pressed')).toBe(String(bidi));
+        expect(buttonByTip(harness.wrapper, LTR_TIP).attributes('aria-pressed')).toBe(String(!bidi));
+      }
+      expect(superdoc.inputs('get')).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('rejects a pending old paragraph as soon as selection moves, while the next read is debounced', async () => {
+    vi.useFakeTimers();
+    try {
+      const superdoc = createSuperdocDouble();
+      const doc = superdoc.host.activeEditor!.doc as unknown as ParagraphFormatDocumentApi;
+      let notifySelection!: () => void;
+      const selection = superdoc.host.ui.selection as unknown as { observe: (callback: () => void) => () => void };
+      const unsubscribe = vi.fn();
+      selection.observe = (callback) => { notifySelection = callback; return unsubscribe; };
+      let blockId = 'p1';
+      doc.selection = { current: () => ({ target: { segments: [{ blockId, range: { start: 0, end: 0 } }] } }) };
+      let resolve!: (value: unknown) => void;
+      doc.getNodeById = () => new Promise((done) => { resolve = done; });
+      const harness = mountUi(HomeTab, { superdoc });
+      await vi.advanceTimersByTimeAsync(150);
+      blockId = 'p2';
+      notifySelection();
+      resolve({ node: { kind: 'paragraph', paragraph: { props: { bidi: true } } }, address: { kind: 'block', nodeType: 'paragraph', nodeId: 'p1' } });
+      await settle();
+      expect(buttonByTip(harness.wrapper, RTL_TIP).attributes('aria-pressed')).toBe('false');
+      await vi.advanceTimersByTimeAsync(150);
+      resolve({ node: { kind: 'paragraph', paragraph: { props: { bidi: false } } }, address: { kind: 'block', nodeType: 'paragraph', nodeId: 'p2' } });
+      await settle();
+      expect(buttonByTip(harness.wrapper, LTR_TIP).attributes('aria-pressed')).toBe('true');
+      harness.wrapper.unmount();
+      expect(unsubscribe).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not publish a pending read from the previous document after switching tabs', async () => {
+    vi.useFakeTimers();
+    try {
+      const old = createSuperdocDouble();
+      const doc = old.host.activeEditor!.doc as unknown as ParagraphFormatDocumentApi;
+      let resolve!: (value: unknown) => void;
+      doc.getNode = (address) => new Promise((done) => { resolve = () => done({ node: { kind: 'paragraph', paragraph: { props: { bidi: true } } }, address }); });
+      const harness = mountUi(HomeTab, { superdoc: old });
+      await vi.advanceTimersByTimeAsync(150);
+      await harness.setSuperdoc(createSuperdocDouble({ paragraphProps: { bidi: false } }));
+      await vi.advanceTimersByTimeAsync(150);
+      await settle();
+      expect(buttonByTip(harness.wrapper, LTR_TIP).attributes('aria-pressed')).toBe('true');
+      resolve(undefined);
+      await settle();
+      expect(buttonByTip(harness.wrapper, LTR_TIP).attributes('aria-pressed')).toBe('true');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
 });

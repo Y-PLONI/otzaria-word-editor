@@ -57,6 +57,7 @@ import type { SuperDoc } from 'superdoc';
 import type { CommandOutcome } from './command-adapter';
 import { receiptFailureText, thrownText, type DocReceipt, type MaybePromise } from './document-api';
 import { readDocSelection, type SelectionDocumentApi } from './doc-selection';
+import { getDocumentReadRevision, invalidateDocumentReads, type DocumentReadRevision } from './document-read-state';
 
 /** הנוסח שהתכנית קובעת ב-§12 לפקד שאין לו API זמין. זהה ל-page-break.ts. */
 const UNAVAILABLE_TEXT = 'אינו זמין בגרסה זו';
@@ -132,6 +133,7 @@ function unsupported(failedAction: string): CommandOutcome {
 
 /** קריאה בודדת לפעולת מנוע: לעולם לא זורקת, ו-NO_OP היא הצלחה. */
 async function call(
+  doc: ParagraphFormatDocumentApi | null,
   failedAction: string,
   run: () => MaybePromise<DocReceipt>,
 ): Promise<CommandOutcome> {
@@ -140,6 +142,9 @@ async function call(
     receipt = await run();
   } catch (error) {
     return { ok: false, message: thrownText(failedAction, error), reason: 'threw' };
+  } finally {
+    // גם כשל עשוי להגיע אחרי שינוי חלקי. שומרים את המסמך שעליו הפעולה התחילה.
+    invalidateDocumentReads(doc);
   }
   if (receipt?.success === false && receipt.failure?.code !== 'NO_OP') {
     return { ok: false, message: receiptFailureText(failedAction, receipt), reason: receipt.failure?.code };
@@ -173,14 +178,17 @@ export interface ParagraphFormatDocumentApi extends SelectionDocumentApi {
    * מחזיר את המסמך (נמדד; ב-2.20 שתיהן עבדו). מכאן `GET_ALL`.
    */
   get?: (input: typeof GET_ALL) => MaybePromise<unknown>;
+  /** Public 2.23 node reads return an SDNodeResult envelope, not the node itself. */
+  getNodeById?: (input: { nodeId: string }) => MaybePromise<unknown>;
+  getNode?: (address: ParagraphTarget) => MaybePromise<unknown>;
   blocks?: {
-    list?: () => MaybePromise<
+    list?: (input: { nodeIds: readonly string[]; in?: unknown }) => MaybePromise<
       { blocks?: readonly { nodeId?: string; nodeType?: string }[] } | undefined
     >;
   };
   lists?: {
     getState?: (input: {
-      target: { kind: 'block'; nodeType: 'paragraph' | 'listItem'; nodeId: string };
+      target: { kind: 'block'; nodeType: 'paragraph' | 'listItem'; nodeId: string; story?: unknown };
     }) => MaybePromise<{ success?: boolean; isListItem?: boolean } | undefined>;
   };
 }
@@ -210,8 +218,8 @@ export interface ParagraphTarget {
  * ולא ליטרל מקובע: כתובת עם `nodeType:'paragraph'` על בלוק שהוא בפועל
  * `heading` או `listItem` היא כתובת פסולה, וכתיבה חזרה אליה נכשלת.
  *
- * `blocks.list` מונה בלוקים עליונים בלבד (בקריאה אחת — בלי ארגומנטים הוא
- * מחזיר את כל הסיפור, נמדד), ולכן פריט רשימה בתוך תא טבלה אינו שם; שם
+ * `blocks.list({nodeIds})` מסנן לפני העימוד, אך מונה בלוקים עליונים בלבד,
+ * ולכן פריט רשימה בתוך תא טבלה אינו שם; שם
  * מכריע `lists.getState`, כמו ב-`resolveListItem` ב-lists.ts. כותרת
  * ממוספרת נשארת `heading`: זה מה ש-`blocks.list` מדווח, וכתובת ההפסקה
  * שלה היא כתובת כותרת.
@@ -223,11 +231,13 @@ export interface ParagraphTarget {
 async function resolveBlockType(
   doc: ParagraphFormatDocumentApi,
   blockId: string,
+  story?: unknown,
+  fallback: ParagraphBlockType = 'paragraph',
 ): Promise<ParagraphBlockType> {
   const list = doc.blocks?.list;
   if (typeof list === 'function') {
     try {
-      const listed = await list();
+      const listed = await list.call(doc.blocks, { nodeIds: [blockId], ...(story ? { in: story } : {}) });
       const found = (listed?.blocks ?? []).find((b) => b.nodeId === blockId);
       if (found) {
         return found.nodeType === 'heading' || found.nodeType === 'listItem'
@@ -239,10 +249,14 @@ async function resolveBlockType(
     }
   }
 
+  // A targeted read resolves headings inside tables, which blocks.list omits.
+  if (fallback !== 'paragraph') return fallback;
   const getState = doc.lists?.getState;
   if (typeof getState !== 'function') return 'paragraph';
   try {
-    const state = await getState({ target: { kind: 'block', nodeType: 'paragraph', nodeId: blockId } });
+    const state = await getState.call(doc.lists, {
+      target: { kind: 'block', nodeType: 'paragraph', nodeId: blockId, ...(story ? { story } : {}) },
+    });
     return state?.success === true && state.isListItem ? 'listItem' : 'paragraph';
   } catch {
     return 'paragraph';
@@ -263,7 +277,7 @@ async function resolveTarget(
     return { error: { ok: false, message: 'יש למקם את הסמן במסמך', reason: 'selection-required' } };
   }
   const doc = docOf(host);
-  const nodeType = doc ? await resolveBlockType(doc, selection.blockId) : 'paragraph';
+  const nodeType = doc ? await resolveBlockType(doc, selection.blockId, selection.story) : 'paragraph';
   return {
     target: {
       kind: 'block',
@@ -351,16 +365,9 @@ function nodeParagraphId(node: object): string | undefined {
 }
 
 /**
- * התכונות של הפסקה שמזהה שלה `blockId`, מתוך המסמך שהוחזר מ-`doc.get()`.
- *
- * מיוצאת מפני שהסרגל (engine/page-ruler.ts) קורא את אותה פסקה בדיוק, ושני
- * מאתרים לאותו צומת היו נפרדים ביום שבו המודל ישנה צורה.
- *
- * פער ידוע, לא נסגר: הסריקה עוברת רק על `body` ברמה העליונה ולא נכנסת
- * לתוך טבלה — פסקה בתוך תא טבלה לא תיפתר כאן, ותוחזר `undefined`. עבור
- * חיווי הכיוון (RTL/LTR) ב-HomeTab.vue זה אומר `bidi` יחשב `false`
- * כברירת מחדל, מה שעלול להדליק את כפתור LTR בטעות על תא RTL. לא אומת
- * אמפירית אם זה קורה בפועל (אין תשתית QA לטבלאות עדיין) — נשאר לבדיקה.
+ * Explicit dialog/selection reads still consume the full document model here.
+ * This legacy walker covers top-level body nodes; background direction/ruler
+ * reads use readTargetedParagraph, which also resolves table and other stories.
  */
 export function findParagraphProps(document: unknown, blockId: string): RawParagraphProps | undefined {
   if (!document || typeof document !== 'object') return undefined;
@@ -549,47 +556,116 @@ export interface ParagraphIndentReading {
   indents: ParagraphIndents;
 }
 
+/** A canonical story key keeps equal paragraph IDs in different stories separate. */
+function storyKey(story: unknown): string | null {
+  if (!story || (story as { storyType?: unknown }).storyType === 'body') return '';
+  try {
+    return JSON.stringify(story, (_key, value: unknown) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+      return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)));
+    }) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Ruler equality must include the write target's type and story, not just its ID. */
+export function sameParagraphTarget(a: ParagraphTarget | null, b: ParagraphTarget | null): boolean {
+  if (!a || !b) return a === b;
+  const story = storyKey(a.story);
+  return a.nodeId === b.nodeId && a.nodeType === b.nodeType && story !== null && story === storyKey(b.story);
+}
+
+interface ParagraphReadCache {
+  revision: DocumentReadRevision;
+  lastKey?: string;
+  last?: ParagraphIndentReading;
+  pending: Map<string, Promise<ParagraphIndentReading | null>>;
+}
+
+// One completed paragraph per document, plus only currently pending requests.
+// A new revision never reuses a previous revision's cached reading.
+const paragraphReads = new WeakMap<ParagraphFormatDocumentApi, ParagraphReadCache>();
+
+async function readTargetedParagraph(
+  doc: ParagraphFormatDocumentApi,
+  nodeId: string,
+  story: unknown,
+  revision: DocumentReadRevision,
+): Promise<ParagraphIndentReading | null> {
+  const address: ParagraphTarget = {
+    kind: 'block', nodeType: 'paragraph', nodeId, ...(story ? { story } : {}),
+  };
+  let envelope: unknown;
+  // getNodeById has no story parameter in 2.23. A non-body read must use getNode.
+  if (storyKey(story) === '' && typeof doc.getNodeById === 'function') {
+    envelope = await doc.getNodeById({ nodeId });
+  } else if (typeof doc.getNode === 'function') {
+    envelope = await doc.getNode(address);
+  } else {
+    return null;
+  }
+  if (getDocumentReadRevision(doc) !== revision || !envelope || typeof envelope !== 'object') return null;
+  const { node, address: resolved } = envelope as { node?: unknown; address?: ParagraphTarget };
+  if (!node || typeof node !== 'object' || resolved?.kind !== 'block' || resolved.nodeId !== nodeId) return null;
+  const id = nodeParagraphId(node);
+  if (id && id !== nodeId) return null;
+  const projected = node as { kind?: string; paragraph?: { props?: RawParagraphProps }; heading?: { props?: RawParagraphProps } };
+  if (projected.kind !== 'paragraph' && projected.kind !== 'heading') return null;
+
+  // A list item is projected as a paragraph by 2.23. Resolve its write type with
+  // a filtered list, with lists.getState as the fallback for paragraphs in cells.
+  const hint = resolved.nodeType === 'heading' || resolved.nodeType === 'listItem' ? resolved.nodeType : 'paragraph';
+  const nodeType = await resolveBlockType(doc, nodeId, story, hint);
+  return {
+    target: { ...address, nodeType },
+    indents: indentsFromProps(projected.paragraph?.props ?? projected.heading?.props),
+  };
+}
+
 /**
- * הכניסות של הפסקה שהסמן בה — הקריאה שהסרגל עושה על כל תזוזת סמן.
+ * Home's direction indicator and the ruler share one targeted read per paragraph
+ * and document revision. Caret offsets do not affect the key. No full-document
+ * read or unfiltered blocks.list is allowed on this background path.
  *
- * למה קריאה נפרדת ולא `readParagraphFormat`: זו מחזירה תצלום מלא ומנסחת
- * הודעות כשל בעברית („פתיחת תפריט הפסקה נכשלה”), וזה נכון לדיאלוג שנפתח
- * בלחיצה. הסרגל אינו פעולה של המשתמש אלא תצוגה שרצה ברקע: אין לו על מה
- * להתלונן, ו„אין סמן במסמך” הוא אצלו מצב רגיל — פשוט אין סמני כניסה לצייר.
- * לכן `null` בכל מסלול שאינו מצליח, ואף הודעה.
- *
- * המחיר של `doc.get()` מוכר — הוא סורק את המסמך כולו — ולכן הקריאה מושהית
- * ב-`createRulerModel` (engine/page-ruler.ts), בדיוק כמו ספירת המילים.
+ * A dispatched engine call cannot be cancelled; its result is discarded when
+ * its document/revision changes. UI consumers additionally reject old selections.
  */
 export async function readParagraphIndents(
   host: ParagraphFormatTarget,
 ): Promise<ParagraphIndentReading | null> {
   const doc = docOf(host);
-  if (!doc || typeof doc.get !== 'function') return null;
-
+  if (!doc) return null;
+  const revision = getDocumentReadRevision(doc);
+  const current = () => docOf(host) === doc && getDocumentReadRevision(doc) === revision;
   const selection = await readDocSelection(host);
-  if (!selection.blockId) return null;
+  if (!selection.blockId || !current()) return null;
+  const story = storyKey(selection.story);
+  if (story === null) return null;
+  const key = JSON.stringify([selection.blockId, story]);
 
-  let document: unknown;
-  try {
-    document = await doc.get(GET_ALL);
-  } catch {
-    return null;
+  let cache = paragraphReads.get(doc);
+  if (!cache || cache.revision !== revision) {
+    cache = { revision, pending: new Map() };
+    paragraphReads.set(doc, cache);
   }
-
-  // אותה גזירה כמו ב-`resolveTarget`: הסרגל מצייר סמני כניסה גם על כותרת
-  // ופריט רשימה, וכתיבה חזרה דרכם דורשת את ה-`nodeType` האמיתי שלהם.
-  const nodeType = await resolveBlockType(doc, selection.blockId);
-
-  return {
-    target: {
-      kind: 'block',
-      nodeType,
-      nodeId: selection.blockId,
-      ...(selection.story ? { story: selection.story } : {}),
-    },
-    indents: indentsFromProps(findParagraphProps(document, selection.blockId)),
-  };
+  if (cache.lastKey === key && cache.last) return cache.last;
+  cache.lastKey = key;
+  cache.last = undefined;
+  let pending = cache.pending.get(key);
+  if (!pending) {
+    const owner = cache;
+    pending = readTargetedParagraph(doc, selection.blockId, selection.story, revision)
+      .catch(() => null)
+      .then((reading) => {
+        owner.pending.delete(key);
+        if (reading && getDocumentReadRevision(doc) === revision && owner.lastKey === key) owner.last = reading;
+        return reading;
+      });
+    cache.pending.set(key, pending);
+  }
+  const reading = await pending;
+  return current() ? reading : null;
 }
 
 /** כניסות הפסקה, ב-twips. `special` קובע אם `firstLine` או `hanging` נשלחים — בדיוק כמו „מיוחד” ב-Word. */
@@ -617,7 +693,8 @@ export async function applyParagraphIndentation(
     return { ok: false, message: `${failedAction}: הערכים חייבים להיות מספרים לא-שליליים`, reason: 'invalid-input' };
   }
 
-  const paragraph = docOf(host)?.format?.paragraph;
+  const doc = docOf(host);
+  const paragraph = doc?.format?.paragraph;
   const setIndentation = paragraph?.setIndentation;
   if (typeof setIndentation !== 'function') return unsupported(failedAction);
 
@@ -626,13 +703,14 @@ export async function applyParagraphIndentation(
   if (settings.special === 'firstLine') payload.firstLine = amount;
   if (settings.special === 'hanging') payload.hanging = amount;
 
-  return call(failedAction, () => setIndentation(payload));
+  return call(doc, failedAction, () => setIndentation(payload));
 }
 
 export function clearParagraphIndentation(host: ParagraphFormatTarget, target: unknown): Promise<CommandOutcome> {
-  const clear = docOf(host)?.format?.paragraph?.clearIndentation;
+  const doc = docOf(host);
+  const clear = doc?.format?.paragraph?.clearIndentation;
   if (typeof clear !== 'function') return Promise.resolve(unsupported('ניקוי הכניסות נכשל'));
-  return call('ניקוי הכניסות נכשל', () => clear({ target }));
+  return call(doc, 'ניקוי הכניסות נכשל', () => clear({ target }));
 }
 
 /** ריווח הפסקה, ב-twips. `rule:'auto'` עם `lineTwips` הוא הכפל (240=שורה, 480=כפולה). */
@@ -659,16 +737,18 @@ export async function applyParagraphSpacing(
     return { ok: false, message: `${failedAction}: סוג מרווח השורות אינו חוקי`, reason: 'invalid-input' };
   }
 
-  const setSpacing = docOf(host)?.format?.paragraph?.setSpacing;
+  const doc = docOf(host);
+  const setSpacing = doc?.format?.paragraph?.setSpacing;
   if (typeof setSpacing !== 'function') return unsupported(failedAction);
 
-  return call(failedAction, () => setSpacing({ target, before, after, line, lineRule: settings.rule }));
+  return call(doc, failedAction, () => setSpacing({ target, before, after, line, lineRule: settings.rule }));
 }
 
 export function clearParagraphSpacing(host: ParagraphFormatTarget, target: unknown): Promise<CommandOutcome> {
-  const clear = docOf(host)?.format?.paragraph?.clearSpacing;
+  const doc = docOf(host);
+  const clear = doc?.format?.paragraph?.clearSpacing;
   if (typeof clear !== 'function') return Promise.resolve(unsupported('ניקוי הריווח נכשל'));
-  return call('ניקוי הריווח נכשל', () => clear({ target }));
+  return call(doc, 'ניקוי הריווח נכשל', () => clear({ target }));
 }
 
 /* ------------------------------------------------------------------ */
@@ -690,12 +770,13 @@ export function clearParagraphSpacing(host: ParagraphFormatTarget, target: unkno
 async function resolveBlockTypes(
   doc: ParagraphFormatDocumentApi,
   blockIds: readonly string[],
+  story?: unknown,
 ): Promise<Map<string, ParagraphBlockType>> {
   const types = new Map<string, ParagraphBlockType>();
   const list = doc.blocks?.list;
   if (typeof list !== 'function') return types;
   try {
-    const listed = await list();
+    const listed = await list.call(doc.blocks, { nodeIds: blockIds, ...(story ? { in: story } : {}) });
     for (const block of listed?.blocks ?? []) {
       if (typeof block.nodeId !== 'string' || !blockIds.includes(block.nodeId)) continue;
       types.set(
@@ -760,7 +841,7 @@ export async function readSelectionSpacing(
     return null;
   }
 
-  const types = await resolveBlockTypes(doc, selection.blockIds);
+  const types = await resolveBlockTypes(doc, selection.blockIds, selection.story);
   return selection.blockIds.map((blockId) => ({
     target: {
       kind: 'block' as const,
@@ -870,7 +951,8 @@ export async function applySelectionSpacing(
   if (!entries.length) {
     return { ok: false, message: 'יש למקם את הסמן במסמך', reason: 'selection-required' };
   }
-  const setSpacing = docOf(host)?.format?.paragraph?.setSpacing;
+  const doc = docOf(host);
+  const setSpacing = doc?.format?.paragraph?.setSpacing;
   if (typeof setSpacing !== 'function') return unsupported(failedAction);
 
   for (const entry of entries) {
@@ -879,7 +961,7 @@ export async function applySelectionSpacing(
     if ((before !== null && nonNegativeInt(before) === null) || (after !== null && nonNegativeInt(after) === null)) {
       return { ok: false, message: `${failedAction}: הערכים חייבים להיות מספרים לא-שליליים`, reason: 'invalid-input' };
     }
-    const outcome = await call(failedAction, () =>
+    const outcome = await call(doc, failedAction, () =>
       setSpacing({
         target: entry.target,
         ...(before === null ? {} : { before }),
@@ -949,9 +1031,10 @@ export async function applyParagraphContextualSpacing(
   contextualSpacing: boolean,
 ): Promise<CommandOutcome> {
   const failedAction = 'שינוי הריווח בין פסקאות מאותו סגנון נכשל';
-  const setFlowOptions = docOf(host)?.format?.paragraph?.setFlowOptions;
+  const doc = docOf(host);
+  const setFlowOptions = doc?.format?.paragraph?.setFlowOptions;
   if (typeof setFlowOptions !== 'function') return unsupported(failedAction);
-  return call(failedAction, () => setFlowOptions({ target, contextualSpacing }));
+  return call(doc, failedAction, () => setFlowOptions({ target, contextualSpacing }));
 }
 
 export async function applyParagraphKeepOptions(
@@ -960,9 +1043,10 @@ export async function applyParagraphKeepOptions(
   options: { keepNext: boolean; keepLines: boolean; widowControl: boolean },
 ): Promise<CommandOutcome> {
   const failedAction = 'שינוי אפשרויות השמירה נכשל';
-  const setKeepOptions = docOf(host)?.format?.paragraph?.setKeepOptions;
+  const doc = docOf(host);
+  const setKeepOptions = doc?.format?.paragraph?.setKeepOptions;
   if (typeof setKeepOptions !== 'function') return unsupported(failedAction);
-  return call(failedAction, () =>
+  return call(doc, failedAction, () =>
     setKeepOptions({
       target,
       keepNext: options.keepNext === true,
@@ -994,10 +1078,11 @@ export async function addParagraphTabStop(
     return { ok: false, message: `${failedAction}: סוג המוביל אינו חוקי`, reason: 'invalid-input' };
   }
 
-  const setTabStop = docOf(host)?.format?.paragraph?.setTabStop;
+  const doc = docOf(host);
+  const setTabStop = doc?.format?.paragraph?.setTabStop;
   if (typeof setTabStop !== 'function') return unsupported(failedAction);
 
-  return call(failedAction, () =>
+  return call(doc, failedAction, () =>
     setTabStop({
       target,
       position,
@@ -1017,15 +1102,17 @@ export async function removeParagraphTabStop(
   if (position === null || position <= 0) {
     return { ok: false, message: `${failedAction}: מיקום העצירה חייב להיות מספר חיובי`, reason: 'invalid-input' };
   }
-  const clearTabStop = docOf(host)?.format?.paragraph?.clearTabStop;
+  const doc = docOf(host);
+  const clearTabStop = doc?.format?.paragraph?.clearTabStop;
   if (typeof clearTabStop !== 'function') return unsupported(failedAction);
-  return call(failedAction, () => clearTabStop({ target, position }));
+  return call(doc, failedAction, () => clearTabStop({ target, position }));
 }
 
 export function clearAllParagraphTabStops(host: ParagraphFormatTarget, target: unknown): Promise<CommandOutcome> {
-  const clearAll = docOf(host)?.format?.paragraph?.clearAllTabStops;
+  const doc = docOf(host);
+  const clearAll = doc?.format?.paragraph?.clearAllTabStops;
   if (typeof clearAll !== 'function') return Promise.resolve(unsupported('ניקוי עצירות הטאב נכשל'));
-  return call('ניקוי עצירות הטאב נכשל', () => clearAll({ target }));
+  return call(doc, 'ניקוי עצירות הטאב נכשל', () => clearAll({ target }));
 }
 
 

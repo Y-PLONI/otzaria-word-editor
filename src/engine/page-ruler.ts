@@ -84,6 +84,7 @@
 import type { CommandOutcome } from './command-adapter';
 import {
   applyParagraphIndentation,
+  sameParagraphTarget,
   type ParagraphIndentReading,
   type ParagraphIndents,
   type ParagraphFormatTarget,
@@ -1507,11 +1508,7 @@ export interface RulerModelSource {
 
 export interface RulerModel {
   getState(): RulerReading | null;
-  /**
-   * הסרגל מוצג או מוסתר. סרגל מוסתר אינו קורא כלום — `doc.get()` סורק את
-   * המסמך כולו, וקריאה שלו על כל תזוזת סמן כשאיש אינו רואה את התוצאה היא
-   * עבודה מיותרת על מסמך של שמונים עמודים.
-   */
+  /** סרגל מוסתר אינו קורא את המסמך ואינו מחזיק תזמון רענון. */
   setEnabled(enabled: boolean): void;
   noteSelectionChanged(): void;
   noteDocumentChanged(): void;
@@ -1526,10 +1523,7 @@ export interface RulerModel {
  */
 export const RULER_SELECTION_DEBOUNCE_MS = 150;
 
-/**
- * השהיית הקריאה אחרי שינוי במסמך. ארוכה יותר — הקלדה אינה משנה כניסות,
- * והקריאה סורקת את המסמך כולו.
- */
+/** שינוי תוכן בלבד יכול להמתין; אירוע בחירה באותו רצף מקצר את ההשהיה. */
 export const RULER_DOCUMENT_DEBOUNCE_MS = 500;
 
 /**
@@ -1544,8 +1538,10 @@ export function createRulerModel(source: RulerModelSource): RulerModel {
   let enabled = false;
   let disposed = false;
   let generation = 0;
-  let selectionTimer: ReturnType<typeof setTimeout> | undefined;
-  let documentTimer: ReturnType<typeof setTimeout> | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let scheduledDelay = Infinity;
+  let running = false;
+  let rerun = false;
 
   /**
    * כל שדה של הדף נבדק, ולא רק אלה שהסרגל האופקי צריך.
@@ -1574,7 +1570,7 @@ export function createRulerModel(source: RulerModelSource): RulerModel {
       a.indents?.firstLineTwips === b.indents?.firstLineTwips &&
       a.indents?.hangingTwips === b.indents?.hangingTwips &&
       a.indents?.bidi === b.indents?.bidi &&
-      a.target?.nodeId === b.target?.nodeId
+      sameParagraphTarget(a.target, b.target)
     );
   }
 
@@ -1584,77 +1580,96 @@ export function createRulerModel(source: RulerModelSource): RulerModel {
     source.onChange(next);
   }
 
-  async function read(): Promise<void> {
-    const mine = ++generation;
-    if (!enabled) {
-      publish(null);
-      return;
-    }
-
-    let page: PageMarginsState | null = null;
-    try {
-      page = await source.readPage();
-    } catch {
-      page = null;
-    }
-    if (disposed || mine !== generation) return;
-    if (!page) {
-      publish(null);
-      return;
-    }
-
-    let paragraph: ParagraphIndentReading | null = null;
-    try {
-      paragraph = await source.readIndents();
-    } catch {
-      paragraph = null;
-    }
-    if (disposed || mine !== generation) return;
-
-    publish({
-      page,
-      indents: paragraph?.indents ?? null,
-      target: paragraph?.target ?? null,
-    });
+  function cancelTimer(): void {
+    clearTimeout(timer);
+    timer = undefined;
+    scheduledDelay = Infinity;
   }
 
-  function schedule(which: 'selection' | 'document'): void {
+  async function read(): Promise<void> {
     if (disposed || !enabled) return;
-    if (which === 'selection') {
-      clearTimeout(selectionTimer);
-      selectionTimer = setTimeout(() => void read(), RULER_SELECTION_DEBOUNCE_MS);
+    if (running) {
+      rerun = true;
       return;
     }
-    clearTimeout(documentTimer);
-    documentTimer = setTimeout(() => void read(), RULER_DOCUMENT_DEBOUNCE_MS);
+    running = true;
+    const mine = generation;
+    try {
+      let page: PageMarginsState | null = null;
+      try {
+        page = await source.readPage();
+      } catch {
+        // A failed background read clears the readout without reporting a command error.
+      }
+      if (disposed || mine !== generation) return;
+      if (!page) {
+        publish(null);
+        return;
+      }
+
+      let paragraph: ParagraphIndentReading | null = null;
+      try {
+        paragraph = await source.readIndents();
+      } catch {
+        // The page is still useful when there is no readable paragraph selection.
+      }
+      if (disposed || mine !== generation) return;
+      publish({ page, indents: paragraph?.indents ?? null, target: paragraph?.target ?? null });
+    } finally {
+      running = false;
+      // Keep at most one read in flight and one request to read the latest state.
+      if (rerun && timer === undefined && !disposed && enabled) {
+        rerun = false;
+        void read();
+      }
+    }
+  }
+
+  function schedule(delay: number): void {
+    if (disposed || !enabled) return;
+    // Invalidate immediately, not only when the debounce expires.
+    generation += 1;
+    rerun = false;
+    scheduledDelay = Math.min(scheduledDelay, delay);
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      timer = undefined;
+      scheduledDelay = Infinity;
+      void read();
+    }, scheduledDelay);
+  }
+
+  function refreshNow(): void {
+    generation += 1;
+    cancelTimer();
+    void read();
   }
 
   return {
     getState: () => reading,
 
     setEnabled(next) {
-      if (enabled === next) return;
+      if (disposed || enabled === next) return;
       enabled = next;
+      generation += 1;
+      cancelTimer();
+      rerun = false;
       if (!enabled) {
-        // הדור עולה כדי שקריאה שבאוויר לא תדווח אחרי הכיבוי.
-        generation += 1;
-        clearTimeout(selectionTimer);
-        clearTimeout(documentTimer);
         publish(null);
         return;
       }
       void read();
     },
 
-    noteSelectionChanged: () => schedule('selection'),
-    noteDocumentChanged: () => schedule('document'),
-    refreshNow: () => void read(),
+    noteSelectionChanged: () => schedule(RULER_SELECTION_DEBOUNCE_MS),
+    noteDocumentChanged: () => schedule(RULER_DOCUMENT_DEBOUNCE_MS),
+    refreshNow,
 
     dispose() {
       disposed = true;
       generation += 1;
-      clearTimeout(selectionTimer);
-      clearTimeout(documentTimer);
+      rerun = false;
+      cancelTimer();
     },
   };
 }

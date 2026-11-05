@@ -606,6 +606,7 @@ import {
 } from './engine/formatting-marks';
 import type { FormattingMarksBlock } from './engine/formatting-marks-layer';
 import { readParagraphIndents, toggleSelectionSpacing } from './engine/paragraph-format';
+import { forgetDocumentReads, invalidateDocumentReads, observeDocumentReadInvalidation } from './engine/document-read-state';
 import type { RulerUnit } from './engine/ruler-geometry';
 import {
   applyHebrewDocumentDefaults,
@@ -889,6 +890,9 @@ provide(READOUT_SELECTION, readoutSelection);
  */
 const activeSuperdoc = shallowRef<SuperDoc | null>(null);
 provide(ACTIVE_SUPERDOC, activeSuperdoc);
+// גם חזרה לטאב קיים מתחילה מקריאה טרייה: פעולה אסינכרונית עשויה להסתיים
+// כשהמסמך שלו ברקע. הפסילה סינכרונית, לפני שקוראי התצוגה יראו את הטאב.
+watch(activeSuperdoc, (host) => invalidateDocumentReads(host?.activeEditor?.doc), { flush: 'sync' });
 
 /**
  * ה-container של המסמך הפתוח — installBookCompletion (engine/book-completion-
@@ -1907,6 +1911,8 @@ function setStatus(text: string, isError = false): void {
  * שבור. כאן ההודעה נכנסת לשורת המצב, ובכשל גם ללוג של אוצריא.
  */
 function reportCommand(outcome: CommandOutcome, commandId: string): void {
+  // יש פעולות עיצוב שלא מפעילות onUpdate; כשל יכול להגיע אחרי שינוי חלקי.
+  invalidateDocumentReads(activeSuperdoc.value?.activeEditor?.doc);
   if (!outcome.ok) {
     setStatus(outcome.message, true);
     console.warn(`[otzaria-word] ${commandId} נכשלה: ${outcome.message} (${outcome.reason ?? '—'})`);
@@ -2253,17 +2259,18 @@ function updateShellView(patch: Partial<SessionView>): void {
  * עריכה) ועשויה להיקרא בזמן שהטאב הזה ברקע.
  */
 function createOpenEditorForSession(session: DocumentSession): OpenEditor {
-  return (host, source, signal) =>
-    createEditor({
+  return (host, source, signal) => {
+    return createEditor({
       container: host,
       source,
       signal,
       onError: (err) => console.error('[otzaria-word] שגיאת מנוע:', err),
       onStatus: (message, isError) => setStatus(message, isError),
       onUpdate: () => {
+        // createEditor invalidates the originating document before notifying
+        // this session, including commits made before its promise resolves.
         session.save.markDirty();
         session.metrics?.noteDocumentChanged();
-        session.ruler?.noteDocumentChanged();
         session.textCursor?.noteDocumentChanged();
         session.pageBorders?.noteDocumentChanged();
         session.lineNumbers?.noteDocumentChanged();
@@ -2279,6 +2286,7 @@ function createOpenEditorForSession(session: DocumentSession): OpenEditor {
       },
       onPaginationUpdate: (totalPages) => session.metrics?.notePaginationUpdate(totalPages),
     });
+  };
 }
 
 /**
@@ -2648,7 +2656,8 @@ async function trimLiveDocuments(): Promise<void> {
  * ולא נראה”.
  */
 async function applyNewDocumentDirection(superdoc: SuperDoc): Promise<void> {
-  const report = await applyHebrewDocumentDefaults(superdoc);
+  const doc = superdoc.activeEditor?.doc;
+  const report = await applyHebrewDocumentDefaults(superdoc).finally(() => invalidateDocumentReads(doc));
 
   if (report.failures.length === 0) {
     document.documentElement.dataset.documentDirection = 'rtl';
@@ -2806,6 +2815,8 @@ async function openDocumentInto(
   }
   const adapter = createCommandAdapter(editor.ui);
   commandAdapter.value = adapter;
+  const documentApi = editor.superdoc.activeEditor?.doc;
+  editor.onDispose(() => forgetDocumentReads(documentApi));
 
   // ה-`editor.superdoc` המקומי ולא `activeSuperdoc.value` בפירוק: אותה מלכודת
   // כמו באדפטר החיפוש — סגירת המסמך הקודם קורית אחרי שהחדש כבר נרשם.
@@ -2944,6 +2955,7 @@ async function openDocumentInto(
       if (!session || session === activeSession.value) rulerReading.value = next;
     },
   });
+  editor.onDispose(observeDocumentReadInvalidation(documentApi, () => sessionRuler.noteDocumentChanged()));
   ruler = sessionRuler;
   if (session) session.ruler = sessionRuler;
   rulerHost.value = paintedHost(editor.ui);
@@ -4302,6 +4314,7 @@ async function onExportOtzaria(): Promise<void> {
  * היה בו קודם. ראו ההסבר המלא ב-engine/page-break.ts, „QA עצמאי” → „Undo/Redo”.
  */
 function onUndo(): void {
+  invalidateDocumentReads(activeSuperdoc.value?.activeEditor?.doc);
   pageBreakTracker.forgetAllKeepingSnapshot();
   // מיד אחרי זיהוי רשימה — הביטול שלה הוא צעד אחד, כמו ב-Ctrl+Z.
   if (listAutoformat?.undo()) return;
@@ -4309,6 +4322,7 @@ function onUndo(): void {
 }
 
 function onRedo(): void {
+  invalidateDocumentReads(activeSuperdoc.value?.activeEditor?.doc);
   if (!pageBreakTracker.restoreSnapshot()) pageBreakTracker.forgetAll();
   if (listAutoformat?.redo()) return;
   void runShortcutCommand('redo');
@@ -5182,6 +5196,7 @@ function onZoomChange(level: number): void {
  * שהמשתמש עזב אותו.
  */
 function onRulerChanged(): void {
+  invalidateDocumentReads(activeSuperdoc.value?.activeEditor?.doc);
   ruler?.refreshNow();
 }
 
@@ -6159,8 +6174,12 @@ onMounted(async () => {
   // בדיקה בדיוק שלמעלה — QA מדד ש-Ctrl+Z בתוך שדה טקסט של הממשק (חיפוש,
   // למשל) ניקה את המעקב בלי שום קשר למסמך לפני שהיא נוספה.
   undoRedoWatcher = watchUndoRedoKeys({
-    onUndo: () => pageBreakTracker.forgetAllKeepingSnapshot(),
+    onUndo: () => {
+      invalidateDocumentReads(activeSuperdoc.value?.activeEditor?.doc);
+      pageBreakTracker.forgetAllKeepingSnapshot();
+    },
     onRedo: () => {
+      invalidateDocumentReads(activeSuperdoc.value?.activeEditor?.doc);
       if (!pageBreakTracker.restoreSnapshot()) pageBreakTracker.forgetAll();
     },
     isBlocked: isOutsideDocumentEditing,
