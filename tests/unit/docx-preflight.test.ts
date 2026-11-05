@@ -19,7 +19,8 @@
  * לשבור. לכן הבדיקות כאן מודדות גם קינון, גם `w:val` מכובה, וגם מסמך שאין בו
  * מה לתקן ולכן אינו נכתב מחדש בכלל.
  */
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { Blob as NativeBlob } from 'node:buffer';
 import { deflateRawSync } from 'node:zlib';
 import {
   COMPLEX_SCRIPT_BOLD_NOTICE,
@@ -891,6 +892,9 @@ describe('preflightDocx', () => {
 });
 
 describe('preflightSource', () => {
+  // Response.blob() comes from Node's Fetch implementation, so use its Blob
+  // realm too. The browser path retains that Blob before transferring bytes.
+  beforeEach(() => vi.stubGlobal('Blob', NativeBlob));
   it('מסמך ריק עובר כפי שהוא', async () => {
     await expect(preflightSource(undefined)).resolves.toEqual({
       source: undefined,
@@ -1022,7 +1026,7 @@ describe('preflightSource', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => ({
-        arrayBuffer: async () => {
+        blob: async () => {
           vi.stubGlobal(
             'TextEncoder',
             class {
@@ -1031,7 +1035,7 @@ describe('preflightSource', () => {
               }
             },
           );
-          return bytes.buffer;
+          return new Blob([bytes]);
         },
       })),
     );

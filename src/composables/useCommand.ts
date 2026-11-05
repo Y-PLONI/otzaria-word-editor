@@ -1,7 +1,7 @@
 import { ref, watch, onUnmounted, inject, computed, shallowRef } from 'vue';
 import type { CommandAdapter, CommandOutcome } from '../engine/command-adapter';
 import type { CommandState } from 'superdoc/ui';
-import { COMMAND_ADAPTER, COMMAND_REPORTER, READOUT_SELECTION, type CommandReporter } from './keys';
+import { COMMAND_ADAPTER, COMMAND_REPORTER, DOCUMENT_INTERACTION_BLOCKED, READOUT_SELECTION, type CommandReporter } from './keys';
 import { UNSETTLED_SELECTION, heldCommandState, type ReadoutSelection } from '../engine/readout-hold';
 
 /**
@@ -21,6 +21,7 @@ const EMPTY_STATE: CommandState = {
 
 export function useCommand(commandId: string) {
   const adapterRef = inject(COMMAND_ADAPTER, ref(null));
+  const blocked = inject(DOCUMENT_INTERACTION_BLOCKED, ref(false));
   const report = inject(COMMAND_REPORTER, consoleReporter);
   /**
    * ברירת המחדל היא „לא התיישב” ולא „התיישב”: קומפוננטה שמורכבת בלי המעטפת
@@ -87,9 +88,10 @@ export function useCommand(commandId: string) {
   );
 
   /** מה שהפקד מציג: הכול טרי מהמנוע, מלבד הערך שעבר דרך ההחזקה. */
-  const displayed = computed<CommandState>(() =>
-    heldCommandState(state.value, held.value, selection.value),
-  );
+  const displayed = computed<CommandState>(() => {
+    const current = heldCommandState(state.value, held.value, selection.value);
+    return blocked.value ? { ...current, enabled: false, reason: 'not-ready' } : current;
+  });
 
   onUnmounted(() => {
     cleanup();
@@ -101,7 +103,7 @@ export function useCommand(commandId: string) {
    * אתרי קריאה לזכור לטפל בכשל — וזה בדיוק מה שלא קרה עד עכשיו.
    */
   async function run(payload?: unknown): Promise<CommandOutcome> {
-    const outcome = adapterRef.value
+    const outcome = adapterRef.value && !blocked.value
       ? await adapterRef.value.run(commandId, payload)
       : ({ ok: false, message: 'המנוע אינו מוכן', reason: 'not-ready' } as CommandOutcome);
 
@@ -118,7 +120,7 @@ export function useCommand(commandId: string) {
     state: displayed,
     /** המצב הגולמי מהמנוע, בלי החזקה. למי שצריך למדוד את המנוע עצמו. */
     engineState: state,
-    enabled: computed(() => state.value.enabled),
+    enabled: computed(() => displayed.value.enabled),
     active: computed(() => state.value.active),
     value: computed(() => displayed.value.value),
     run,

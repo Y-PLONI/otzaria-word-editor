@@ -164,6 +164,62 @@ describe('משטח ההקלדה של המנוע', () => {
   });
 });
 
+describe('עורך פעיל שננעל לפתיחה', () => {
+  it('חוסם פקודות ופעולות משני שלבי הניתוב, ומאפשר אותן שוב בשחרור', () => {
+    let blocked = true;
+    const { dispatcher, runCommand, runAction } = setup({
+      shortcuts: SHORTCUTS, isDocumentBlocked: () => blocked,
+    });
+    const keys = [
+      { code: 'KeyB', ctrlKey: true },
+      { code: 'Enter', ctrlKey: true },
+      { code: 'KeyE', ctrlKey: true, shiftKey: true },
+    ];
+    for (const init of keys) {
+      const key = event(init);
+      expect(dispatcher.handleCapture(key) || dispatcher.handle(key)).toBe(true);
+      expect(key.preventDefault).toHaveBeenCalled();
+      expect(key.stopPropagation).toHaveBeenCalled();
+    }
+    expect(runCommand).not.toHaveBeenCalled();
+    expect(runAction).not.toHaveBeenCalled();
+    blocked = false;
+    dispatcher.handle(event(keys[0]));
+    dispatcher.handle(event(keys[1]));
+    dispatcher.handleCapture(event(keys[2]));
+    expect(runCommand).toHaveBeenCalledWith('bold', undefined);
+    expect(runAction).toHaveBeenCalledWith('page-break', undefined);
+    expect(runAction).toHaveBeenCalledWith('track-changes', undefined);
+  });
+
+  it('משאיר Escape/F6 ו־Tab, הדבקה ושדות UI לפי החוזה המקורי', () => {
+    const { dispatcher, runAction, runCommand } = setup({
+      shortcuts: SHORTCUTS, isDocumentBlocked: () => true,
+    });
+    for (const init of [{ code: 'Escape' }, { code: 'F6' }, { code: 'F6', shiftKey: true }]) {
+      expect(dispatcher.handle(event(init))).toBe(true);
+    }
+    expect(runAction.mock.calls).toEqual([
+      ['escape', undefined], ['focus-next-region', undefined], ['focus-prev-region', undefined],
+    ]);
+    for (const init of [{ code: 'KeyQ', altKey: true }, { code: 'F8', altKey: true }]) {
+      expect(dispatcher.handleCapture(event(init))).toBe(true);
+    }
+    expect(runAction).toHaveBeenCalledTimes(3);
+    for (const init of [
+      { code: 'Tab' },
+      { code: 'KeyV', ctrlKey: true },
+      { code: 'KeyB', ctrlKey: true, target: element('input') },
+      { code: 'Enter', ctrlKey: true, target: element('textarea') },
+    ]) {
+      const key = event(init);
+      expect(dispatcher.handleCapture(key) || dispatcher.handle(key)).toBe(false);
+      expect(key.preventDefault).not.toHaveBeenCalled();
+    }
+    expect(runCommand).not.toHaveBeenCalled();
+  });
+});
+
 describe('המנתב', () => {
   it('צירוף מוכר: הפקודה רצה דרך האדפטר, וברירת המחדל נבלעת', () => {
     const { dispatcher, runCommand } = setup();
@@ -443,6 +499,21 @@ describe('קיצורים אישיים', () => {
     const harness = setup({ customShortcuts: () => shortcuts, runCustom, ...over });
     return { ...harness, runCustom };
   }
+
+  it('קיצור אישי אינו משנה עורך נעול, בלי להשתלט על שדה UI', () => {
+    let blocked = true;
+    const { dispatcher, runCustom } = withCustom({ isDocumentBlocked: () => blocked });
+    const held = event({ code: 'KeyK', ctrlKey: true, altKey: true });
+    expect(dispatcher.handleCapture(held)).toBe(true);
+    expect(held.preventDefault).toHaveBeenCalled();
+    expect(runCustom).not.toHaveBeenCalled();
+    const field = event({ code: 'KeyK', ctrlKey: true, altKey: true, target: element('input') });
+    expect(dispatcher.handleCapture(field)).toBe(false);
+    expect(field.preventDefault).not.toHaveBeenCalled();
+    blocked = false;
+    expect(dispatcher.handleCapture(event({ code: 'KeyK', ctrlKey: true, altKey: true }))).toBe(true);
+    expect(runCustom).toHaveBeenCalledExactlyOnceWith('cs-1');
+  });
 
   it('צירוף פנוי מגיע לקיצור האישי ונבלע', () => {
     const { dispatcher, runCustom } = withCustom();

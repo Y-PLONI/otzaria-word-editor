@@ -58,6 +58,8 @@ npm run verify    # typecheck, טסטים, build, ועשרים ושלושה שע
 
 `npm test` מריץ את חבילת ה‑vitest. הבדיקות אינן מרימות את מנוע ה‑DOCX — הוא דורש workers ו‑canvas אמיתיים — ולכן ריצה חיה נבדקת בשערי Windows המתועדים ב‑[docs/spike-windows.md](docs/spike-windows.md).
 
+עיבוד ZIP/XML בפתיחה רץ ב־worker. החוזה, ההתאוששות ושער `file://` שמפריד בין זמן עיבוד כולל לחסימת הממשק מתועדים ב־[docs/preflight-worker.md](docs/preflight-worker.md).
+
 ## מסך הטעינה
 
 הבאנדל הארוז הוא כ‑17MB — כ‑12MB לממשק ולמנוע, וכ‑5MB לקוד ה‑workers — וב‑`file://`,

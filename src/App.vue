@@ -18,7 +18,7 @@
       מהזרימה במכה אחת ולהחזיר אותם כלוח צף אחד, בלי שהמסמך יזוז. ראו
       `.shell-top` ב-`<style>`.
     -->
-    <div class="shell-top">
+    <div class="shell-top" :inert="isOpening" :aria-busy="isOpening">
       <!-- רצועת טאבים — העליונה ביותר, מעל הכותרת. אחד ל-`DocumentSession` פתוח. ראו „ריבוי מסמכים” ליד `sessions` בסקריפט. -->
       <DocumentTabsBar
         :tabs="documentTabs"
@@ -37,8 +37,8 @@
         :is-save-error="saveSnapshot.state === 'error'"
         :save-state-text="saveStateMessage"
         :autosave-enabled="autosaveEnabled"
-        :can-undo="canUndo"
-        :can-redo="canRedo"
+        :can-undo="canUndo && !isOpening"
+        :can-redo="canRedo && !isOpening"
         @save="onSave(false)"
         @undo="onUndo"
         @redo="onRedo"
@@ -62,7 +62,7 @@
         :is-exiting="isExiting"
         :book-completion-enabled="bookCompletionEnabled"
         :dictation-state="dictationState"
-        :dictation-read-only="!isDocumentEditable"
+        :dictation-read-only="!canEditDocument"
         :list-autoformat-enabled="listAutoformatEnabled"
         :navigation-pane-visible="navigationPaneVisible"
         @new-doc="openOpenDialog('new')"
@@ -107,7 +107,7 @@
           :viewport-source="rulerViewport"
           :unit="rulerUnit"
           :zoom="zoom.value"
-          :editable="isDocumentEditable"
+          :editable="canEditDocument"
           @changed="onRulerChanged"
         />
       </div>
@@ -135,7 +135,7 @@
         :viewport-source="rulerViewport"
         :unit="rulerUnit"
         :zoom="zoom.value"
-        :editable="isDocumentEditable"
+        :editable="canEditDocument"
         @changed="onRulerChanged"
       />
       <main
@@ -248,6 +248,7 @@
       :result-text="searchCounter"
       :can-replace="canShowReplace"
       :is-replacing="searchState.isReplacing"
+      :read-only="isOpening"
       @close="closeFindDialog"
       @find="onFindText"
       @query-change="onFindQueryChange"
@@ -361,6 +362,8 @@
 
     <MacrosDialog
       :is-open="isMacrosOpen"
+      :busy="isOpening"
+      :is-document-blocked="isActiveEditorBlocked"
       :handle="activeMacros"
       :document-vba="documentVba"
       @close="isMacrosOpen = false"
@@ -420,10 +423,12 @@ import { DOCUMENT_TEMPLATES, applyTemplate, type TemplateId } from './engine/tem
 import type { RecentDocument } from './sessions/recent-documents';
 import { createRecentDocumentStore } from './sessions/recent-document-store';
 import { createCommandAdapter, type CommandAdapter, type CommandOutcome } from './engine/command-adapter';
+import { createEditorInteraction, type EditorInteraction } from './engine/editor-interaction';
 import type { CommandId } from './engine/capabilities';
 import {
   COMMAND_ADAPTER,
   COMMAND_REPORTER,
+  DOCUMENT_INTERACTION_BLOCKED,
   STATUS_NOTIFIER,
   DOCUMENT_GENERATION,
   DRAFT_OPENER,
@@ -798,6 +803,7 @@ const caretIdle = ref(false);
 let caretFocus: CaretFocusHandle | null = null;
 
 const commandAdapter = shallowRef<CommandAdapter | null>(null);
+const editorInteractions = new WeakMap<EditorSession, EditorInteraction>();
 provide(COMMAND_ADAPTER, commandAdapter);
 
 /**
@@ -873,6 +879,7 @@ provide(READOUT_SELECTION, readoutSelection);
  * ה-Document API, והוא יושב על המופע ולא על ה-controller. ראו engine/document-api.ts.
  */
 const activeSuperdoc = shallowRef<SuperDoc | null>(null);
+const interactiveSuperdoc = computed(() => isOpening.value ? null : activeSuperdoc.value);
 provide(ACTIVE_SUPERDOC, activeSuperdoc);
 // גם חזרה לטאב קיים מתחילה מקריאה טרייה: פעולה אסינכרונית עשויה להסתיים
 // כשהמסמך שלו ברקע. הפסילה סינכרונית, לפני שקוראי התצוגה יראו את הטאב.
@@ -928,6 +935,7 @@ const saveExtension = shallowRef<WordExtension>('docx');
  * הכפתורים שלה ממילא מנוטרלים בלי מסמך.
  */
 function onMacroRecord(): boolean {
+  if (isActiveEditorBlocked()) return false;
   const macros = activeMacros.value;
   if (!macros) return false;
   macros.toggleRecording();
@@ -935,6 +943,7 @@ function onMacroRecord(): boolean {
 }
 
 function onMacroPlay(): boolean {
+  if (isActiveEditorBlocked()) return false;
   const macros = activeMacros.value;
   if (!macros) return false;
   macros.replayLast();
@@ -953,6 +962,9 @@ const hasDocument = computed(() => activeSuperdoc.value !== null);
 
 const title = ref('מסמך חדש');
 const isOpening = ref(false);
+// Keep document-bound UI state (notably the pre-protection mode) through a
+// temporary lock. Only replacing the document changes the injected identities.
+provide(DOCUMENT_INTERACTION_BLOCKED, isOpening);
 
 let fontFacesReady = false;
 let fontWorkDisposed = false;
@@ -1424,6 +1436,7 @@ const rulerViewport = shallowRef<ViewportSource | null>(null);
 const rulerUnit = ref<RulerUnit>('cm');
 /** `false` במסמך שפתוח לקריאה בלבד — אז הידיות אינן נגררות. */
 const isDocumentEditable = ref(true);
+const canEditDocument = computed(() => isDocumentEditable.value && !isOpening.value);
 
 /**
  * מצב „גבולות עמוד” של המסמך הפתוח, ל-ui/shell/PageBorderOverlay.vue.
@@ -1875,7 +1888,11 @@ let editBookResolving = false;
  */
 function isOpenBusy(): boolean {
   return isOpening.value || pendingTabLoad || (openingAttempt !== null && !openingAttempt.cancelled) ||
-    tabClosePending || isExiting.value || receivedFileOpening || editBookResolving;
+    tabClosePending || isExiting.value || receivedFileOpening || editBookResolving || isDocumentModeChanging();
+}
+function isDocumentModeChanging(): boolean {
+  const editor = swap?.current;
+  return !!editor && (editorInteractions.get(editor)?.pendingModeChanges.value ?? 0) > 0;
 }
 let contextMenuListener: (() => void) | null = null;
 /** מבטל את ההאזנה לקובץ שתוסף אחר שולח. ראו `registerReceivedFiles`. */
@@ -2743,21 +2760,48 @@ interface OpenOptions {
  * באותה שורה של 24 פיקסלים, ואין טעם שיאמרו את אותו דבר פעמיים.
  */
 async function openDocument(file?: UserFile, options: OpenOptions = {}): Promise<boolean> {
-  if (!swap || (activeSession.value && styleEditsInFlight.has(activeSession.value))) return false;
+  if (!swap || isDocumentModeChanging() || (activeSession.value && styleEditsInFlight.has(activeSession.value))) return false;
   const attempt = documentLoad.begin(
     file?.name ?? options.name ?? 'מסמך חדש',
     file || options.draft ? 'קורא את הקובץ…' : 'מכין מסמך ריק…',
   );
   openingAttempt = attempt;
+  isOpening.value = true;
+  // Freeze the old engine as well as its DOM: Ribbon, nonmodal panels, and
+  // delayed Document API callers live outside that container. The candidate
+  // keeps its own editable mode and can initialize/focus outside this lease.
+  const previous = swap.current;
+  let releaseInteraction: (() => void) | undefined;
+  const restorePreviousInteraction = (): void => {
+    attempt.signal.removeEventListener('abort', restorePreviousInteraction);
+    const release = releaseInteraction;
+    releaseInteraction = undefined;
+    release?.();
+  };
   try {
+    if (previous && !attempt.signal.aborted) {
+      try {
+        const interaction = editorInteractions.get(previous);
+        if (!interaction) throw new Error('לא ניתן לנעול את המסמך בזמן הפתיחה');
+        releaseInteraction = interaction.block();
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : 'לא ניתן לנעול את המסמך בזמן הפתיחה', true);
+        return false;
+      }
+      attempt.signal.addEventListener('abort', restorePreviousInteraction, { once: true });
+    }
+    if (attempt.signal.aborted) return false;
     return await openDocumentInto(attempt, file, options);
   } finally {
+    // ביטול משחרר מיד; finally מאוחר של אותו ניסיון אינו משחרר נעילה חדשה.
+    restorePreviousInteraction();
     if (openingAttempt === attempt) openingAttempt = null;
     attempt.fail();
     // וגם המצב שמשתק את הרצועה: פתיחה שזרקה השאירה אותה מנוטרלת לתמיד. הערך
     // נקרא מה-swap ולא נקבע ל-false, כדי שפתיחה חדשה יותר שכבר בדרך לא
     // תיראה כמי שהסתיימה.
     isOpening.value = (openingAttempt !== null && !openingAttempt.cancelled) || (swap?.isOpening ?? false);
+    if (previous && swap?.current === previous && !isOpening.value) returnOrphanedFocus();
     // מנוע חי נוסף נולד כאן — הנקודה השנייה שבה התקרה יכולה להישבר (הראשונה
     // היא מעבר טאב). ראו `MAX_LIVE_DOCUMENTS`.
     void trimLiveDocuments();
@@ -2783,7 +2827,9 @@ async function openDocumentInto(
   // החוט הראשי, ומשם אין חזרה — גם `OPEN_TIMEOUT_MS` אינו יכול לירות. ראו
   // engine/docx-preflight.ts. השלב הזה אינו יכול להיכשל: הוא מחזיר את המקור
   // כמות שהוא בכל מקרה שאינו „מצאתי בדיוק את הערך הזה”.
-  const { source, fontTable, vba, notice: preflightNotice } = await preflightSource(options.draft ?? file?.url);
+  const { source, fontTable, vba, notice: preflightNotice } = await preflightSource(options.draft ?? file?.url, {
+    signal: attempt.signal,
+  });
   // „דלג” בזמן שהבייטים נקראו. הבדיקה כאן ולא רק לפני המנוע: שאר הפונקציה
   // כותבת למצב של המעטפת — כותרת, יעד שמירה, רשומת ההפעלה — ופתיחה שהמשתמש
   // נטש אינה אמורה לכתוב שם דבר.
@@ -2827,7 +2873,9 @@ async function openDocumentInto(
     if (file) openedFileTokens.set(session, file.token);
     else openedFileTokens.delete(session);
   }
-  const adapter = createCommandAdapter(editor.ui);
+  const interaction = createEditorInteraction(editor, createCommandAdapter(editor.ui));
+  editorInteractions.set(editor, interaction);
+  const adapter = interaction.commands;
   commandAdapter.value = adapter;
   const documentApi = editor.superdoc.activeEditor?.doc;
   editor.onDispose(() => forgetDocumentReads(documentApi));
@@ -2903,6 +2951,7 @@ async function openDocumentInto(
   if (editorStackRef.value) {
     try {
       const macros = installMacros(editor, editorStackRef.value, setStatus, {
+        commands: adapter,
         // אישור שמירה של הקלטה לא-שלמה — פעולה שאינה ניתנת להקלטה (למשל
         // הכנסת תמונה). הדיאלוג של אוצריא; מחוץ לאוצריא הוא מחזיר false,
         // וההקלטה מבוטלת — שמירה חלקית לא קורית בלי הסכמה.
@@ -3439,9 +3488,13 @@ async function openDocumentInto(
    * מסמך של המנוע — ובמסמך ארוך זו המתנה ארוכה, שבה המסמך כבר על המסך אך
    * הפתיחה „עוד לא נגמרה” והרצועה מנוטרלת. ראו `applyDocumentStartCaret`.
    */
+  const focusedAtOpen = document.activeElement;
   if (
     !caretRestored &&
-    !isOutsideDocumentEditing(document.activeElement) &&
+    // Candidate setup is allowed while the opening UI is blocked; only an
+    // actual competing dialog/input may keep its caret from being initialized.
+    !isModalDialogOpen() &&
+    (!isTextEntryTarget(focusedAtOpen) || isDocumentSurface(focusedAtOpen)) &&
     !hasTextCaret(editor.ui)
   ) {
     void applyDocumentStartCaret(editor.ui, editor.superdoc, editor.container);
@@ -3476,6 +3529,7 @@ async function onSkipLoad(): Promise<void> {
 
   if (hasDocument.value) {
     setStatus(`פתיחת ${name} הופסקה — ${title.value} נשאר פתוח`);
+    returnOrphanedFocus();
     return;
   }
 
@@ -4331,10 +4385,11 @@ async function onExportOtzaria(): Promise<void> {
  * בפס הכותרת לא הייתה מנקה/משחזרת את המעקב אף פעם (רגרסיה שנחשפה תוך כדי
  * הוספת `watchUndoRedoKeys`: היא החליפה את הניקוי שישב קודם ב-
  * `runShortcutCommand`, ומעולם לא כיסתה את הכפתורים — הם אינם אירוע מקלדת).
- * בלי `isBlocked`: לחיצה מפורשת על כפתור תמיד עוסקת במסמך, לא במקום שהפוקוס
+ * בלי חסימת שדות קלט: לחיצה מפורשת על כפתור תמיד עוסקת במסמך, לא במקום שהפוקוס
  * היה בו קודם. ראו ההסבר המלא ב-engine/page-break.ts, „QA עצמאי” → „Undo/Redo”.
  */
 function onUndo(): void {
+  if (isActiveEditorBlocked()) return;
   invalidateDocumentReads(activeSuperdoc.value?.activeEditor?.doc);
   pageBreakTracker.forgetAllKeepingSnapshot();
   // מיד אחרי זיהוי רשימה — הביטול שלה הוא צעד אחד, כמו ב-Ctrl+Z.
@@ -4343,6 +4398,7 @@ function onUndo(): void {
 }
 
 function onRedo(): void {
+  if (isActiveEditorBlocked()) return;
   invalidateDocumentReads(activeSuperdoc.value?.activeEditor?.doc);
   if (!pageBreakTracker.restoreSnapshot()) pageBreakTracker.forgetAll();
   if (listAutoformat?.redo()) return;
@@ -4350,6 +4406,7 @@ function onRedo(): void {
 }
 
 function onTitleUpdate(newTitle: string): void {
+  if (isActiveEditorBlocked()) return;
   if (newTitle.trim()) {
     title.value = newTitle.trim();
     save?.markDirty();
@@ -4789,7 +4846,7 @@ const voiceDictation = createVoiceDictation({
   onState: (state) => {
     dictationState.value = state;
   },
-  canWrite: () => isDocumentEditable.value,
+  canWrite: () => canEditDocument.value,
   onServiceMissing: () => {
     isVoiceServiceDialogOpen.value = true;
   },
@@ -4811,7 +4868,7 @@ async function onDownloadVoiceService(): Promise<void> {
 watch(documentGeneration, () => voiceDictation.cancel());
 watch(activeSuperdoc, () => voiceDictation.cancel());
 // וכך גם מסמך שננעל לקריאה בלבד באמצע הקלטה: הכתיבה הבאה הייתה נכשלת.
-watch(isDocumentEditable, (editable) => {
+watch(canEditDocument, (editable) => {
   if (!editable) voiceDictation.cancel();
 });
 
@@ -5019,6 +5076,7 @@ function openFindDialog(mode: 'find' | 'replace', initialQuery = ''): void {
 }
 
 async function onRunCommandFromTellMe(id: string, payload?: unknown): Promise<void> {
+  if (isActiveEditorBlocked()) return;
   if (!commandAdapter.value) {
     setStatus('אין מסמך פתוח לביצוע הפעולה', true);
     return;
@@ -5039,11 +5097,13 @@ async function onRunCommandFromTellMe(id: string, payload?: unknown): Promise<vo
 }
 
 function onRunActionFromTellMe(action: ShellAction): void {
+  if (isActiveEditorBlocked()) return;
   runShellAction(action);
 }
 
 /** פעולות Tell Me שאינן פקודת מנוע או פעולת מעטפת רגילה. */
 function onCustomActionFromTellMe(action: TellMeCustomAction): void {
+  if (isActiveEditorBlocked()) return;
   switch (action) {
     case 'export-pdf':
       void onExportPdf();
@@ -5164,10 +5224,12 @@ function reportReplace(outcome: SearchOutcome | undefined, success: string): voi
 }
 
 async function onReplaceText(replacement: string): Promise<void> {
+  if (isActiveEditorBlocked()) return;
   reportReplace(await searchAdapter?.replace(replacement), 'המופע הוחלף');
 }
 
 async function onReplaceAllText(replacement: string): Promise<void> {
+  if (isActiveEditorBlocked()) return;
   // נקרא לפני הפעולה: אחריה קבוצת ההתאמות כבר התרוקנה.
   const matches = searchAdapter?.getState().total ?? 0;
   const adapter = searchAdapter;
@@ -5306,14 +5368,15 @@ async function onOpenLibrary(): Promise<void> {
  * בזמן ריצה, וכל סדר אחר היה מחייב לפצל אחת מהן לשני מקומות.
  */
 const contextMenu = useContextMenu({
-  superdoc: activeSuperdoc,
+  superdoc: interactiveSuperdoc,
   isDocumentSurface,
-  isModalOpen: isModalDialogOpen,
-  runAction: (action) => runShellAction(action),
+  isModalOpen: () => isActiveEditorBlocked() || isModalDialogOpen(),
+  runAction: (action) => !isActiveEditorBlocked() && runShellAction(action),
   report: reportCommand,
   misspelledWordAt: (at) => spellingOverlayRef.value?.wordAt(at.x, at.y) ?? null,
   addToDictionary: addWordToDictionary,
 });
+watch(isOpening, (opening) => { if (opening) contextMenu.close(); }, { flush: 'sync' });
 
 /**
  * סגירת התפריט **והחזרת המיקוד למסמך**.
@@ -5335,14 +5398,15 @@ function closeContextMenu(): void {
  * בעצמו אינו נגרר לכאן.
  */
 function returnOrphanedFocus(): void {
+  const opened = activeSuperdoc.value;
   // אחרי שה-DOM התעדכן, ולא באותה שורה: ברגע שהדגל כובה השדה עדיין בעץ ועדיין
   // מחזיק את הפוקוס, ו-`activeElement` היה מראה אותו במקום את ה-`<body>` —
   // כלומר הבדיקה הייתה תמיד יוצאת מוקדם.
   void nextTick(() => {
+    if (!opened || activeSuperdoc.value !== opened || isActiveEditorBlocked()) return;
     const active = document.activeElement;
     if (active !== null && active !== document.body) return;
-    const opened = activeSuperdoc.value;
-    if (opened) focusOpenedDocument(opened);
+    focusOpenedDocument(opened);
   });
 }
 
@@ -5646,6 +5710,11 @@ function isDocumentSurface(target: EventTarget | null): boolean {
   return host !== null && target instanceof Node && host.contains(target);
 }
 
+/** הנעילה של המופע הפעיל בלבד — המועמד החדש אינו יורש אותה מהישן. */
+function isActiveEditorBlocked(): boolean {
+  return isOpening.value || activeEditorContainer.value?.inert === true;
+}
+
 /**
  * דיאלוג שמכריז `aria-modal`. מה שמאחוריו אינו זמין — גם לא לקיצור.
  *
@@ -5668,7 +5737,8 @@ function isModalDialogOpen(): boolean {
  * הזאת בחינם ממנו.
  */
 function isOutsideDocumentEditing(target: EventTarget | null): boolean {
-  return isModalDialogOpen() || (isTextEntryTarget(target) && !isDocumentSurface(target));
+  return isActiveEditorBlocked() || isModalDialogOpen() ||
+    (isTextEntryTarget(target) && !isDocumentSurface(target));
 }
 
 /**
@@ -5728,7 +5798,7 @@ function shellRegion(selector: string): HTMLElement | null {
  * לשורת המצב שמחוץ למסך.
  */
 function revealedBarAvailable(zone: Exclude<RevealZone, null>): () => boolean {
-  return () => !isFocusMode.value || revealed.value === zone;
+  return () => (zone !== 'top' || !isOpening.value) && (!isFocusMode.value || revealed.value === zone);
 }
 
 const focusRing = createFocusRing({
@@ -5756,6 +5826,7 @@ const focusRing = createFocusRing({
     {
       id: 'document',
       element: () => editorStackRef.value,
+      isAvailable: () => !isActiveEditorBlocked(),
       focus: () => focusDocument(activeSuperdoc.value),
     },
     {
@@ -6168,6 +6239,7 @@ onMounted(async () => {
     // מודאלי = `aria-modal`, וזה מה שקובע. „אודות” ודיאלוג הקישור מכריזים
     // כך; דיאלוג החיפוש אינו מודאלי בכוונה, ומעליו עדיין מותר לערוך ולשמור.
     isModalOpen: () => isModalDialogOpen(),
+    isDocumentBlocked: isActiveEditorBlocked,
     isDocumentSurface,
     // הרשימה האישית, ואחריה בלבד: המנתב מגיע אליה רק כשלא נמצאה רשומה
     // מובנית, וזו כל ההבטחה של המערכת הזאת — היא נוספת ואינה דורסת.

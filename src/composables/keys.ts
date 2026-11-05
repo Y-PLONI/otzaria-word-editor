@@ -19,6 +19,8 @@ import type { AutoCorrectOptions } from '../engine/autocorrect';
 
 /** האדפטר של ה-session הפעיל. `null` עד שיש מסמך פתוח. */
 export const COMMAND_ADAPTER: InjectionKey<Ref<CommandAdapter | null>> = Symbol('commandAdapter');
+/** Temporary UI lock; document/adapter identities stay stable across cancellation. */
+export const DOCUMENT_INTERACTION_BLOCKED: InjectionKey<Readonly<Ref<boolean>>> = Symbol('documentInteractionBlocked');
 
 /**
  * מי שיודע להציג הודעה למשתמש. ה-adapter מחזיר תוצאה עם הודעה בעברית, אבל עד

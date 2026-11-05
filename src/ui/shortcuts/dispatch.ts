@@ -36,6 +36,12 @@ import type { CommandId } from '../../engine/capabilities';
 import { matchAny } from './match';
 import { SHORTCUTS, type ShellAction, type Shortcut } from './registry';
 
+/** פעולות מעטפת שזמינות גם כאשר גוף המסמך נעול להחלפה. */
+const ACTIONS_WITHOUT_DOCUMENT = new Set<ShellAction>([
+  'escape', 'focus-next-region', 'focus-prev-region',
+  'shortcuts-help',
+]);
+
 /**
  * האם המנוע יבלע את הצירוף לפני שהוא יגיע ל-bubble.
  *
@@ -129,6 +135,11 @@ export interface ShortcutDispatcherDeps {
   /** האם דיאלוג מודאלי פתוח כרגע. */
   isModalOpen?: () => boolean;
   /**
+   * העורך הפעיל עומד להתחלף ואינו מקבל פעולות. חוסם גם קיצורים מה-body;
+   * שדות UI, ניווט מיקוד ופעולות שכבה כגון Escape נשארים זמינים.
+   */
+  isDocumentBlocked?: () => boolean;
+  /**
    * האם היעד נמצא **בתוך אזור המסמך** — כלומר שייך למנוע ולא לממשק שלנו.
    *
    * ברירת המחדל היא „לא”, וכל מי שמרכיב את המנתב על מסמך אמיתי חייב למסור
@@ -172,6 +183,7 @@ export interface ShortcutDispatcher {
 export function createShortcutDispatcher(deps: ShortcutDispatcherDeps): ShortcutDispatcher {
   const shortcuts = deps.shortcuts ?? SHORTCUTS;
   const isModalOpen = deps.isModalOpen ?? (() => false);
+  const isDocumentBlocked = deps.isDocumentBlocked ?? (() => false);
   const isDocumentSurface = deps.isDocumentSurface ?? (() => false);
 
   /**
@@ -205,6 +217,10 @@ export function createShortcutDispatcher(deps: ShortcutDispatcherDeps): Shortcut
 
     if (isModalOpen()) return false;
     if (inUiTextEntry(event.target)) return false;
+    if (isDocumentBlocked()) {
+      swallow(event);
+      return true;
+    }
 
     const handled = runCustom(match.id);
     if (handled) swallow(event);
@@ -242,6 +258,11 @@ export function createShortcutDispatcher(deps: ShortcutDispatcherDeps): Shortcut
 
     if (isModalOpen() && !shortcut.inModal) return false;
     if (!shortcut.inTextEntry && inUiTextEntry(event.target)) return false;
+    if (isDocumentBlocked() &&
+        (!shortcut.action || !ACTIONS_WITHOUT_DOCUMENT.has(shortcut.action))) {
+      swallow(event);
+      return true;
+    }
 
     // Capture owns the entire held chord. Letting repeats reach the engine
     // would center the paragraph (E) or create bullets (8) after our toggle.

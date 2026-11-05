@@ -4,6 +4,7 @@
  * `node scripts/qa/docx-fixtures.mjs <dir>` writes them as files for a manual look.
  */
 import { writeFileSync } from 'node:fs';
+import { deflateRawSync } from 'node:zlib';
 
 const CRC_TABLE = (() => {
   const t = new Uint32Array(256);
@@ -21,24 +22,34 @@ function crc32(buf) {
 }
 
 export function zipStored(entries) {
+  return zip(entries, false);
+}
+
+/** Compressed incoming archives for package-processing benchmarks. */
+export function zipDeflated(entries) {
+  return zip(entries, true);
+}
+
+function zip(entries, compressed) {
   const locals = [];
   const centrals = [];
   let offset = 0;
   let count = 0;
   for (const [name, content] of Object.entries(entries)) {
     const nameBuf = Buffer.from(name, 'utf8');
-    const data = Buffer.from(content, 'utf8');
-    const crc = crc32(data);
+    const raw = Buffer.from(content, 'utf8');
+    const data = compressed ? deflateRawSync(raw) : raw;
+    const crc = crc32(raw);
     const local = Buffer.alloc(30);
     local.writeUInt32LE(0x04034b50, 0);
     local.writeUInt16LE(20, 4);
     local.writeUInt16LE(0x0800, 6);
-    local.writeUInt16LE(0, 8);
+    local.writeUInt16LE(compressed ? 8 : 0, 8);
     local.writeUInt16LE(0, 10);
     local.writeUInt16LE(0x21, 12);
     local.writeUInt32LE(crc, 14);
     local.writeUInt32LE(data.length, 18);
-    local.writeUInt32LE(data.length, 22);
+    local.writeUInt32LE(raw.length, 22);
     local.writeUInt16LE(nameBuf.length, 26);
     local.writeUInt16LE(0, 28);
     const central = Buffer.alloc(46);
@@ -46,12 +57,12 @@ export function zipStored(entries) {
     central.writeUInt16LE(20, 4);
     central.writeUInt16LE(20, 6);
     central.writeUInt16LE(0x0800, 8);
-    central.writeUInt16LE(0, 10);
+    central.writeUInt16LE(compressed ? 8 : 0, 10);
     central.writeUInt16LE(0, 12);
     central.writeUInt16LE(0x21, 14);
     central.writeUInt32LE(crc, 16);
     central.writeUInt32LE(data.length, 20);
-    central.writeUInt32LE(data.length, 24);
+    central.writeUInt32LE(raw.length, 24);
     central.writeUInt16LE(nameBuf.length, 28);
     central.writeUInt16LE(0, 30);
     central.writeUInt16LE(0, 32);

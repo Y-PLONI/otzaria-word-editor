@@ -508,7 +508,7 @@
             <button
               type="button"
               class="md-btn md-btn-primary"
-              :disabled="!selectedId"
+              :disabled="busy || !selectedId"
               @pointerdown.prevent
               @click="onReplay"
             >
@@ -538,7 +538,7 @@
             <button
               type="button"
               class="md-btn"
-              :disabled="!selectedId"
+              :disabled="busy || !selectedId"
               @pointerdown.prevent
               @click="onInsertSnippet"
             >
@@ -550,7 +550,7 @@
             <button
               type="button"
               class="md-btn md-btn-primary"
-              :disabled="!canRunScript"
+              :disabled="busy || !canRunScript"
               @pointerdown.prevent
               @click="onRunScript"
             >
@@ -577,7 +577,7 @@
             <button
               type="button"
               class="md-btn md-btn-primary"
-              :disabled="!selectedId"
+              :disabled="busy || !selectedId"
               @pointerdown.prevent
               @click="onRunTool"
             >
@@ -686,6 +686,10 @@ const { dragStyle, startDialogDrag } = useDialogDrag();
 const props = withDefaults(
   defineProps<{
     isOpen?: boolean;
+    /** Disable document execution while preserving edits to the library form. */
+    busy?: boolean;
+    /** Read the active editor lock at click time, before a render can catch up. */
+    isDocumentBlocked?: () => boolean;
     /** מערכת המאקרו של המסמך הפתוח, או `null` כשאין מסמך. */
     handle?: MacrosHandle | null;
     /**
@@ -694,7 +698,7 @@ const props = withDefaults(
      */
     documentVba?: DocumentVba;
   }>(),
-  { isOpen: false, handle: null, documentVba: () => NO_VBA }
+  { isOpen: false, busy: false, isDocumentBlocked: () => false, handle: null, documentVba: () => NO_VBA }
 );
 
 const emit = defineEmits<{
@@ -908,6 +912,7 @@ function snippetMeta(item: Snippet): string {
 /* ---------- פעולות ---------- */
 
 function onReplay(): void {
+  if (props.busy || props.isDocumentBlocked()) return;
   const kit = props.handle?.kit;
   if (!kit || !selectedId.value) return;
   void kit.replayRecording(selectedId.value).then((result) => {
@@ -960,6 +965,7 @@ function onSaveSnippet(): void {
 }
 
 function onInsertSnippet(): void {
+  if (props.busy || props.isDocumentBlocked()) return;
   const kit = props.handle?.kit;
   if (!kit || !selectedId.value) return;
   void kit.expandSnippet(selectedId.value).then((result) => {
@@ -987,6 +993,7 @@ function onSaveScript(): void {
  * שזה בדיוק מחזור העבודה של כתיבת מאקרו.
  */
 function onRunScript(): void {
+  if (props.busy || props.isDocumentBlocked()) return;
   const kit = props.handle?.kit;
   if (!kit || !canRunScript.value) return;
   scriptResult.value = 'מריץ…';
@@ -998,6 +1005,7 @@ function onRunScript(): void {
 }
 
 function onRunTool(): void {
+  if (props.busy || props.isDocumentBlocked()) return;
   const kit = props.handle?.kit;
   if (!kit || !selectedId.value) return;
   void kit.runTool(selectedId.value).then((outcome) => {
