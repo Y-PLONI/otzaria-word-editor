@@ -192,23 +192,34 @@ void bootPayload.then(() => markHostReady());
  * `_booted` הוא הדגל של אוצריא חדשה; בישנה ממתינים לאירוע עצמו.
  */
 function isUnbootedStub(sdk: OtzariaGlobal): boolean {
-  if (hostReady) return false;
+  if (hostReady || hostGaveUp) return false;
   const stub = sdk as OtzariaGlobal & { _boot?: unknown; _booted?: unknown };
   return typeof stub._boot === 'function' && stub._booted !== true;
 }
 
 /**
- * עד האתחול, או עד `BOOT_TIMEOUT_MS`. אחרי התקרה הקריאה יוצאת בכל זאת ונכשלת
- * כמו קודם — המתנה אינסופית הייתה מחליפה כשל גלוי במסך תלוי.
+ * עד האתחול, או עד `BOOT_TIMEOUT_MS` מהקריאה **הראשונה** שהמתינה.
+ *
+ * התקרה משותפת לכל הקריאות, ואחריה מוותרים: כל קריאה יוצאת מיד ונכשלת כמו
+ * קודם. תקרה לכל קריאה בנפרד הייתה מצטברת — שתי קריאות טוריות של
+ * `loadPreviousSession` לבדן היו 30 שניות של מסך טעינה, ואחר כך כל שמירה
+ * הייתה נתלית 15 שניות לפני שהיא נכשלת. המתנה אינסופית הייתה מחליפה כשל
+ * גלוי במסך תלוי.
  */
+let hostGaveUp = false;
+let hostWait: Promise<void> | null = null;
 function untilHostReady(): Promise<void> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  return Promise.race([
-    hostReadyPromise,
-    new Promise<void>((resolve) => {
-      timer = setTimeout(resolve, BOOT_TIMEOUT_MS);
-    }),
-  ]).finally(() => clearTimeout(timer));
+  hostWait ??= new Promise<void>((resolve) => {
+    const timer = setTimeout(() => {
+      hostGaveUp = true;
+      resolve();
+    }, BOOT_TIMEOUT_MS);
+    void hostReadyPromise.then(() => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+  return hostWait;
 }
 
 /** ברירת מחדל לשעון-שומר של ה-boot. ה-Host מקומי; המתנה ארוכה היא כשל. */

@@ -58,10 +58,33 @@ const SESSION_KEY = 'session';
  * כדי שההחלטות יהיו נבדקות בלי לזייף את הגשר.
  */
 export async function loadSessionRecord(): Promise<unknown> {
-  return tryCall<unknown>('storage.get', { key: SESSION_KEY });
+  if (!isAvailable()) return null;
+  try {
+    return await call<unknown>('storage.get', { key: SESSION_KEY });
+  } catch (error) {
+    sessionUnreadable = true;
+    console.error('[otzaria-word] רשומת ההפעלה לא נקראה — היא לא תידרס בהפעלה הזאת', error);
+    return null;
+  }
 }
 
+/**
+ * הקריאה של הרשומה נכשלה — וזה לא „אין רשומה”.
+ *
+ * כשל נקרא כמו רשומה חסרה, והעלייה ממשיכה במסמך ריק, אבל הרשומה שבאחסון עשויה
+ * להחזיק את כל הטאבים והטיוטות של המשתמש. כתיבה של המצב הריק מעליה הייתה
+ * מאבדת אותם — וזה בדיוק מה שקרה ב-7.0, כשהקריאה יצאה לפני האתחול של אוצריא.
+ * לכן אחרי כשל כזה לא כותבים את הרשומה עד סוף ההפעלה: בהפעלה הבאה הקריאה
+ * תנסה שוב, ומה שבאחסון עדיין שם.
+ */
+let sessionUnreadable = false;
+
 export async function saveSessionRecord(value: unknown, requireSuccess = false): Promise<void> {
+  if (sessionUnreadable) {
+    // מי שדורש הצלחה (בייטים שהתקבלו בלי קובץ מקור) חייב לדעת שאין רשומה.
+    if (requireSuccess) throw new Error('רשומת ההפעלה לא נקראה בעלייה, ולכן אינה נכתבת');
+    return;
+  }
   // קבלה של בייטים ללא קובץ מקור חייבת לדעת אם יש רשומה לשחזור.
   // הכתיבות הרגילות נשארות רשת ביטחון שקטה.
   const write = requireSuccess ? call : tryCall;

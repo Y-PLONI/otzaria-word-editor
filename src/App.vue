@@ -3434,6 +3434,9 @@ async function openDocumentInto(
 
   save?.reset(file && file.access === 'readwrite' ? { token: file.token, name: file.name } : null);
 
+  // המסמך הריק של פתיחה שנכשלה אינו נרשם — אבל הוא כן מה שבמנוע, והטיוטה
+  // שברשומה אינה שלו.
+  if (options.remember === false) keeper?.noteDraftNotLoaded();
   if (options.remember !== false) {
     keeper?.setDocument(
       file ? { token: file.token, name: file.name, writable: file.access === 'readwrite' } : null,

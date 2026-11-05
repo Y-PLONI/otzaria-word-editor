@@ -402,3 +402,27 @@ describe('call לפני האתחול', () => {
     await outcome;
   });
 });
+
+describe('התקרה של ההמתנה לאתחול', () => {
+  it('משותפת לכל הקריאות, ואחריה קריאות נכשלות מיד', async () => {
+    vi.useFakeTimers();
+    const client = await freshClient();
+    (window as Partial<Window>).Otzaria = otzariaStub() as never;
+
+    const first = client.call('storage.get');
+    const firstOutcome = expect(first).rejects.toThrow('not ready yet');
+    await vi.advanceTimersByTimeAsync(client.BOOT_TIMEOUT_MS / 2);
+    // קריאה שנייה באמצע — אינה מקבלת תקרה חדשה משלה.
+    const second = client.call('storage.get');
+    const secondOutcome = expect(second).rejects.toThrow('not ready yet');
+    await vi.advanceTimersByTimeAsync(client.BOOT_TIMEOUT_MS / 2);
+    await firstOutcome;
+    await secondOutcome;
+
+    // ואחרי הוויתור — בלי המתנה בכלל.
+    const third = client.call('storage.get');
+    const thirdOutcome = expect(third).rejects.toThrow('not ready yet');
+    await vi.advanceTimersByTimeAsync(0);
+    await thirdOutcome;
+  });
+});
