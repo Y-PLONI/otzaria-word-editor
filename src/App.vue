@@ -580,6 +580,7 @@ import {
 import { installOtzariaLinkClicks } from './engine/otzaria-link-click';
 import { preflightSource } from './engine/docx-preflight';
 import { forgetFamilyAvailability, installDocumentFontAliases } from './engine/docx-fonts';
+import { beginPerformanceSpan, markPerformance, type PerformanceSpan } from './diagnostics/performance';
 import {
   anchorPageIndex,
   createDocMetrics,
@@ -2771,6 +2772,12 @@ async function openDocument(file?: UserFile, options: OpenOptions = {}): Promise
     file || options.draft ? 'קורא את הקובץ…' : 'מכין מסמך ריק…',
   );
   openingAttempt = attempt;
+  const timing = beginPerformanceSpan('document.open', {
+    kind: options.draft ? 'draft' : file ? 'file' : 'new',
+    restored: Boolean(options.restore && (file || options.draft)),
+    restoredView: Boolean(options.restore?.caret || options.restore?.zoom != null),
+  });
+  let measuredOutcome = 'failed';
   isOpening.value = true;
   // Freeze the old engine as well as its DOM: Ribbon, nonmodal panels, and
   // delayed Document API callers live outside that container. The candidate
@@ -2796,7 +2803,9 @@ async function openDocument(file?: UserFile, options: OpenOptions = {}): Promise
       attempt.signal.addEventListener('abort', restorePreviousInteraction, { once: true });
     }
     if (attempt.signal.aborted) return false;
-    return await openDocumentInto(attempt, file, options);
+    const opened = await openDocumentInto(attempt, file, options, timing);
+    measuredOutcome = opened ? 'opened' : attempt.cancelled ? 'cancelled' : 'not-opened';
+    return opened;
   } finally {
     // ביטול משחרר מיד; finally מאוחר של אותו ניסיון אינו משחרר נעילה חדשה.
     restorePreviousInteraction();
@@ -2807,6 +2816,7 @@ async function openDocument(file?: UserFile, options: OpenOptions = {}): Promise
     // תיראה כמי שהסתיימה.
     isOpening.value = (openingAttempt !== null && !openingAttempt.cancelled) || (swap?.isOpening ?? false);
     if (previous && swap?.current === previous && !isOpening.value) returnOrphanedFocus();
+    timing?.end(measuredOutcome);
     // מנוע חי נוסף נולד כאן — הנקודה השנייה שבה התקרה יכולה להישבר (הראשונה
     // היא מעבר טאב). ראו `MAX_LIVE_DOCUMENTS`.
     void trimLiveDocuments();
@@ -2817,6 +2827,7 @@ async function openDocumentInto(
   attempt: LoadAttempt,
   file?: UserFile,
   options: OpenOptions = {},
+  timing?: PerformanceSpan,
 ): Promise<boolean> {
   if (!swap) return false;
   // ראו „ריבוי מסמכים” ליד `sessions`: פתיחה תמיד מתרחשת לתוך הטאב הפעיל —
@@ -2832,9 +2843,11 @@ async function openDocumentInto(
   // החוט הראשי, ומשם אין חזרה — גם `OPEN_TIMEOUT_MS` אינו יכול לירות. ראו
   // engine/docx-preflight.ts. השלב הזה אינו יכול להיכשל: הוא מחזיר את המקור
   // כמות שהוא בכל מקרה שאינו „מצאתי בדיוק את הערך הזה”.
+  timing?.mark('preflight.start');
   const { source, fontTable, vba, notice: preflightNotice } = await preflightSource(options.draft ?? file?.url, {
     signal: attempt.signal,
   });
+  timing?.mark('preflight.end');
   // „דלג” בזמן שהבייטים נקראו. הבדיקה כאן ולא רק לפני המנוע: שאר הפונקציה
   // כותבת למצב של המעטפת — כותרת, יעד שמירה, רשומת ההפעלה — ופתיחה שהמשתמש
   // נטש אינה אמורה לכתוב שם דבר.
@@ -2844,7 +2857,9 @@ async function openDocumentInto(
   // לפני שהמנוע מודד, ולא אחרי: `lineRule="auto"` גוזר את גובה השורה ממדדי
   // הגופן שנבחר בפועל, ולכן גופן חסר משנה את פריסת כל המסמך — לא רק את מראהו.
   // ראו engine/docx-fonts.ts. אינו יכול להיכשל, ואינו מעכב כשאין מה להחליף.
+  timing?.mark('document-fonts.start');
   await installDocumentFontAliases(fontTable);
+  timing?.mark('document-fonts.end');
   if (attempt.cancelled) return false;
   attempt.stage(LOAD_STAGES.engine, 'בונה את המסמך…');
 
@@ -2853,11 +2868,15 @@ async function openDocumentInto(
   // שהמשתמש קבע (composables/new-document-defaults.ts). `undefined` בבדיקות,
   // ואז המנוע פותח את שלו.
   let newDocumentDefaultsNotice: string | null = null;
+  timing?.mark('blank-source.start');
   const blank = !file && !options.draft
     ? await newDocumentSource(message => { newDocumentDefaultsNotice = message; })
     : undefined;
+  timing?.mark('blank-source.end');
   if (attempt.cancelled) return false;
+  timing?.mark('engine.start');
   const outcome = await swap.open(source ?? blank);
+  timing?.mark('engine.end');
 
   // ה-swap מדווח `superseded` גם על פתיחה שבוטלה — הביטול מקדם שם את הדור
   // לפני שהוא מרים את האיתות (ראו EditorSwap.cancel). המחוון כבר סולק
@@ -2874,6 +2893,8 @@ async function openDocumentInto(
   attempt.stage(LOAD_STAGES.arranging, 'מסדר את התצוגה…');
 
   const editor = outcome.session;
+  timing?.bind(editor);
+  timing?.mark('arrange.start');
   if (session) {
     if (file) openedFileTokens.set(session, file.token);
     else openedFileTokens.delete(session);
@@ -3383,12 +3404,6 @@ async function openDocumentInto(
   // (קורה) יישמר כ-`.docm`, אחרת Word יתלונן עליו.
   documentVba.value = vba;
   saveExtension.value = resolveSaveExtension(file?.name ?? options.name, vba.hasMacroPart);
-  // זמן הטעינה הוא מדידת פיתוח ולא הודעה למשתמש: „נטען ב-473 מילישניות” תפס
-  // את שורת המצב עד ההודעה הבאה. הוא נשמר — הוא מה שמסביר פתיחה איטית —
-  // בלוג של אוצריא, במקום שבו מסתכלים על מדידות.
-  console.info(
-    `[otzaria-word] ${title.value} נטען ב-${Math.round(performance.now() - startedAt)} מילישניות`
-  );
   setStatus('');
 
   /* שורת המצב מציגה הודעה אחת, ולכן יש סדר עדיפות בין אלה שיכולות להיאמר
@@ -3482,7 +3497,10 @@ async function openDocumentInto(
   // ואחריו המקום שהמשתמש היה בו. **אחרי** המיקוד ולא לפניו: `focus` עם
   // `restoreSelection` מציב סמן משלו, ומי שרץ אחרון הוא זה שקובע איפה הוא
   // יושב.
+  timing?.mark('arrange.end');
+  timing?.mark('view-restore.start');
   const caretRestored = await restoreDocumentView(editor, adapter, options.restore);
+  timing?.mark('view-restore.end');
   if (attempt.cancelled) return false;
 
   /*
@@ -3513,6 +3531,11 @@ async function openDocumentInto(
   // אחרון, ולא ליד `outcome.status === 'opened'`: מרגע ש-100% על המסך „דלג”
   // נעלם, ואילו שחזור התצוגה הוא עוד המתנה שהמשתמש רואה.
   attempt.finish();
+  // Includes view restoration. This is opening work, not proof that an edit
+  // has reached the document and appeared; the opt-in performance probe tests that.
+  console.info(
+    `[otzaria-word] ${title.value} נטען ב-${Math.round(performance.now() - startedAt)} מילישניות`
+  );
   return true;
 }
 
@@ -5955,17 +5978,30 @@ async function openStartupDocument(restored: DocumentSession): Promise<void> {
   const restoredSessions = new Set(sessions.values());
   // Send-to-document needs the old active document and its restored caret.
   while (!startupSendEvents.length && startupOpenRequests.length && !opened) {
-    opened = await startupOpenRequests.shift()!();
+    // Include source resolution before openDocument; a later fallback is not
+    // success for this selected request. Diagnostics never choose the target.
+    const intent = beginPerformanceSpan('document.intent');
+    try {
+      opened = await startupOpenRequests.shift()!();
+    } finally {
+      intent?.end(opened ? 'opened' : 'failed');
+    }
     if (!opened && isStatusError.value) failureMessage = statusText.value;
   }
   async function restoreOriginalTarget(): Promise<void> {
     activateTab(restored);
     if (restored.pendingRestore) {
-      if (startupAttemptedSessions.has(restored.id)) {
-        // A failed explicit request for this very tab must not retry it twice.
-        restored.pendingRestore = false;
-        await openDocument(undefined, { remember: false });
-      } else await openPendingTab(restored);
+      const intent = beginPerformanceSpan('document.intent');
+      let intendedOpened = false;
+      try {
+        if (startupAttemptedSessions.has(restored.id)) {
+          // A failed explicit request for this very tab must not retry it twice.
+          restored.pendingRestore = false;
+          await openDocument(undefined, { remember: false });
+        } else intendedOpened = await openPendingTab(restored);
+      } finally {
+        intent?.end(intendedOpened ? 'opened' : 'failed');
+      }
     }
   }
   if (!opened) await restoreOriginalTarget();
@@ -6312,6 +6348,7 @@ onMounted(async () => {
     // כל הקריאות במקביל ולא בזו אחר זו: כל אחת היא סבב IPC מלא מול אוצריא,
     // הן קוראות מפתחות שונים ואינן תלויות זו בזו — והן עומדות בין המשתמש לבין
     // פתיחת המסמך הראשון.
+    const preferencesTiming = beginPerformanceSpan('preferences');
     const [
       storedAutosave,
       storedRuler,
@@ -6338,7 +6375,13 @@ onMounted(async () => {
         // ההודעה נדחית לסיום הפתיחה: בזמן טעינת המסמך שורת המצב מוחלפת,
         // ואזהרה שנכתבה כבר כאן הייתה נעלמת לפני שהמשתמש יכול לקרוא אותה.
         loadCustomShortcutList({ announce: false }),
-      ]);
+      ]).then((values) => {
+        preferencesTiming?.end('loaded');
+        return values;
+      }, (error: unknown) => {
+        preferencesTiming?.end('failed');
+        throw error;
+      });
     autosaveEnabled.value = storedAutosave;
     listAutoformatEnabled.value = storedListAutoformat;
     navigationPaneVisible.value = storedNavigationPane;
@@ -6412,11 +6455,13 @@ onMounted(async () => {
       // הכשל יושבת בשורת המצב שמתחת, ומסך טעינה שנשאר פרוש מסתיר בדיוק את
       // מה שצריך להיקרא.
       splashDone();
+      markPerformance('startup.settled');
       if (customShortcutsNotice !== '') setStatus(customShortcutsNotice);
       finishStartupRequests();
     }
   } else {
     splashDone();
+    markPerformance('startup.settled');
     finishStartupRequests();
   }
 });
@@ -6735,6 +6780,9 @@ async function recoverDraft(
 /** בייטי הטיוטה כ-Blob שאפשר למסור למנוע, או `null` כשאין. */
 async function readDraftBytes(path: string): Promise<Blob | null> {
   const bytes = await readWorkspaceBytes(path);
+  // Only called after choosing a draft to restore. Choosing the disk file
+  // returns earlier; losing the chosen draft must not validate that fallback.
+  if (!bytes) markPerformance('document.intent.source-unavailable');
   return bytes ? new Blob([bytes], { type: DOCX_MIME }) : null;
 }
 

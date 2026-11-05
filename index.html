@@ -24,6 +24,7 @@
           function (event) {
             latch.payload = event.detail;
             latch.at = Math.round(performance.now());
+            try { window.__otzariaPerformance?.mark('plugin.boot'); } catch (ignored) {}
           },
           { once: true },
         );
@@ -444,8 +445,12 @@
             paint();
             stage.textContent = 'מוכן';
             root.setAttribute('data-done', '1');
+            try { window.__otzariaPerformance?.mark('splash.dismiss-requested'); } catch (ignored) {}
             setTimeout(function () {
-              if (root.parentNode) root.parentNode.removeChild(root);
+              if (root.parentNode) {
+                root.parentNode.removeChild(root);
+                try { window.__otzariaPerformance?.mark('splash.removed'); } catch (ignored) {}
+              }
             }, 260);
           },
         };
