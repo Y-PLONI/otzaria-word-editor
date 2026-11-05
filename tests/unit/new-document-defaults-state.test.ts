@@ -5,15 +5,32 @@ import { patchBlankDocumentXml, patchBlankStylesXml } from '../../src/engine/bla
 import { resolveFormat } from '../../src/engine/docx-style-edit';
 import { readTemplateStyles } from '../../src/engine/new-document-defaults';
 
-const host = vi.hoisted(() => ({ stored: null as unknown, save: vi.fn() }));
-vi.mock('../../src/host/settings', () => ({ loadNewDocumentDefaults: async () => host.stored, saveNewDocumentDefaults: host.save }));
+const host = vi.hoisted(() => ({ stored: null as unknown, save: vi.fn(), load: vi.fn() }));
+vi.mock('../../src/host/settings', () => ({ loadNewDocumentDefaults: async () => { host.load(); return host.stored; }, saveNewDocumentDefaults: host.save }));
 vi.mock('../../src/engine/blank-document-source', () => ({ blankDocumentSource: () => new Blob([new Uint8Array(DOCX)]) }));
 const DOCX = deriveHebrewBlankDocx({ patchDocument: patchBlankDocumentXml, patchStyles: patchBlankStylesXml });
 const TEMPLATE = readZip(DOCX).find(entry => entry.name === 'word/styles.xml')!.data.toString('utf8');
 
-beforeEach(() => { vi.resetModules(); host.stored = null; host.save.mockReset(); });
+beforeEach(() => { vi.resetModules(); host.stored = null; host.save.mockReset(); host.load.mockClear(); });
 
 describe('new document preference acceptance and migration', () => {
+  it('shares an early pending load and waits for its defaults before creating the document', async () => {
+    let release!: (value: unknown) => void;
+    host.stored = new Promise(resolve => { release = resolve; });
+    const state = await import('../../src/composables/new-document-defaults');
+    const ready = state.loadNewDocumentDefaults();
+    let created = false;
+    const source = state.newDocumentSource().then(blob => { created = true; return blob; });
+    await Promise.resolve();
+    expect(created).toBe(false);
+    expect(host.load).toHaveBeenCalledOnce();
+    release({ run: { fontFamily: 'David', fontSizePt: 18 }, styles: {} });
+    await ready;
+    const xml = (await readTemplateStyles((await source)!))!;
+    expect(resolveFormat(xml, 'Normal')).toMatchObject({ fontFamily: 'David', fontSizePt: 18 });
+    expect(host.load).toHaveBeenCalledOnce();
+  });
+
   it('leaves safe saved settings intact and reports refusal of the imported no-op italic preference', async () => {
     host.stored = { run: { fontSizePt: 15 }, styles: { Heading1: { color: '123456' } } };
     const state = await import('../../src/composables/new-document-defaults');

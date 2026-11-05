@@ -295,8 +295,10 @@
       :intent="openDialogIntent"
       :templates="DOCUMENT_TEMPLATES"
       :recents="recentDocuments"
+      :recents-loading="recentsLoading"
       :busy="isOpening || saveSnapshot.isSaving"
       :discarded-count="discardedBackups.length"
+      :discarded-loading="discardedLoading"
       :previous-version="previousVersion"
       :notice="openDialogNotice"
       :place="openSources.place.value"
@@ -415,14 +417,8 @@ import VoiceServiceDialog from './ui/panels/VoiceServiceDialog.vue';
 import DiscardedDocumentsDialog from './ui/panels/DiscardedDocumentsDialog.vue';
 import TooltipLayer from './ui/tooltip/TooltipLayer.vue';
 import { DOCUMENT_TEMPLATES, applyTemplate, type TemplateId } from './engine/templates';
-import {
-  normalizeRecents,
-  rememberRecent,
-  forgetRecent,
-  setRecentPinned,
-  sortedRecents,
-  type RecentDocument,
-} from './sessions/recent-documents';
+import type { RecentDocument } from './sessions/recent-documents';
+import { createRecentDocumentStore } from './sessions/recent-document-store';
 import { createCommandAdapter, type CommandAdapter, type CommandOutcome } from './engine/command-adapter';
 import type { CommandId } from './engine/capabilities';
 import {
@@ -1289,6 +1285,14 @@ const isOpenDialogOpen = ref(false);
  */
 const openDialogIntent = ref<'new' | 'open'>('new');
 const recentDocuments = ref<RecentDocument[]>([]);
+const recentsLoading = ref(true);
+const recentStore = createRecentDocumentStore({
+  load: loadRecentDocuments,
+  save: saveRecentDocuments,
+  onChange: (list) => { recentDocuments.value = list; },
+  onLoading: (loading) => { recentsLoading.value = loading; },
+  onError: (error) => console.warn('[otzaria-word] עדכון רשימת האחרונים נכשל', error),
+});
 
 /**
  * „מסמכים שנסגרו בלי לשמור” — חמשת הגיבויים האחרונים, ומסך השחזור שלהם.
@@ -1299,6 +1303,7 @@ const recentDocuments = ref<RecentDocument[]>([]);
  * שאיש מלבדנו אינו כותב.
  */
 const discardedBackups = ref<DiscardedDocument[]>([]);
+const discardedLoading = ref(true);
 const isDiscardedOpen = ref(false);
 /** מונע שתי פתיחות של אותו עותק לפני שהקריאה מה-storage הסתיימה. */
 const isDiscardedOpening = ref(false);
@@ -1341,8 +1346,7 @@ function rememberRecentDocument(entry: {
    */
   writable: boolean;
 }): void {
-  recentDocuments.value = rememberRecent(recentDocuments.value, { ...entry, openedAt: Date.now() });
-  void saveRecentDocuments(recentDocuments.value);
+  recentStore.remember({ ...entry, openedAt: Date.now() });
 }
 
 /**
@@ -3794,8 +3798,7 @@ async function onOpenDialogRecent(token: string): Promise<void> {
 }
 
 function onOpenDialogTogglePin(token: string, pinned: boolean): void {
-  recentDocuments.value = setRecentPinned(recentDocuments.value, token, pinned);
-  void saveRecentDocuments(recentDocuments.value);
+  recentStore.setPinned(token, pinned);
 }
 
 /**
@@ -3926,6 +3929,9 @@ async function onOpenDiscarded(slot: number): Promise<void> {
         ? `${entry.name} נפתח מהעותק שנשמר בסגירה (${age}) — טרם נשמר לקובץ`
         : `${entry.name} נפתח מהעותק שנשמר בסגירה — טרם נשמר לקובץ`,
     );
+  } catch (error) {
+    console.warn('[otzaria-word] פתיחת עותק לשחזור נכשלה', error);
+    setStatus(`העותק של ${entry.name} לא נפתח — הפעולה נכשלה, ואפשר לנסות שוב`, true);
   } finally {
     isDiscardedOpening.value = false;
   }
@@ -3938,12 +3944,16 @@ async function onOpenDiscarded(slot: number): Promise<void> {
  */
 async function onForgetDiscarded(slot: number): Promise<void> {
   if (isDiscardedOpening.value) return;
-  await forgetDiscarded(slot);
+  try {
+    await forgetDiscarded(slot);
+  } catch (error) {
+    console.warn('[otzaria-word] הסרת עותק לשחזור נכשלה', error);
+    setStatus('הסרת העותק לשחזור נכשלה — אפשר לנסות שוב', true);
+  }
 }
 
 function onOpenDialogForget(token: string): void {
-  recentDocuments.value = forgetRecent(recentDocuments.value, token);
-  void saveRecentDocuments(recentDocuments.value);
+  recentStore.forget(token);
 }
 
 /**
@@ -6170,6 +6180,16 @@ onMounted(async () => {
     // הפקד הזה הדיווח הראשון היה הולך לאיבוד.
     zoomCenter = createZoomCenter(editorStackRef.value);
 
+    // מתחילים באותו גל IPC, אך רשימות היסטוריה אינן תנאי לפתיחת מסמך.
+    // כתיבות מוקדמות לאחרונים ממוזגות אחרי הטעינה; טעינת הגיבויים יושבת
+    // בתחילת תור האחסון שלהם ולכן אינה יכולה לדרוס עדכון חדש.
+    void recentStore.load();
+    void loadDiscardedHistory().catch((error) => {
+      console.warn('[otzaria-word] טעינת העותקים לשחזור נכשלה', error);
+    });
+    // רק newDocumentSource ממתינה להגדרות האלה, לפני יצירת מסמך חדש.
+    void loadNewDocumentDefaults();
+
     // הבחירה נטענת לפני שנפתח מסמך: העריכה הראשונה עלולה להתחיל סבב autosave,
     // ואם ההעדפה עוד לא הגיעה הוא היה רץ לפי ברירת המחדל ולא לפי מה שהמשתמש
     // בחר בהפעלה הקודמת. ההעדפה של הסרגל — מאותו טעם: היא חלה על המסמך שנפתח
@@ -6182,8 +6202,6 @@ onMounted(async () => {
       storedAutosave,
       storedRuler,
       stored,
-      storedRecents,
-      storedDiscarded,
       storedSpellcheck,
       storedCanvasColor,
       storedListAutoformat,
@@ -6195,8 +6213,6 @@ onMounted(async () => {
         loadAutosaveEnabled(),
         loadRulerVisible(),
         loadPreviousSession(),
-        loadRecentDocuments(),
-        loadDiscardBackups(),
         loadSpellcheckEnabled(),
         loadCanvasColor(),
         loadListAutoformatEnabled(),
@@ -6215,21 +6231,12 @@ onMounted(async () => {
     // ערך חסר או פגום הוא ברירות המחדל, ושדה פגום נופל לברירת המחדל שלו.
     autoCorrectOptions.value = normalizeAutoCorrect(storedAutoCorrect);
     rulerPreference = storedRuler;
-    // ממוינת כבר כאן ולא רק בתצוגה: זו הרשימה שכל שאר הקוד רואה, ורשימה
-    // שמגיעה מ-storage אין לה הבטחת סדר.
-    recentDocuments.value = sortedRecents(normalizeRecents(storedRecents));
-    // אותה הכרעה בדיוק כמו של „אחרונים”: מה שמגיע מ-storage אין לו הבטחת
-    // סדר, והמיון הוא של הרשימה שכל שאר הקוד רואה — לא של התצוגה בלבד.
-    discardedBackups.value = normalizeBackups(storedDiscarded);
     // העץ של „פתח מסמך” מהמטמון — עכשיו, ולא בפתיחה הראשונה של הדיאלוג, כדי
     // שהוא ייפתח מלא. אינו חוסם את העלייה: אין לו חלק בפתיחת המסמך.
     void openSources.init();
     // ברירת המחדל של Ctrl+V. לא חוסמת: עד שהיא נקראת Ctrl+V הוא של המנוע,
     // וזו בדיוק ברירת המחדל.
     void loadPasteDefault();
-    // ברירות המחדל של מסמך חדש. לא חוסמת: מסמך חדש שנפתח לפני שהן נקראו
-    // מחכה להן בעצמו (`newDocumentSource`).
-    void loadNewDocumentDefaults();
     // צבע הבד מוחל כאן ולא בלשונית „תצוגה”: הפקד שמשנה אותו יושב בלשונית
     // שמורכבת רק כשהיא הפעילה (`v-else-if` ב-Ribbon.vue), והבד נראה מהרגע
     // הראשון. `applyCanvasColor` ולא `setCanvasColor` — זו קריאה, ואין טעם
@@ -6633,6 +6640,18 @@ async function discardWithBackup(session: DocumentSession | null): Promise<void>
  * ידרוס כתיבה שזה עתה הושלמה את מחיקתו.
  */
 let discardedStorageChain: Promise<void> = Promise.resolve();
+let discardedHydration: Promise<void> | null = null;
+
+function loadDiscardedHistory(): Promise<void> {
+  discardedHydration ??= enqueueDiscardedStorageOperation(async () => {
+    try {
+      discardedBackups.value = normalizeBackups(await loadDiscardBackups());
+    } finally {
+      discardedLoading.value = false;
+    }
+  });
+  return discardedHydration;
+}
 
 function enqueueDiscardedStorageOperation(operation: () => Promise<void>): Promise<void> {
   const task = discardedStorageChain.then(operation);

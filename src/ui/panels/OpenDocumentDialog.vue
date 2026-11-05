@@ -220,6 +220,7 @@
               v-else
               class="rec-section"
               :aria-labelledby="REC_TITLE_ID"
+              :aria-busy="recentsLoading"
             >
               <div class="rec-head">
                 <h3
@@ -266,9 +267,17 @@
                 </div>
               </div>
 
+              <p
+                v-if="recentsLoading"
+                class="rec-empty"
+                role="status"
+              >
+                טוען מסמכים אחרונים…
+              </p>
+
               <!-- אין אחרונים כלל -->
               <div
-                v-if="recents.length === 0"
+                v-else-if="recents.length === 0"
                 class="rec-empty"
               >
                 <SvgIcon
@@ -454,22 +463,18 @@
           {{ busy ? 'פותח מסמך…' : notice }}
         </p>
         <div class="open-footer__end">
-          <!--
-            נקודת הכניסה למסמכים שנסגרו בלי לשמור. מרונדרת **רק** כשיש מה
-            לשחזר (`discardedCount > 0`): כפתור שמוביל לרשימה ריקה הוא כפתור
-            שנלחץ פעם אחת ולא נלחץ שוב, וברירת המחדל 0 גם מבטיחה שהוא לא
-            יופיע לפני שמי שמחזיק את מסך השחזור חיווט אותו.
-          -->
+          <!-- הרשימה אינה חוסמת פתיחה; בזמן טעינה אין הבטחה שהיא ריקה. -->
           <button
-            v-if="discardedCount > 0"
+            v-if="discardedLoading || discardedCount > 0"
             type="button"
             class="open-discarded"
-            :disabled="busy"
+            :disabled="busy || discardedLoading"
+            :aria-busy="discardedLoading"
             data-tip-title="מסמכים שנסגרו בלי לשמור"
             data-tip-desc="חמשת האחרונים נשמרו כגיבוי, ואפשר לפתוח אותם מכאן"
             @click="$emit('show-discarded')"
           >
-            נסגרו בלי לשמור ({{ discardedCount }})
+            {{ discardedLoading ? 'טוען עותקים לשחזור…' : `נסגרו בלי לשמור (${discardedCount})` }}
           </button>
           <!--
             הגרסה שהייתה לפני השמירה האחרונה. מרונדרת רק כשיש כזאת ורק
@@ -562,6 +567,7 @@ const props = withDefaults(
     isOpen?: boolean;
     templates?: readonly DocumentTemplate[];
     recents?: readonly RecentDocument[];
+    recentsLoading?: boolean;
     busy?: boolean;
     searchQuery?: string;
     /**
@@ -569,6 +575,7 @@ const props = withDefaults(
      * `0` = אין מה לשחזר, והכניסה אינה מרונדרת כלל.
      */
     discardedCount?: number;
+    discardedLoading?: boolean;
     /**
      * הגרסה שהייתה לפני השמירה האחרונה של המסמך הפתוח, או `null` כשאין.
      *
@@ -606,9 +613,11 @@ const props = withDefaults(
     isOpen: false,
     templates: () => [],
     recents: () => [],
+    recentsLoading: false,
     busy: false,
     searchQuery: '',
     discardedCount: 0,
+    discardedLoading: false,
     // כמו `discardedCount`: נכשל סגור — דיאלוג שהורכב בלי מידע אינו מציע
     // לפתוח גרסה שאינו מכיר.
     previousVersion: null,
