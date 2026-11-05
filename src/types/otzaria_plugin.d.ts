@@ -776,6 +776,10 @@ export interface ReaderState {
   currentIndex: number;
   currentRef: string | null;
   openTabs: Array<{
+    /** מזהה הכלי בטאב כלי/תוסף; `null` בטאב ספר. */
+    toolId?: string | null;
+    /** הטאב של התוסף הקורא עצמו. */
+    isSelf?: boolean;
     /** Canonical book id (`null` for a non-book tab such as search). */
     id: number | null;
     type: BookType | null;
@@ -967,6 +971,8 @@ export interface TextSourceMap {
 
 export interface GetSectionTextMapArgs {
   bookId: string;
+  /** מזהה ספר יציב; גובר על `bookId` (כותרת), שאינה תואמת בטאב של מהדורה חלופית. */
+  bookUid?: string;
   sectionIndex: number;
   layer?: 'source' | 'rendered' | 'both';
   includeWords?: boolean;

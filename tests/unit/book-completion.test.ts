@@ -6,6 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   buildSectionCache,
+  matchAcrossBooks,
   matchAtCursor,
   matchBookTitle,
   sliceWords,
@@ -108,6 +109,53 @@ describe('matchAtCursor', () => {
   it('null בגבול מילה בלי שום הקשר', () => {
     const cache = buildSectionCache(VERSE);
     expect(matchAtCursor(cache, { precedingWords: [], partialWord: '' })).toBeNull();
+  });
+});
+
+describe('matchAcrossBooks', () => {
+  /** הספר שנקרא אחרון — אינו הספר שמעתיקים ממנו. */
+  const LAST_READ = buildSectionCache('ויאמר משה אל העם אל תיראו בראתי');
+  const COPIED_FROM = buildSectionCache(VERSE);
+
+  it('הקשר תואם בספר אחר גובר על הספר שנקרא אחרון', () => {
+    const found = matchAcrossBooks([LAST_READ, COPIED_FROM], {
+      precedingWords: ['בראשית'],
+      partialWord: 'ב',
+    });
+    expect(found?.bookIndex).toBe(1);
+    expect(found?.match.matchedWordIndex).toBe(1);
+  });
+
+  it('ההקשר הארוך מנצח גם כשהספר הראשון תואם בהקשר קצר', () => {
+    const first = buildSectionCache('אמר ברא אלהים עולם');
+    const found = matchAcrossBooks([first, COPIED_FROM], {
+      precedingWords: ['בראשית', 'ברא'],
+      partialWord: 'אל',
+    });
+    expect(found?.bookIndex).toBe(1);
+    expect(found?.match.contextWordsUsed).toBe(2);
+  });
+
+  it('בשוויון הקשר — הספר שנקרא אחרון', () => {
+    const found = matchAcrossBooks([COPIED_FROM, buildSectionCache(VERSE)], {
+      precedingWords: ['בראשית'],
+      partialWord: 'ב',
+    });
+    expect(found?.bookIndex).toBe(0);
+  });
+
+  /** התסמין שדווח: בהרבה ספרים פתוחים, שלוש אותיות העלו קטע אקראי מספר אחר. */
+  it('בלי הקשר תואם מציעה רק מהספר שנקרא אחרון', () => {
+    expect(
+      matchAcrossBooks([LAST_READ, COPIED_FROM], { precedingWords: ['לא', 'קיים'], partialWord: 'השמ' }),
+    ).toBeNull();
+    expect(
+      matchAcrossBooks([LAST_READ, COPIED_FROM], { precedingWords: [], partialWord: 'ברא' })?.bookIndex,
+    ).toBe(0);
+  });
+
+  it('null כשאין ספרים', () => {
+    expect(matchAcrossBooks([], { precedingWords: [], partialWord: 'ברא' })).toBeNull();
   });
 });
 

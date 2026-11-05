@@ -162,6 +162,111 @@ try {
     else report.fail('ghost אינו נשאר מעל טקסט שמוקלד', `ghost מחוץ לסמן: ${stale.join(' ')}`);
   });
 
+  /*
+   * מכאן הקורא המדומה מחזיק כמה ספרים, ואפשר לשנות את הטקסט „המוצג” שלהם
+   * באמצע. `Shift` לבדו מעורר הערכה (keyup) בלי לפסול הצעה ובלי לכתוב, ושתי
+   * הערכות במרחק של יותר מ-STATE_TTL_MS הן מה שמריץ רענון של מצב הקורא
+   * ואחריו הערכה שרואה את התוצאה שלו.
+   */
+  const nudge = async (wait = 600) => {
+    await app.press('Shift', 'ShiftLeft', 16, 0);
+    await app.sleep(wait);
+  };
+  const refreshReader = async () => {
+    await nudge(1_800);
+    await nudge(1_800);
+  };
+  const setReader = (state, books) =>
+    app.js(`
+      window.__qaReader = { state: ${JSON.stringify(state)}, books: ${JSON.stringify(books)} };
+      window.__qaHost.replies['reader.getCurrentState'] = function () {
+        return Promise.resolve({ success: true, data: window.__qaReader.state, error: null });
+      };
+      window.__qaHost.replies['reader.getSectionTextMap'] = function (payload) {
+        var book = window.__qaReader.books[(payload && (payload.bookUid || payload.bookId)) || ''];
+        if (book === undefined) {
+          return Promise.resolve({ success: false, data: null, error: { code: 'error.not_found', message: 'text book was not found' } });
+        }
+        var text = payload.sectionIndex === 0 ? book : '';
+        return Promise.resolve({ success: true, data: { renderedText: text, sourceText: text, hasMore: false, nextCursor: null }, error: null });
+      };
+    `);
+
+  /** אותו פסוק, כפי שהקורא מציג אותו כשהניקוד גלוי. */
+  const NIKUD_LINE = 'בְּרֵאשִׁית בָּרָא אֱלֹהִים אֵת הַשָּׁמַיִם וְאֵת הָאָרֶץ וְהָאָרֶץ הָיְתָה תֹהוּ וָבֹהוּ';
+  const NIKUD_GHOST = 'בָּרָא אֱלֹהִים אֵת הַשָּׁמַיִם וְאֵת';
+  const GENESIS = { currentBook: 'בראשית', currentBookId: 'b1', bookUid: null, currentRef: 'בראשית א', currentIndex: 0 };
+
+  /*
+   * הדיווח: „מעתיק עם ניקוד ולא לפי איך שזה מוצג”. המטמון נשמר לפי ספר
+   * ושורה, והסתרת ניקוד אינה משנה אף אחד מהם — ולכן ההשלמה המשיכה להציע את
+   * מה שנטען קודם, עד גלילה. כאן שני הכיוונים, בלי לזוז מהשורה.
+   */
+  await step('שינוי ניקוד בקורא מגיע להשלמה בלי גלילה', async () => {
+    await setReader(GENESIS, { b1: NIKUD_LINE });
+    await refreshReader();
+    await app.press('Enter', 'Enter', 13, 0);
+    await app.type('בראשית ב');
+    await app.sleep(1_600);
+    const shown = (await ghostText()).trim();
+    log('ניקוד גלוי:', JSON.stringify(shown));
+    if (shown === NIKUD_GHOST) report.pass('הצגת ניקוד בקורא — ההשלמה מנוקדת');
+    else report.fail('הצגת ניקוד בקורא — ההשלמה מנוקדת', `הוצג ${JSON.stringify(shown)} במקום „${NIKUD_GHOST}”`);
+
+    await setReader(GENESIS, { b1: LINE });
+    await refreshReader();
+    const hidden = (await ghostText()).trim();
+    log('ניקוד מוסתר:', JSON.stringify(hidden));
+    if (hidden === FIRST_GHOST) report.pass('הסתרת ניקוד בקורא — ההשלמה בלי ניקוד');
+    else report.fail('הסתרת ניקוד בקורא — ההשלמה בלי ניקוד', `הוצג ${JSON.stringify(hidden)} במקום „${FIRST_GHOST}”`);
+  });
+
+  /*
+   * הדיווח: „כשיש הרבה ספרים פתוחים אין קשר בין מה שהוא מציע לנכתב”. הספר
+   * שנקרא אחרון (שמות) אינו הספר שמעתיקים ממנו (בראשית, בטאב של מהדורה
+   * חלופית — הכותרת אינה שם הספר, ולכן הוא נמצא רק לפי `bookUid`).
+   */
+  await step('ספר שמעתיקים ממנו גובר על הספר שנקרא אחרון', async () => {
+    const EXODUS_LINE = 'ואלה שמות בני ישראל הבאים מצרימה את יעקב איש וביתו באו';
+    await setReader(
+      {
+        currentBook: 'שמות',
+        currentBookId: 'שמות',
+        bookUid: 'u2',
+        currentType: 'text',
+        currentRef: 'שמות א',
+        currentIndex: 0,
+        openTabs: [
+          { toolId: null, isSelf: false, bookId: 'שמות', bookUid: 'u2', type: 'text', index: 0 },
+          { toolId: null, isSelf: false, bookId: 'בראשית (מהדורה)', bookUid: 'u1', type: 'text', index: 0 },
+          { toolId: 'otzaria.word', isSelf: true, bookId: 'וורד', bookUid: null, type: null, index: 0 },
+        ],
+      },
+      { u2: EXODUS_LINE, u1: LINE },
+    );
+    await app.press('Enter', 'Enter', 13, 0);
+    await refreshReader();
+
+    await app.type('בראשית ב');
+    await app.sleep(1_600);
+    const withContext = (await ghostText()).trim();
+    log('עם הקשר:', JSON.stringify(withContext));
+    if (withContext === FIRST_GHOST) report.pass('הקשר תואם בספר רקע מציע ממנו');
+    else report.fail('הקשר תואם בספר רקע מציע ממנו', `הוצג ${JSON.stringify(withContext)} במקום „${FIRST_GHOST}”`);
+
+    // „וחש” מופיע רק בבראשית, ובלי שום מילת הקשר: זה בדיוק הקטע האקראי מספר
+    // אחר שדווח. מותר רק מהספר שנקרא אחרון. הטענה על המשך **הספר** ולא על
+    // „אין ghost”: הרשימות הסטטיות רצות אחרי הספר ומציעות לאותן אותיות משלהן.
+    const BACKGROUND_CONTINUATION = 'וחשך על פני תהום';
+    await app.press('Enter', 'Enter', 13, 0);
+    await app.type('וחש');
+    await app.sleep(1_600);
+    const standalone = (await ghostText()).trim();
+    log('בלי הקשר:', JSON.stringify(standalone));
+    if (standalone !== BACKGROUND_CONTINUATION) report.pass('בלי הקשר אין הצעה מספר רקע');
+    else report.fail('בלי הקשר אין הצעה מספר רקע', `הוצג ${JSON.stringify(standalone)} מספר הרקע`);
+  });
+
   await step('כיבוי מסיר את ה-ghost', async () => {
     await app.click('השלמה מהספר', { after: 700 });
     const ghost = await ghostText();
@@ -175,7 +280,7 @@ try {
       (l) =>
         /error|שגיאה|failed|נכשל/i.test(l) &&
         !/DevTools|Download the Vue/i.test(l) &&
-        !/reader\.addContextMenuItem|fonts\.listInstalled/.test(l) &&
+        !/reader\.addContextMenuItem|reader\.addToolbarItem|fonts\.listInstalled/.test(l) &&
         !/projection-incomplete|typing-mutation: engine pass failed/.test(l),
     );
     if (noisy.length) report.fail('ללא רעש', noisy.join(' | '));
