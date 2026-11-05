@@ -325,7 +325,7 @@ import { layOutTocRows } from '../../../engine/toc';
 import {
   readPageBreakSupport,
   readPageBreakNodeId,
-  setParagraphPageBreak,
+  toggleParagraphPageBreak,
   pageBreakTracker,
   type PageBreakSupport,
 } from '../../../engine/page-break';
@@ -383,6 +383,11 @@ import { pickImageFile, readImageAsDataUrl } from '../../../host/files';
 defineEmits<{
   (e: 'open-link'): void;
 }>();
+
+const props = withDefaults(defineProps<{
+  /** Pause only selection-driven readouts, preserving commands and dialogs. */
+  readoutsVisible?: boolean;
+}>(), { readoutsVisible: true });
 
 /** ברירת המחדל כשאין מדווח — הרכבה חלקית בבדיקות. זהה להתנהגות של `useCommand`. */
 const fallbackReporter: CommandReporter = (outcome, id) => {
@@ -537,12 +542,15 @@ const pageBreakOn = shallowRef(false);
 
 /** מונה דורות נפרד לקריאת המצב: היא רצה הרבה יותר (כל תזוזת סמן), לא רק בפתיחת מסמך. */
 let pageBreakStateGeneration = 0;
+let pageBreakReadoutDisposed = false;
 
 /** מזהה הפסקה שהסמן בה מול `pageBreakTracker`. לא זורקת — `readPageBreakNodeId` עצמה אינה. */
 async function refreshPageBreakOn(): Promise<void> {
+  if (pageBreakReadoutDisposed || !props.readoutsVisible) return;
+  clearTimeout(pageBreakSelectionTimer);
   const mine = ++pageBreakStateGeneration;
   const nodeId = await readPageBreakNodeId(superdoc.value);
-  if (mine !== pageBreakStateGeneration) return;
+  if (mine !== pageBreakStateGeneration || pageBreakReadoutDisposed || !props.readoutsVisible) return;
   pageBreakOn.value = pageBreakTracker.isOn(nodeId);
 }
 
@@ -555,6 +563,9 @@ const PAGE_BREAK_SELECTION_DEBOUNCE_MS = 150;
 let pageBreakSelectionTimer: ReturnType<typeof setTimeout> | undefined;
 
 function schedulePageBreakRefresh(): void {
+  if (pageBreakReadoutDisposed || !props.readoutsVisible) return;
+  // Selection can move while an earlier read is still pending.
+  pageBreakStateGeneration += 1;
   clearTimeout(pageBreakSelectionTimer);
   pageBreakSelectionTimer = setTimeout(() => void refreshPageBreakOn(), PAGE_BREAK_SELECTION_DEBOUNCE_MS);
 }
@@ -569,6 +580,17 @@ function schedulePageBreakRefresh(): void {
  * בלי `observe` בכלל.
  */
 let unsubscribePageBreakSelection: (() => void) | null = null;
+let unsubscribePageBreakTracker: (() => void) | null = null;
+
+function stopPageBreakReadout(): void {
+  pageBreakStateGeneration += 1;
+  clearTimeout(pageBreakSelectionTimer);
+  pageBreakSelectionTimer = undefined;
+  unsubscribePageBreakSelection?.();
+  unsubscribePageBreakSelection = null;
+  unsubscribePageBreakTracker?.();
+  unsubscribePageBreakTracker = null;
+}
 
 watch(
   superdoc,
@@ -582,17 +604,19 @@ watch(
 );
 
 watch(
-  superdoc,
-  (host) => {
-    // מסמך אחר: מאפסת את הידע ואת החיווי, ומחליפה מנוי. אותו מסמך בדיוק
-    // (לשונית שהוחלפה וחזרה) — `syncDocument` אינה מאפסת, וההסבר המלא נמצא
-    // לצידה ב-page-break.ts. המפתח הוא `documentGeneration.value` ולא `host`
-    // עצמו — ראו „QA עצמאי” בהערת הפתיחה של page-break.ts למה.
-    pageBreakTracker.syncDocument(documentGeneration.value);
-    pageBreakOn.value = false;
+  [superdoc, documentGeneration, () => props.readoutsVisible],
+  ([host, documentKey, visible], [previousHost, previousKey, wasVisible]) => {
+    stopPageBreakReadout();
+    // Document identity is command state, so it must synchronize while hidden.
+    // Folding/unfolding the same document must preserve the Undo/Redo snapshot.
+    if (host !== previousHost || documentKey !== previousKey) {
+      pageBreakTracker.syncDocument(documentKey);
+      pageBreakOn.value = false;
+    }
+    if (!visible) return;
 
-    unsubscribePageBreakSelection?.();
-    unsubscribePageBreakSelection = null;
+    // Undo/Redo changes the tracker without necessarily moving the selection.
+    unsubscribePageBreakTracker = pageBreakTracker.onChange(() => void refreshPageBreakOn());
 
     const observeSelection = (host as SuperDoc | null | undefined)?.ui?.selection?.observe;
     if (typeof observeSelection === 'function') {
@@ -605,24 +629,16 @@ watch(
     }
     // נפילה בטוחה למנוע בלי `observe` בכלל, וגם קריאה ראשונה שאינה תלויה
     // ב„ירה מיד” של המנוע.
-    schedulePageBreakRefresh();
+    // Cancel an observe() initial callback's timer when refreshing on reveal.
+    if (wasVisible === false) void refreshPageBreakOn();
+    else schedulePageBreakRefresh();
   },
-  { immediate: true }
+  { immediate: true, flush: 'sync' }
 );
 
-/**
- * מנוי על שינויים ב-`pageBreakTracker` עצמו — לא רק על תזוזת סמן. חובה בשביל
- * `forgetAll()` (App.vue, אחרי Undo/Redo מוצלח): היא נקראת **מחוץ** לרכיב
- * הזה, ואינה מזיזה את הסמן — כלומר `ui.selection.observe` שמעל לא יורה, וה-
- * חיווי היה נשאר תקוע על „פעיל” עד לחיצה הבאה. נמדד ב-QA בדפדפן אמיתי לפני
- * שהמנוי הזה נוסף. נרשם פעם אחת לכל חיי הרכיב, לא בתוך ה-watch שמעל.
- */
-const unsubscribePageBreakTracker = pageBreakTracker.onChange(() => void refreshPageBreakOn());
-
 onUnmounted(() => {
-  unsubscribePageBreakTracker();
-  unsubscribePageBreakSelection?.();
-  clearTimeout(pageBreakSelectionTimer);
+  pageBreakReadoutDisposed = true;
+  stopPageBreakReadout();
 });
 
 /**
@@ -637,12 +653,12 @@ const pageBreakTooltip = computed(() => {
 });
 
 /**
- * מתג אמיתי: לחיצה כשהפסקה „כבויה” שולחת `true`, וכשהיא „דלוקה” שולחת
- * `false`. `pageBreakOn` הוא הידע שלנו על הפסקה **הנוכחית** בלבד (ראו
- * ההסבר למעלה), ולכן נקרא מיד לפני השליחה ולא נשמר ממערכת נפרדת.
+ * The command resolves its target and toggle value together. The visual state
+ * can still be catching up after a hidden selection change and must not decide
+ * what to write.
  */
 async function onStartOnNewPage(): Promise<void> {
-  const outcome = await setParagraphPageBreak(superdoc.value, !pageBreakOn.value, pageBreakTracker);
+  const outcome = await toggleParagraphPageBreak(superdoc.value, pageBreakTracker);
   report(outcome, 'page-break-before');
   await refreshPageBreakOn();
 }

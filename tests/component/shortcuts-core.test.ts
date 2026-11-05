@@ -320,6 +320,19 @@ describe('פקודות המנוע', () => {
     expect(adapter.calls.map((call) => call.id)).toEqual(['bold']);
   });
 
+  it('formatting and page-break shortcuts keep working with the ribbon collapsed', async () => {
+    const wrapper = await mountShell();
+    await wrapper.find('.word-ribbon-toggle').trigger('click');
+    expect(wrapper.find('.word-ribbon-toggle').attributes('aria-expanded')).toBe('false');
+    press({ code: 'KeyB', ctrlKey: true });
+    press({ code: 'Enter', ctrlKey: true });
+    await settle();
+    expect(adapter.applied.map(call => call.id)).toContain('bold');
+    expect(superdoc.inputs('format.paragraph.setFlowOptions')).toContainEqual(
+      expect.objectContaining({ pageBreakBefore: true }),
+    );
+  });
+
   it('פקודה חסומה מדווחת בעברית ואינה נופלת', async () => {
     adapter = createCommandDouble({ failures: { undo: 'history-empty' } });
     const wrapper = await mountShell();
