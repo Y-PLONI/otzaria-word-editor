@@ -50,6 +50,17 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('package worker ownership', () => {
+  it('accepts the postflight result without preflight metadata and rejects a foreign operation', async () => {
+    const pending = runPackageTask('postflight', new ArrayBuffer(1));
+    const completed = vi.fn(); void pending.then(completed);
+    const worker = workers[0];
+    worker.onmessage!(new MessageEvent<PackageResponse>('message', { data: { ...worker.request!, operation: 'preflight', ok: true, result: unchanged } }));
+    await Promise.resolve(); expect(completed).not.toHaveBeenCalled();
+    worker.onmessage!(new MessageEvent<PackageResponse>('message', { data: { ...worker.request!, operation: 'postflight', ok: true, result: { bytes: null } } }));
+    await expect(pending).resolves.toEqual({ bytes: null });
+    expect(worker.terminate).toHaveBeenCalledOnce();
+  });
+
   it('transfers input bytes and terminates after returning metadata', async () => {
     const bytes = new Uint8Array([1, 2, 3]).buffer;
     const pending = runPackageTask('preflight', bytes);

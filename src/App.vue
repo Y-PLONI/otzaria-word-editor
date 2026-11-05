@@ -708,7 +708,7 @@ import {
   type SessionState,
   type SessionView,
 } from './sessions/session-state';
-import { createSessionKeeper, type SessionKeeper } from './sessions/session-keeper';
+import { createSessionKeeper, type KeeperSavePoint, type SessionKeeper } from './sessions/session-keeper';
 import {
   applyCaretAnchor,
   applyDocumentStartCaret,
@@ -2007,16 +2007,19 @@ provide(STATUS_NOTIFIER, (text: string) => setStatus(text));
  * getter הוא סגירה, ולכן הוא רואה את ההשמה שמגיעה מיד אחרי.
  */
 function initSaveCoordinator(getSession: () => DocumentSession): SaveCoordinator {
+  // הייצואים של הקואורדינטור סדרתיים; onSaved צורך את הנקודה לפני הסבב הבא.
+  let exportedSavePoint: KeeperSavePoint;
   return createSaveCoordinator({
-    exportDocument: async () => {
+    exportDocument: async (signal) => {
       const session = getSession();
       const active = session.swap.current;
       if (!active) throw new Error('אין מסמך פתוח');
+      exportedSavePoint = session.keeper.captureSave();
       // ה-MIME הוא מה שנשלח כ-`Content-Type` בכתיבה, ו-`superdoc.export`
       // מסמן תמיד `docx`. מסמך עם מאקרו היה מוצהר לא נכון למי שקורא את
       // ההצהרה — ראו `retypeBlob`. הסיומת נקראת מהטאב הזה ולא מה-ref המוצג:
       // שמירה אוטומטית של טאב ברקע רצה כאן, על המסמך שלו.
-      return retypeBlob(await exportDocx(active.superdoc), sessionSaveExtension(session));
+      return retypeBlob(await exportDocx(active.superdoc, { signal }), sessionSaveExtension(session));
     },
     beginWrite: (size) => beginBinaryWrite(size),
     upload: uploadBytes,
@@ -2071,15 +2074,14 @@ function initSaveCoordinator(getSession: () => DocumentSession): SaveCoordinator
      */
     onSaved: (info) => {
       const session = getSession();
-      // „שמור בשם” מחליף את הקובץ שמאחורי המסמך; „שמור” רגיל אינו. רק
-      // הראשון הוא זהות חדשה, ורק אז נכון לשכוח את מקום הסמן.
+      // „שמור בשם” מחליף את הקובץ שמאחורי אותה עריכה חיה. Keeper יעדכן
+      // את היעד בתור שלו, בלי לאפס מונים של הקלדה שהתרחשה בזמן השמירה.
       if (activeEntry(session.keeper.state)?.document?.token !== info.token) {
-        session.keeper.setDocument({ token: info.token, name: info.name, writable: true });
         // „שמור בשם” הוא קובץ חדש שהמשתמש בחר בעצמו — בדיוק מה שרשימת
         // האחרונים אמורה להחזיק. שמירה רגילה אינה נכנסת לכאן (התנאי מעל),
         // ולכן היא אינה מקפיצה את המסמך לראש הרשימה בכל סבב אוטומטי.
         // „שמור בשם” כותב לקובץ שהמשתמש בחר עכשיו, ולכן הוא כתיב בהגדרה —
-        // זה גם מה ש-`setDocument` שמעליו כותב לרשומת ההפעלה.
+        // זה גם מה ש-`noteSaved` כותב לרשומת ההפעלה.
         rememberRecentDocument({
           token: info.token,
           name: info.name,
@@ -2089,7 +2091,10 @@ function initSaveCoordinator(getSession: () => DocumentSession): SaveCoordinator
       }
       // הגודל הוא של מה שנכתב עכשיו, ולכן הוא הבסיס להשוואה הבאה מול
       // הדיסק — בלעדיו „הקובץ השתנה מבחוץ” היה נשאל אחרי כל שמירה רגילה.
-      void session.keeper.noteSaved(info.size);
+      void session.keeper.noteSaved(exportedSavePoint, {
+        sourceSize: info.size,
+        document: { token: info.token, name: info.name, writable: true },
+      });
     },
   });
 }

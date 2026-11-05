@@ -322,7 +322,8 @@ vi.mock('../../src/sessions/save-coordinator', async (importOriginal) => ({
         stub.saveNowCalls.push(options);
         // הכפיל מודיע על השמירה כמו הקואורדינטור האמיתי. בלי זה כל בדיקה
         // כאן הייתה מודדת מעטפת שאינה שומעת שמירה אוטומטית בכלל.
-        stub.saveDeps?.onSaved?.({ token: 'token-1', name: 'מסמך.docx', size: 4_096 });
+        await deps.exportDocument();
+        deps.onSaved?.({ token: 'token-1', name: 'מסמך.docx', size: 4_096 });
         return { status: 'saved', token: 'token-1', name: 'מסמך.docx', size: 4_096 };
       },
       dispose: () => {},
@@ -587,6 +588,10 @@ beforeEach(() => {
   stub.superdoc = createSuperdocDouble();
   const adapter = stub.adapter as CommandDouble;
   stub.superdoc.host.setDocumentMode = vi.fn(mode => adapter.setState('document-mode', { value: mode }));
+  // גם שמירה מזויפת עוברת בייצוא, כדי לתפוס את נקודת השחזור לפני commit.
+  Object.assign(stub.superdoc.host, {
+    export: async () => new Blob([new Uint8Array(4_096)]),
+  });
   stub.session = {
     superdoc: stub.superdoc.host,
     container: document.createElement('div'),
@@ -1564,6 +1569,7 @@ describe('חזרה למה שהיה', () => {
     await mountShell();
     expect(stub.draftRemovals, 'עוד לא נשמר דבר').toBe(0);
 
+    await stub.saveDeps?.exportDocument();
     stub.saveDeps?.onSaved?.({ token: 'tok', name: 'חידושים.docx', size: 250 });
     await settle(6);
 
