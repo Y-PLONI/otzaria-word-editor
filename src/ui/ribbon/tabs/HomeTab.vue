@@ -654,8 +654,13 @@ const emit = defineEmits<{
  * והוא מסתכל בדיוק על הפקד הזה. ב-Word הוא נמצא ב„אפשרויות תיקון שגיאות”,
  * שהוא שלושה מסכים משם.
  */
-const props = withDefaults(defineProps<{ listAutoformatEnabled?: boolean }>(), {
+const props = withDefaults(defineProps<{
+  listAutoformatEnabled?: boolean;
+  /** Only visual paragraph reads pause; commands and shared font state stay live. */
+  readoutsVisible?: boolean;
+}>(), {
   listAutoformatEnabled: true,
+  readoutsVisible: true,
 });
 
 const SPACING_OPTIONS: SelectOption[] = [
@@ -1074,17 +1079,17 @@ function bindBidiDocument(): void {
 }
 
 async function refreshParagraphBidi(): Promise<void> {
-  if (bidiDisposed) return;
+  if (bidiDisposed || !props.readoutsVisible) return;
   clearTimeout(bidiSelectionTimer);
   bindBidiDocument();
   const mine = ++bidiGeneration;
   const reading = await readParagraphIndents(superdoc.value);
-  if (mine !== bidiGeneration || bidiDisposed) return;
+  if (mine !== bidiGeneration || bidiDisposed || !props.readoutsVisible) return;
   paragraphBidi.value = reading ? reading.indents.bidi : null;
 }
 
 function scheduleBidiRefresh(): void {
-  if (bidiDisposed) return;
+  if (bidiDisposed || !props.readoutsVisible) return;
   // Reject a previous response even while the next read is still debounced.
   bidiGeneration += 1;
   bindBidiDocument();
@@ -1092,13 +1097,23 @@ function scheduleBidiRefresh(): void {
   bidiSelectionTimer = setTimeout(() => void refreshParagraphBidi(), BIDI_SELECTION_DEBOUNCE_MS);
 }
 
+function stopBidiReadout(): void {
+  bidiGeneration += 1;
+  clearTimeout(bidiSelectionTimer);
+  bidiSelectionTimer = undefined;
+  unsubscribeBidiSelection?.();
+  unsubscribeBidiSelection = null;
+  unsubscribeBidiDocument?.();
+  unsubscribeBidiDocument = null;
+  bidiDocument = undefined;
+}
+
 watch(
-  superdoc,
-  (host) => {
-    bidiGeneration += 1;
-    paragraphBidi.value = null;
-    unsubscribeBidiSelection?.();
-    unsubscribeBidiSelection = null;
+  [superdoc, () => props.readoutsVisible],
+  ([host, visible], [previousHost, wasVisible]) => {
+    stopBidiReadout();
+    if (host !== previousHost) paragraphBidi.value = null;
+    if (!visible) return;
     bindBidiDocument();
     const selection = host?.ui?.selection;
     if (typeof selection?.observe === 'function') {
@@ -1108,17 +1123,17 @@ watch(
         unsubscribeBidiSelection = null;
       }
     }
-    scheduleBidiRefresh();
+    // observe() may schedule its initial snapshot; the immediate reveal read
+    // clears that timer, so opening the ribbon requests one current reading.
+    if (wasVisible === false) void refreshParagraphBidi();
+    else scheduleBidiRefresh();
   },
   { immediate: true, flush: 'sync' },
 );
 
 onUnmounted(() => {
   bidiDisposed = true;
-  bidiGeneration += 1;
-  unsubscribeBidiSelection?.();
-  unsubscribeBidiDocument?.();
-  clearTimeout(bidiSelectionTimer);
+  stopBidiReadout();
 });
 
 /**

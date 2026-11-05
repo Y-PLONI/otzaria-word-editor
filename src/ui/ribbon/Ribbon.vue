@@ -82,6 +82,7 @@
       />
       <HomeTab
         v-else-if="currentTabId === 'home'"
+        :readouts-visible="!isCollapsed"
         :list-autoformat-enabled="listAutoformatEnabled"
         @open-find="$emit('open-find')"
         @open-replace="$emit('open-replace')"
@@ -89,6 +90,7 @@
       />
       <InsertTab
         v-else-if="currentTabId === 'insert'"
+        :readouts-visible="!isCollapsed"
         @open-link="$emit('open-link')"
       />
       <LayoutTab v-else-if="currentTabId === 'layout'" />
