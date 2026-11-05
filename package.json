@@ -47,6 +47,7 @@
     "check:caret-focus": "node scripts/qa/caret-focus-qa.mjs",
     "check:caret-visibility": "node scripts/qa/caret-visibility-qa.mjs",
     "check:empty-line-caret": "node scripts/qa/empty-line-caret-qa.mjs",
+    "check:justify-last-line": "node scripts/qa/justify-last-line-qa.mjs",
     "check:line-end": "node scripts/qa/rtl-line-end-qa.mjs",
     "check:run-direction": "node scripts/qa/rtl-run-export-qa.mjs",
     "check:arrows": "node scripts/qa/rtl-caret-qa.mjs && node scripts/qa/rtl-selection-regressions-qa.mjs",

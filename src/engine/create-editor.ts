@@ -18,6 +18,7 @@ import { splashStage, SPLASH_STAGES } from '../host/splash';
 import { installClickFocus } from './click-focus';
 import { installFormatPainter } from './format-painter';
 import { localizeEngineChrome } from './hf-chrome';
+import { installJustifyLastLine } from './justify-last-line';
 import { installPointerSnap } from './pointer-snap';
 import { installWordSelection } from './word-selection';
 import { createOtzariaLinkActivation } from './otzaria-link-activation';
@@ -324,6 +325,8 @@ export function createEditor(options: CreateEditorOptions): Promise<EditorSessio
     // מותקן על ה-container ולא על המסמך, ונרשם כ-disposer: destroy מפרק את
     // ה-observer *לפני* המנוע, כדי שלא ירוץ על עץ שכבר נפרק.
     disposers.push(localizeEngineChrome(container).dispose);
+    // שורה אחרונה של פסקה מיושרת שחורגת מהשוליים — ראו justify-last-line.ts.
+    disposers.push(installJustifyLastLine(container).dispose);
 
     if (settled) return;
     timer = setTimeout(() => {
