@@ -45,6 +45,7 @@ import { NO_VBA, type DocumentVba } from '../../src/engine/vba-import';
 import { COMMAND_REPORTER, STATUS_NOTIFIER, type CommandReporter } from '../../src/composables/keys';
 import type { DocMetrics } from '../../src/engine/doc-metrics';
 import FindReplaceDialog from '../../src/ui/panels/FindReplaceDialog.vue';
+import TitleBar from '../../src/ui/shell/TitleBar.vue';
 
 /**
  * המצב המשותף לכפילים. `vi.hoisted` נדרש: מפעלי ה-`vi.mock` מורמים אל מעל
@@ -130,6 +131,8 @@ const stub = vi.hoisted(() => ({
    * „פתוח לקריאה”, וסדר העדיפות ביניהם הוא מה שנמדד למטה.
    */
   preflight: { notice: null as string | null, vba: null as DocumentVba | null },
+  preflightGate: null as Promise<void> | null,
+  preflightSignals: [] as AbortSignal[],
   /** כמה מנועים שוחררו כדי לעמוד בתקרת הזיכרון (`swap.close`). */
   closedEngines: 0,
   /**
@@ -184,6 +187,8 @@ vi.mock('../../src/sessions/editor-swap', async (importOriginal) => ({
       get isOpening() {
         return false;
       },
+      // These tests hold preflight before swap.open creates an engine candidate.
+      cancel: () => false,
       open: async (source?: unknown) => {
         stub.openSources.push(source);
         if (stub.openFailures > 0) {
@@ -222,12 +227,16 @@ vi.mock('../../src/sessions/editor-swap', async (importOriginal) => ({
  */
 vi.mock('../../src/engine/docx-preflight', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../src/engine/docx-preflight')>()),
-  preflightSource: async (source: unknown) => ({
-    source,
-    fontTable: null,
-    vba: stub.preflight.vba ?? { hasMacroPart: false, modules: [], autoRun: [], warnings: [], status: null, unreadable: false },
-    notice: stub.preflight.notice,
-  }),
+  preflightSource: async (source: unknown, options?: { signal?: AbortSignal }) => {
+    if (options?.signal) stub.preflightSignals.push(options.signal);
+    if (stub.preflightGate) await stub.preflightGate;
+    return {
+      source,
+      fontTable: null,
+      vba: stub.preflight.vba ?? { hasMacroPart: false, modules: [], autoRun: [], warnings: [], status: null, unreadable: false },
+      notice: stub.preflight.notice,
+    };
+  },
 }));
 
 vi.mock('../../src/host/files', async (importOriginal) => ({
@@ -532,6 +541,8 @@ beforeEach(() => {
   stub.forgotLastDocument = false;
   stub.openFailures = 0;
   stub.preflight = { notice: null, vba: null };
+  stub.preflightGate = null;
+  stub.preflightSignals.length = 0;
   stub.closedEngines = 0;
   stub.markDirtyCalls = 0;
   stub.resetCalls = 0;
@@ -609,6 +620,208 @@ describe('הרכבת המעטפת', () => {
     expect(stub.resetCalls, 'המסמך החדש אכן נפתח').toBe(2);
     // הדיאלוג מחזיר את המיקוד למי שפתח אותו — שדה החיפוש — ולא לגוף המסמך.
     expect(stub.superdoc?.ops(), 'הפוקוס נשאר בשדה החיפוש').not.toContain('focus');
+  });
+});
+
+describe('נעילת העורך הקודם בזמן פתיחה', () => {
+  function containers(): { previous: HTMLElement; next: HTMLElement } {
+    const previous = document.createElement('div'), next = document.createElement('div');
+    previous.inert = next.inert = false;
+    const base = stub.session as object;
+    let opened = 0;
+    stub.sessionFactory = () => ({ ...base, container: opened++ === 0 ? previous : next });
+    return { previous, next };
+  }
+
+  function holdPreflight(): () => void {
+    let release!: () => void;
+    stub.preflightGate = new Promise<void>(resolve => { release = resolve; });
+    return release;
+  }
+
+  async function beginBlank(beforeChoose?: () => void): Promise<AbortSignal> {
+    const count = stub.preflightSignals.length;
+    pressCtrl('KeyN');
+    await settle(8);
+    const card = document.querySelector<HTMLButtonElement>('.tpl-card');
+    expect(card, 'בורר המסמך הריק פתוח').not.toBeNull();
+    beforeChoose?.();
+    card!.click();
+    await vi.waitFor(() => expect(stub.preflightSignals).toHaveLength(count + 1));
+    return stub.preflightSignals[count]!;
+  }
+
+  it('נועלת רק את הישן ומשאירה את המועמד החדש זמין למיקוד', async () => {
+    const { previous, next } = containers();
+    const wrapper = await mountShell();
+    const release = holdPreflight();
+    try {
+      await beginBlank();
+      expect(previous.inert).toBe(true);
+      expect(next.inert).toBe(false);
+      expect((wrapper.get('.editor-stack').element as HTMLElement).inert).not.toBe(true);
+      stub.superdoc!.reset();
+      release();
+      await vi.waitFor(() => expect(stub.resetCalls).toBe(2));
+      await settle(12);
+      expect(previous.inert).toBe(false);
+      expect(next.inert).toBe(false);
+      expect(stub.superdoc!.ops()).toContain('focus');
+    } finally { release(); }
+  });
+
+  it.each([false, true])('ביטול משחזר מיד את inert המקורי (%s), לפני תשובה מאוחרת', async (prior) => {
+    const { previous } = containers();
+    const wrapper = await mountShell();
+    const release = holdPreflight();
+    try {
+      // Ctrl+N itself is blocked on an inert editor. Preserve a lock that was
+      // applied after the chooser opened, before the opening attempt starts.
+      const signal = await beginBlank(() => { previous.inert = prior; });
+      expect(previous.inert).toBe(true);
+      await wrapper.get('.status-load__skip').trigger('click');
+      expect(signal.aborted).toBe(true);
+      expect(previous.inert).toBe(prior);
+      release();
+      await settle(12);
+      expect(stub.openSources).toHaveLength(1);
+      expect(previous.inert).toBe(prior);
+    } finally { release(); }
+  });
+
+  it('כשל פתיחת המנוע משחרר את העורך שנשאר', async () => {
+    const { previous } = containers();
+    const wrapper = await mountShell();
+    const release = holdPreflight();
+    try {
+      stub.openFailures = 1;
+      await beginBlank();
+      expect(previous.inert).toBe(true);
+      release();
+      await vi.waitFor(() => expect(wrapper.find('.word-statusbar').text()).toContain('פתיחת המסמך נכשלה'));
+      expect(previous.inert).toBe(false);
+      expect(stub.resetCalls).toBe(1);
+    } finally { release(); }
+  });
+
+  it('קיצורים מה-body וכיוון פסקה אינם משנים את הישן, בעוד F6 ו־Escape נשארים זמינים', async () => {
+    const { previous } = containers();
+    const wrapper = await mountShell();
+    const release = holdPreflight();
+    const adapter = stub.adapter as CommandDouble;
+    const key = (init: KeyboardEventInit, target: HTMLElement = document.body): KeyboardEvent => {
+      const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
+      target.dispatchEvent(event);
+      return event;
+    };
+    const direction = (): void => {
+      const init = { code: 'ShiftLeft', key: 'Shift', ctrlKey: true, bubbles: true, cancelable: true };
+      document.body.dispatchEvent(new KeyboardEvent('keydown', init));
+      document.body.dispatchEvent(new KeyboardEvent('keyup', init));
+    };
+    try {
+      await beginBlank();
+      adapter.reset(); stub.superdoc!.reset();
+      expect(key({ code: 'KeyB', ctrlKey: true }).defaultPrevented).toBe(true);
+      expect(key({ code: 'Enter', ctrlKey: true }).defaultPrevented).toBe(true);
+      direction();
+      await settle(8);
+      expect(adapter.calls).toEqual([]);
+      expect(stub.superdoc!.ops()).not.toContain('format.paragraph.setFlowOptions');
+
+      const ribbon = wrapper.get('.word-ribbon-container').element as HTMLElement;
+      ribbon.tabIndex = -1; ribbon.focus();
+      expect(key({ code: 'F6' }, ribbon).defaultPrevented).toBe(true);
+      expect(wrapper.get('.word-statusbar').element.contains(document.activeElement)).toBe(true);
+      expect(stub.superdoc!.ops(), 'F6 מדלג על העורך הנעול').not.toContain('focus');
+
+      key({ code: 'Slash', ctrlKey: true });
+      await settle(8);
+      expect(document.querySelector('[aria-modal="true"]')).not.toBeNull();
+      expect(key({ code: 'Escape' }).defaultPrevented).toBe(true);
+      await settle(8);
+      expect(document.querySelector('[aria-modal="true"]')).toBeNull();
+      expect(previous.inert).toBe(true);
+
+      await wrapper.get('.status-load__skip').trigger('click');
+      expect(previous.inert).toBe(false);
+      key({ code: 'KeyB', ctrlKey: true });
+      key({ code: 'Enter', ctrlKey: true });
+      direction();
+      await settle(12);
+      expect(adapter.calls.map(call => call.id)).toEqual(['bold', 'direction-ltr']);
+      expect(stub.superdoc!.ops()).toContain('format.paragraph.setFlowOptions');
+    } finally { release(); }
+  });
+
+  it('פירוק משחרר מיד ומונע תוצאה מאוחרת מלפתוח מנוע', async () => {
+    const { previous } = containers();
+    const wrapper = await mountShell();
+    const release = holdPreflight();
+    try {
+      const signal = await beginBlank();
+      wrapper.unmount();
+      expect(signal.aborted).toBe(true);
+      expect(previous.inert).toBe(false);
+      release();
+      await settle(12);
+      expect(stub.openSources).toHaveLength(1);
+    } finally { release(); }
+  });
+
+  it('Tell Me שכבר פתוח אינו עוקף את הנעילה, ושדה החיפוש נשמר', async () => {
+    containers();
+    const wrapper = await mountShell();
+    const release = holdPreflight();
+    const adapter = stub.adapter as CommandDouble;
+    const title = wrapper.getComponent(TitleBar);
+    try {
+      await beginBlank();
+      await wrapper.get('.tell-me-input').setValue('בדיקת חיפוש');
+      adapter.reset(); stub.superdoc!.reset();
+      title.vm.$emit('run-command', 'bold');
+      title.vm.$emit('run-action', 'page-break');
+      title.vm.$emit('custom-action', 'about');
+      await settle(8);
+      expect(adapter.calls).toEqual([]);
+      expect(stub.superdoc!.ops()).not.toContain('format.paragraph.setFlowOptions');
+      expect(document.querySelector('[aria-modal="true"]')).toBeNull();
+
+      await wrapper.get('.status-load__skip').trigger('click');
+      expect((wrapper.get('.tell-me-input').element as HTMLInputElement).value).toBe('בדיקת חיפוש');
+      title.vm.$emit('run-command', 'bold');
+      title.vm.$emit('run-action', 'page-break');
+      title.vm.$emit('custom-action', 'about');
+      await settle(12);
+      expect(adapter.calls.map(call => call.id)).toContain('bold');
+      expect(stub.superdoc!.ops()).toContain('format.paragraph.setFlowOptions');
+      expect(document.querySelector('[aria-modal="true"]')).not.toBeNull();
+    } finally { release(); }
+  });
+
+  it('finally מאוחר של פתיחה שבוטלה אינו משחרר פתיחה חדשה על אותו container', async () => {
+    const { previous } = containers();
+    const wrapper = await mountShell();
+    const releaseA = holdPreflight();
+    let releaseB = (): void => {};
+    try {
+      await beginBlank();
+      await wrapper.get('.status-load__skip').trigger('click');
+      expect(previous.inert).toBe(false);
+      releaseB = holdPreflight();
+      const signalB = await beginBlank();
+      expect(previous.inert).toBe(true);
+      releaseA();
+      await settle(12);
+      expect(previous.inert).toBe(true);
+      expect(signalB.aborted).toBe(false);
+      expect(wrapper.find('.status-load__skip').exists()).toBe(true);
+      releaseB();
+      await vi.waitFor(() => expect(stub.resetCalls).toBe(2));
+      await settle(12);
+      expect(previous.inert).toBe(false);
+      expect(stub.openSources).toHaveLength(2);
+    } finally { releaseA(); releaseB(); }
   });
 });
 

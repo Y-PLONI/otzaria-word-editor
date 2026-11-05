@@ -20,6 +20,7 @@
     "check:rtl": "node scripts/rtl-check.mjs",
     "check:ruler": "node scripts/ruler-check.mjs",
     "check:startup": "node scripts/startup-probe.mjs",
+    "check:preflight-worker": "node scripts/qa/preflight-worker-qa.mjs",
     "check:gutter": "node scripts/page-gutter-probe.mjs",
     "check:sdk": "node scripts/sdk-sync-check.mjs",
     "check:menu": "node scripts/context-menu-probe.mjs",

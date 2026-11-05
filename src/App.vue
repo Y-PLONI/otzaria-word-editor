@@ -361,6 +361,8 @@
 
     <MacrosDialog
       :is-open="isMacrosOpen"
+      :busy="isOpening"
+      :is-document-blocked="isActiveEditorBlocked"
       :handle="activeMacros"
       :document-vba="documentVba"
       @close="isMacrosOpen = false"
@@ -2749,9 +2751,29 @@ async function openDocument(file?: UserFile, options: OpenOptions = {}): Promise
     file || options.draft ? 'קורא את הקובץ…' : 'מכין מסמך ריק…',
   );
   openingAttempt = attempt;
+  // העורך הישן נשאר מוצג בזמן הפתיחה. טקסט שייכנס אליו עכשיו עלול להימחק
+  // כשהמועמד יחליף אותו. נועלים רק את ה-container שלו, לא את ה-stack שבו
+  // המועמד החדש צריך לקבל focus וסמן לפני שהפתיחה מסתיימת.
+  const previousContainer = swap.current?.container;
+  const previousInert = previousContainer?.inert ?? false;
+  let interactionBlocked = false;
+  const restorePreviousInteraction = (): void => {
+    if (!interactionBlocked || !previousContainer) return;
+    interactionBlocked = false;
+    attempt.signal.removeEventListener('abort', restorePreviousInteraction);
+    previousContainer.inert = previousInert;
+  };
+  if (previousContainer && !attempt.signal.aborted) {
+    interactionBlocked = true;
+    previousContainer.inert = true;
+    attempt.signal.addEventListener('abort', restorePreviousInteraction, { once: true });
+    if (attempt.signal.aborted) restorePreviousInteraction();
+  }
   try {
     return await openDocumentInto(attempt, file, options);
   } finally {
+    // ביטול משחרר מיד; finally מאוחר של אותו ניסיון אינו משחרר נעילה חדשה.
+    restorePreviousInteraction();
     if (openingAttempt === attempt) openingAttempt = null;
     attempt.fail();
     // וגם המצב שמשתק את הרצועה: פתיחה שזרקה השאירה אותה מנוטרלת לתמיד. הערך
@@ -2783,7 +2805,9 @@ async function openDocumentInto(
   // החוט הראשי, ומשם אין חזרה — גם `OPEN_TIMEOUT_MS` אינו יכול לירות. ראו
   // engine/docx-preflight.ts. השלב הזה אינו יכול להיכשל: הוא מחזיר את המקור
   // כמות שהוא בכל מקרה שאינו „מצאתי בדיוק את הערך הזה”.
-  const { source, fontTable, vba, notice: preflightNotice } = await preflightSource(options.draft ?? file?.url);
+  const { source, fontTable, vba, notice: preflightNotice } = await preflightSource(options.draft ?? file?.url, {
+    signal: attempt.signal,
+  });
   // „דלג” בזמן שהבייטים נקראו. הבדיקה כאן ולא רק לפני המנוע: שאר הפונקציה
   // כותבת למצב של המעטפת — כותרת, יעד שמירה, רשומת ההפעלה — ופתיחה שהמשתמש
   // נטש אינה אמורה לכתוב שם דבר.
@@ -5019,6 +5043,7 @@ function openFindDialog(mode: 'find' | 'replace', initialQuery = ''): void {
 }
 
 async function onRunCommandFromTellMe(id: string, payload?: unknown): Promise<void> {
+  if (isActiveEditorBlocked()) return;
   if (!commandAdapter.value) {
     setStatus('אין מסמך פתוח לביצוע הפעולה', true);
     return;
@@ -5039,11 +5064,13 @@ async function onRunCommandFromTellMe(id: string, payload?: unknown): Promise<vo
 }
 
 function onRunActionFromTellMe(action: ShellAction): void {
+  if (isActiveEditorBlocked()) return;
   runShellAction(action);
 }
 
 /** פעולות Tell Me שאינן פקודת מנוע או פעולת מעטפת רגילה. */
 function onCustomActionFromTellMe(action: TellMeCustomAction): void {
+  if (isActiveEditorBlocked()) return;
   switch (action) {
     case 'export-pdf':
       void onExportPdf();
@@ -5646,6 +5673,11 @@ function isDocumentSurface(target: EventTarget | null): boolean {
   return host !== null && target instanceof Node && host.contains(target);
 }
 
+/** הנעילה של המופע הפעיל בלבד — המועמד החדש אינו יורש אותה מהישן. */
+function isActiveEditorBlocked(): boolean {
+  return activeEditorContainer.value?.inert === true;
+}
+
 /**
  * דיאלוג שמכריז `aria-modal`. מה שמאחוריו אינו זמין — גם לא לקיצור.
  *
@@ -5668,7 +5700,8 @@ function isModalDialogOpen(): boolean {
  * הזאת בחינם ממנו.
  */
 function isOutsideDocumentEditing(target: EventTarget | null): boolean {
-  return isModalDialogOpen() || (isTextEntryTarget(target) && !isDocumentSurface(target));
+  return isActiveEditorBlocked() || isModalDialogOpen() ||
+    (isTextEntryTarget(target) && !isDocumentSurface(target));
 }
 
 /**
@@ -5756,6 +5789,7 @@ const focusRing = createFocusRing({
     {
       id: 'document',
       element: () => editorStackRef.value,
+      isAvailable: () => !isActiveEditorBlocked(),
       focus: () => focusDocument(activeSuperdoc.value),
     },
     {
@@ -6168,6 +6202,7 @@ onMounted(async () => {
     // מודאלי = `aria-modal`, וזה מה שקובע. „אודות” ודיאלוג הקישור מכריזים
     // כך; דיאלוג החיפוש אינו מודאלי בכוונה, ומעליו עדיין מותר לערוך ולשמור.
     isModalOpen: () => isModalDialogOpen(),
+    isDocumentBlocked: isActiveEditorBlocked,
     isDocumentSurface,
     // הרשימה האישית, ואחריה בלבד: המנתב מגיע אליה רק כשלא נמצאה רשומה
     // מובנית, וזו כל ההבטחה של המערכת הזאת — היא נוספת ואינה דורסת.
