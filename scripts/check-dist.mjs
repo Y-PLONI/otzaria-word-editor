@@ -10,6 +10,7 @@ import { readFileSync, writeFileSync, existsSync, statSync, readdirSync, rmSync 
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
+import { Script } from 'node:vm';
 
 const DIST = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist');
 const errors = [];
@@ -30,6 +31,55 @@ if (/<script[^>]*\btype=("|')module\1/.test(html)) {
 }
 if (/\bcrossorigin\b/.test(html)) {
   errors.push('dist/index.html מכיל crossorigin — מיותר ב-file:// ומעורר בקשה חוצת-מקור');
+}
+if (/<link[^>]*rel=("|')modulepreload\1/.test(html)) {
+  errors.push('dist/index.html מכיל modulepreload — ה-chunks נטענים כסקריפטים קלאסיים');
+}
+
+let bundleReport;
+try {
+  bundleReport = JSON.parse(readFileSync(join(DIST, 'bundle-report.json'), 'utf8'));
+  if (bundleReport.format !== 'classic-amd' || bundleReport.entry !== 'assets/app.js') throw new Error('unexpected format');
+} catch (error) {
+  errors.push(`דוח ה-chunks חסר או לא תקין: ${error.message}`);
+}
+const chunks = bundleReport?.chunks ?? {};
+const startupFiles = bundleReport?.startupFiles ?? ['assets/engine-workers.js', 'assets/app.js'];
+const preloadFiles = bundleReport?.preloadFiles ?? [];
+if (!preloadFiles.length) errors.push('חסרה תוכנית preload למנוע DOCX — העלייה תוסיף שרשרת טעינת סקריפטים');
+for (const file of preloadFiles) {
+  if (!chunks[file] || !startupFiles.includes(file)) errors.push(`preload חסר בסגור העלייה: ${file}`);
+}
+if (!html.includes('modules.preload(')) errors.push('הטוען אינו מתחיל את ה־preload שבדוח');
+const startupSources = startupFiles.filter((file) => existsSync(join(DIST, file)))
+  .map((file) => readFileSync(join(DIST, file), 'utf8')).join('\n');
+
+for (const [file, chunk] of Object.entries(chunks)) {
+  const full = join(DIST, file);
+  if (!existsSync(full)) { errors.push(`חסר chunk: ${file}`); continue; }
+  if (statSync(full).size !== chunk.bytes) errors.push(`גודל ${file} אינו תואם לדוח ה-build`);
+  if (!html.includes(JSON.stringify(file))) errors.push(`${file} חסר במפת הטוען הקלאסי`);
+  for (const dependency of [...chunk.imports, ...chunk.dynamicImports]) {
+    if (!chunks[dependency]) errors.push(`${file} מפנה ל-chunk חסר/חיצוני: ${dependency}`);
+  }
+}
+
+// These public engine modules must still be packaged, but outside the startup
+// closure. Disabling the PDF build path would pass a size-only assertion while
+// silently removing the EMF/PDF fallback.
+const deferredModules = [
+  /pdfjs-dist\/build\/pdf\.mjs$/,
+  /superdoc\/dist\/chunks\/pdf\.worker[^/]+\.js$/,
+  /src\/ui\/panels\/MacrosDialog\.vue$/,
+  /src\/ui\/panels\/OpenDocumentDialog\.vue$/,
+  /src\/ui\/panels\/ShortcutManagerDialog\.vue$/,
+];
+for (const expected of deferredModules) {
+  const matching = Object.entries(chunks).filter(([, chunk]) => chunk.modules.some((module) => expected.test(module.id)));
+  if (!matching.length) errors.push(`רכיב לפי צורך חסר מהאריזה: ${expected}`);
+  for (const [file] of matching) {
+    if (startupFiles.includes(file)) errors.push(`${file} נטען בעלייה אף שהוא מכיל ${expected}`);
+  }
 }
 
 // כל href/src ב-HTML חייב להיות נכס מקומי שקיים בפועל.
@@ -111,7 +161,10 @@ const CDN_HINTS = ['cdn.jsdelivr.net', 'unpkg.com', 'cdnjs.cloudflare.com', 'fon
  * חייב לשאת את הבאנר שלו.
  */
 const ENGINE_LICENSE_MARK = 'DOCX Engine Proprietary License Agreement';
-const ENGINE_BEARING_FILES = ['assets/app.js', 'assets/engine-workers.js'];
+const ENGINE_BEARING_FILES = ['assets/engine-workers.js', ...Object.entries(chunks)
+  .filter(([, chunk]) => chunk.modules.some((module) => module.renderedLength > 0 && /@superdoc\/docx-engine\//.test(module.id)))
+  .map(([file]) => file)];
+if (ENGINE_BEARING_FILES.length < 2) errors.push('לא נמצא chunk של מנוע המסמכים בדוח ה-build');
 
 /**
  * ה-path data של אייקוני Fluent System Icons מוטמע ב-src/ui/icons/icons.ts,
@@ -142,10 +195,9 @@ if (!existsSync(dictionaryPath)) {
   errors.push(`${DICTIONARY_ASSET} אינו מכיל את המילון — התוסף שנארז חסר את הנתונים`);
 }
 
-const appPath = join(DIST, 'assets/app.js');
-if (existsSync(appPath) && readFileSync(appPath, 'utf8').includes(DICTIONARY_MARKER)) {
+if (startupSources.includes(DICTIONARY_MARKER)) {
   errors.push(
-    'assets/app.js מכיל את המילון התורני — הוא נבלע לבאנדל הראשי במקום להישאר נכס נפרד. ' +
+    'קובצי העלייה מכילים את המילון התורני — הוא נבלע בעלייה במקום להישאר נכס נפרד. ' +
       'כל משתמש פורס עכשיו 1.3MB בעלייה בשביל תכונה שברירת המחדל שלה כבויה.',
   );
 }
@@ -174,15 +226,13 @@ for (const { file, markers, what, size } of LAZY_ASSETS) {
   if (asset === null) {
     errors.push(`חסר ${file} — ${what} לא ייטענו`);
   }
-  const app = existsSync(appPath) ? readFileSync(appPath, 'utf8') : null;
-
   for (const marker of markers) {
     if (asset !== null && !asset.includes(marker)) {
       errors.push(`${file} אינו מכיל את „${marker}” — התוסף שנארז חסר חלק מ${what}`);
     }
-    if (app !== null && app.includes(marker)) {
+    if (startupSources.includes(marker)) {
       errors.push(
-        `assets/app.js מכיל את ${what} — הם נבלעו לבאנדל הראשי במקום להישאר נכס נפרד. ` +
+        `קובצי העלייה מכילים את ${what} — הם נבלעו בעלייה במקום להישאר נכס נפרד. ` +
           `כל משתמש פורס עכשיו ${size} בעלייה בשביל תכונה שברירת המחדל שלה כבויה.`,
       );
     }
@@ -212,11 +262,19 @@ for (const rel of files) {
   if (!rel.endsWith('.js')) continue;
   const full = join(DIST, rel);
   try {
-    execFileSync(process.execPath, ['--check', full], { stdio: 'pipe' });
+    // Parse as a classic script explicitly; node --check under type:module
+    // would otherwise accept an accidental ESM chunk.
+    new Script(readFileSync(full, 'utf8'), { filename: rel });
   } catch {
-    errors.push(`${rel} אינו סקריפט קלאסי תקין (node --check נכשל)`);
+    errors.push(`${rel} אינו סקריפט קלאסי תקין`);
   }
   const text = readFileSync(full, 'utf8');
+  // A previous hashed chunk must not survive into an otzplugin archive, even
+  // when the current loader cannot request it. A dirty output directory would
+  // otherwise silently ship both engine versions and inflate the package.
+  if (/window\.__otzariaDefine\s*\(/.test(text) && !chunks[rel]) {
+    errors.push(`${rel} הוא chunk שאינו במפת ה-build — יש לנקות פלט ישן לפני אריזה`);
+  }
   for (const hint of CDN_HINTS) {
     if (text.includes(hint)) warnings.push(`${rel} מכיל את המחרוזת ${hint}`);
   }
@@ -236,8 +294,11 @@ for (const rel of ENGINE_BEARING_FILES) {
   }
 }
 
-{
-  const rel = 'assets/app.js';
+const iconFiles = Object.entries(chunks)
+  .filter(([, chunk]) => chunk.modules.some((module) => /src\/ui\/icons\/icons\.ts$/.test(module.id)))
+  .map(([file]) => file);
+if (!iconFiles.length) errors.push('לא נמצא chunk האייקונים בדוח ה-build');
+for (const rel of iconFiles) {
   const full = join(DIST, rel);
   if (existsSync(full) && !readFileSync(full, 'utf8').includes(ICONS_LICENSE_MARK)) {
     errors.push(
@@ -261,13 +322,10 @@ const FONT_FILES = [
   'Assistant-SemiBold.ttf',
   'Assistant-Bold.ttf',
 ];
-const appJsPath = join(DIST, 'assets/app.js');
-const appJs = existsSync(appJsPath) ? readFileSync(appJsPath, 'utf8') : '';
-
 for (const file of FONT_FILES) {
   if (!existsSync(join(DIST, 'fonts', file))) errors.push(`חסר גופן ב-dist: fonts/${file}`);
-  if (appJs && !appJs.includes(`./fonts/${file}`)) {
-    errors.push(`assets/app.js אינו מפנה ל-./fonts/${file} — ההצהרה והנכס יצאו מסינכרון`);
+  if (!startupSources.includes(`./fonts/${file}`)) {
+    errors.push(`קובצי העלייה אינם מפנים ל-./fonts/${file} — ההצהרה והנכס יצאו מסינכרון`);
   }
 }
 

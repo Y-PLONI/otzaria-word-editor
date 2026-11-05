@@ -10,11 +10,13 @@ import { buildStaticCompletionAsset } from './scripts/static-completion-asset';
 import { patchBlankDocumentXml, patchBlankStylesXml } from './src/engine/blank-document';
 import { deriveHebrewBlankDocx } from './scripts/blank-docx';
 import { superdocSelectionIdle } from './scripts/superdoc-selection-idle';
+import { classicChunks, classicChunkFiles, classicStartupPlan } from './scripts/classic-chunks';
+import { installClassicModules } from './scripts/classic-modules';
 
 /**
  * ל-WebView2 של Windows אין תמיכה ב-<script type="module"> מ-file:// ,
- * ואוצריא טוענת תוסף ארוז בדיוק משם. ה-build יוצא IIFE בקובץ אחד, ולכן
- * תגית הסקריפט חייבת להיות קלאסית. במצב dev התגית נשארת module כדי
+ * ואוצריא טוענת תוסף ארוז בדיוק משם. ה-build מפיק chunks של AMD, שנרשמים
+ * ומורצים דרך סקריפטים קלאסיים מקומיים. במצב dev התגית נשארת module כדי
  * שה-HMR של Vite ימשיך לעבוד.
  *
  * ומעבר לכך: Vite מזריק את תגית הכניסה ל-`<head>`, וסקריפט קלאסי שם חוסם את
@@ -37,7 +39,10 @@ function deferredEntry(): Plugin {
     // תגית הכניסה ומוחלפת בטוען.
     enforce: 'post',
 
-    transformIndexHtml(html) {
+    transformIndexHtml(html, context) {
+      if (!context.bundle) throw new Error('Classic chunk manifest is unavailable');
+      const moduleFiles = classicChunkFiles(context.bundle);
+      const { preloadFiles } = classicStartupPlan(context.bundle, { preloadDocumentEngine: true });
       const classic = html.replace(/\s+type="module"/g, '').replace(/\s+crossorigin/g, '');
 
       const match = classic.match(ENTRY);
@@ -75,21 +80,22 @@ function deferredEntry(): Plugin {
           if (started) return;
           started = true;
           var splash = window.__otzariaSplash;
+          var modules = window.__otzariaModules = (${installClassicModules.toString()})(${JSON.stringify(moduleFiles)});
           function say(stage) {
             if (splash && stage) splash.set(stage.at, stage.text);
           }
           /* התחנה מדווחת על השלב ש**מתחיל**, לא על זה שנגמר.
 
-             דיווח ב-onload של app.js פשוט נעלם: הבאנדל הוא IIFE, ו-main.ts
-             מרכיב את Vue במיקרו-טסק בתוך אותה הרצה — כלומר התחנה 68 קודמת
-             ל-onload, ומסך הטעינה בולע כל דיווח נמוך ממנה. נמדד ברצף שהוצג
+             דיווח ב-onload של app.js נעלם בבנייה הישנה: ה-IIFE הריץ את
+             main.ts לפני onload, והתחנה 68 הקדימה את התחנה 55. נמדד ברצף שהוצג
              בפועל: מתחיל · טוען את מנוע המסמכים… · מכין את סביבת העריכה… ·
              פותח את המסמך… · מוכן — התחנה שבאמצע לא הופיעה כלל.
 
-             בצורה הזאת כל תחנה מדווחת ברגע שהיא אכן נכונה: כאן הבאנדל של
-             המנוע מתחיל לרדת, ובסיום שלו app.js מתחיל להיפרס. */
+             גם ב-AMD התחנה 55 נשארת לפני הרכבת הממשק. load של chunk מודד
+             רישום factory בלבד; מדד module:ready נפרד מסמן את הרצת התלויות
+             וה-factory, ו-main.ts ממשיך לדווח על הרכבת המעטפת. */
           /* חימום worker המסמך, ברגע ש-engine-workers.js הציב את המקורות —
-             כלומר בזמן ש-app.js (12MB) עוד נפרס. ‏Worker זמני על ה-blob URL
+             כלומר בזמן שקובצי הממשק עוד נפרסים. ‏Worker זמני על ה-blob URL
              מקמפל את ~4.6MB קוד ה-worker במקביל לפריסה הזאת, ומושלך ברגע
              שאיתת שעלה; כשהמנוע יקים Worker על **אותו URL** הקומפילציה כבר
              חמה (נמדד: ‏~210ms במקום ~325ms). לכן ה-URL נשמר על window,
@@ -129,6 +135,13 @@ function deferredEntry(): Plugin {
             { src: '${WORKERS_SRC}', next: { at: 55, text: 'מרכיב את הממשק…' }, warm: true },
             { src: '${match[1]}', next: null }
           ].forEach(function (step) {
+            if (step.src === '${match[1]}') {
+              modules.load('assets/app').catch(function (error) {
+                console.error('[otzaria-word] Local module load failed:', error);
+                if (splash) splash.fail('טעינת קוד התוסף נכשלה');
+              });
+              return;
+            }
             var script = document.createElement('script');
             script.async = false;
             script.src = step.src;
@@ -146,6 +159,13 @@ function deferredEntry(): Plugin {
             });
             measured('script.requested');
             document.head.appendChild(script);
+          });
+          // Fetch/register the mandatory DOCX engine alongside the entry. Its
+          // factory still waits for SuperDoc's normal dynamic load. Insertion
+          // stays workers → app → preloads; a speculative failure is handled,
+          // and the eventual consumer can retry through the same loader.
+          ${JSON.stringify(preloadFiles)}.forEach(function (file) {
+            modules.preload(file.slice(0, -3)).catch(function () {});
           });
         }
         requestAnimationFrame(function () {
@@ -174,9 +194,9 @@ const WORKER_ROLES: Array<{ match: string; role: 'document' | 'reviewIndex' | 'd
  * ה-workers של המנוע מוטמעים באריזה כמחרוזות, ובזמן ריצה נבנה מהן blob: URL
  * שנמסר ל-`config.workerUrls`.
  *
- * ההטמעה אינה אופציונלית: ה-build הוא IIFE, ובו `import.meta.url` אינו מצביע
- * לקובץ ה-JS — ולכן ה-URL היחסי שהמנוע בונה בעצמו ל-worker אינו נפתר, גם
- * מ-origin תקין (נמדד: אריזה בלי הטמעה נכשלת ב-module-load-failed גם ב-http).
+ * ההטמעה נשארת גם אחרי פיצול ה-chunks: module workers אינם נטענים מ-file://.
+ * מקורות ה-workers נארזים כ-IIFE והכתובות המקומיות נמסרות ב-workerUrls,
+ * כדי ש-engine/workers.ts יוכל להפעיל אותם כ-workers קלאסיים מ-blob.
  * המדידות המלאות, כולל למה blob ולא data:, ב-docs/spike.md §שער A.
  *
  * הפלט הוא `JSON.parse('…')` ולא אובייקט ליטרלי, וזה אינו סגנון: אלה 5MB
@@ -238,9 +258,8 @@ function inlineEngineWorkers(): Plugin {
 /**
  * המילון התורני יוצא כנכס נפרד — לא לתוך `assets/app.js`.
  *
- * ה-build הוא IIFE אחד עם `inlineDynamicImports: true`, ולכן כל צורת `import`
- * של הנתונים — כולל `await import()` — הייתה נבלעת לבאנדל הראשי: 1.3MB שכל
- * משתמש פורס בעלייה בשביל תכונה שברירת המחדל שלה כבויה. הנכס הזה נטען
+ * לפני פיצול ה-build, `inlineDynamicImports: true` בלע גם ייבוא דינמי: 1.3MB שכל
+ * משתמש פורס בעלייה בשביל תכונה שברירת המחדל שלה כבויה. הנכס הנפרד נשאר ונטען
  * בהזרקת `<script>` בזמן ריצה, ורק כשהמשתמש מדליק את הבדיקה — ראו
  * `src/engine/spellcheck-dictionary.ts`, שם גם ההסבר למה `<script>` ולא
  * `fetch` (‏`file://` עם origin opaque).
@@ -391,6 +410,7 @@ export default defineConfig({
     acronymsAsset(),
     staticCompletionAsset(),
     inlineEngineWorkers(),
+    classicChunks({ preloadDocumentEngine: true }),
     deferredEntry(),
   ],
   worker: { format: 'iife' },
@@ -423,12 +443,18 @@ export default defineConfig({
     assetsDir: 'assets',
     sourcemap: false,
     assetsInlineLimit: 4096,
+    // The classic loader owns dependencies. For AMD, Vite injects each chunk's
+    // CSS inside its factory, so lazy panel styles need no CORS/fetch/preloads.
+    modulePreload: false,
+    cssCodeSplit: true,
     chunkSizeWarningLimit: 12_000,
     rollupOptions: {
       output: {
-        format: 'iife',
-        inlineDynamicImports: true,
+        format: 'amd',
+        amd: { autoId: true, define: 'window.__otzariaDefine' },
+        exports: 'named',
         entryFileNames: 'assets/app.js',
+        chunkFileNames: 'assets/[name]-[hash].js',
         assetFileNames: 'assets/[name][extname]',
       },
     },

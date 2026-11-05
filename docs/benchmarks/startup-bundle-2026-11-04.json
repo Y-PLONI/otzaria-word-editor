@@ -1,0 +1,1806 @@
+{
+  "schemaVersion": 1,
+  "recordedAtUtc": "2026-11-04T23:37:35.740069+00:00",
+  "baselineCommit": "db247edfcca1cccb819d6000fd99a1adca68d257",
+  "implementationCommit": "64d7c9eefe78d82aa14b7b8141c1b901eca55b7e",
+  "versions": {
+    "superdoc": "2.23.0",
+    "baselinePdfjs": "5.7.284",
+    "candidatePdfjs": "5.5.207",
+    "node": "24.22.1"
+  },
+  "environment": {
+    "platform": "Linux-6.18.57-x86_64-with-glibc2.39",
+    "rendererCpuRate": 4,
+    "freshBrowserProfilePerRun": true,
+    "sharedMachine": true,
+    "otherAgentBuildsAndTestsPaused": true,
+    "osDiskCacheCleared": false,
+    "hostApi": "QA stub",
+    "urlScheme": "file",
+    "browser": {
+      "protocolVersion": "1.3",
+      "product": "HeadlessChrome/157.0.8103.38",
+      "revision": "@a733b5afbb3ba618844ff8876b89ad1a774b2f18",
+      "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/157.0.8103.38 Safari/537.36",
+      "jsVersion": "15.7.112.23"
+    },
+    "browserDownload": {
+      "channel": "Stable",
+      "version": "157.0.8103.38",
+      "revision": "1717349",
+      "downloads": {
+        "chrome": [
+          {
+            "platform": "linux-arm64",
+            "url": "https://storage.googleapis.com/chrome-for-testing-public/157.0.8103.38/linux-arm64/chrome-linux-arm64.zip"
+          },
+          {
+            "platform": "linux64",
+            "url": "https://storage.googleapis.com/chrome-for-testing-public/157.0.8103.38/linux64/chrome-linux64.zip"
+          },
+          {
+            "platform": "mac-arm64",
+            "url": "https://storage.googleapis.com/chrome-for-testing-public/157.0.8103.38/mac-arm64/chrome-mac-arm64.zip"
+          },
+          {
+            "platform": "mac-x64",
+            "url": "https://storage.googleapis.com/chrome-for-testing-public/157.0.8103.38/mac-x64/chrome-mac-x64.zip"
+          },
+          {
+            "platform": "win32",
+            "url": "https://storage.googleapis.com/chrome-for-testing-public/157.0.8103.38/win32/chrome-win32.zip"
+          },
+          {
+            "platform": "win64",
+            "url": "https://storage.googleapis.com/chrome-for-testing-public/157.0.8103.38/win64/chrome-win64.zip"
+          }
+        ],
+        "chromedriver": [
+          {
+            "platform": "linux-arm64",
+            "url": "https://storage.googleapis.com/chrome-for-testing-public/157.0.8103.38/linux-arm64/chromedriver-linux-arm64.zip"
+          },
+          {
+            "platform": "linux64",
+            "url": "https://storage.googleapis.com/chrome-for-testing-public/157.0.8103.38/linux64/chromedriver-linux64.zip"
+          },
+          {
+            "platform": "mac-arm64",
+            "url": "https://storage.googleapis.com/chrome-for-testing-public/157.0.8103.38/mac-arm64/chromedriver-mac-arm64.zip"
+          },
+          {
+            "platform": "mac-x64",
+            "url": "https://storage.googleapis.com/chrome-for-testing-public/157.0.8103.38/mac-x64/chromedriver-mac-x64.zip"
+          },
+          {
+            "platform": "win32",
+            "url": "https://storage.googleapis.com/chrome-for-testing-public/157.0.8103.38/win32/chromedriver-win32.zip"
+          },
+          {
+            "platform": "win64",
+            "url": "https://storage.googleapis.com/chrome-for-testing-public/157.0.8103.38/win64/chromedriver-win64.zip"
+          }
+        ],
+        "chrome-headless-shell": [
+          {
+            "platform": "linux-arm64",
+            "url": "https://storage.googleapis.com/chrome-for-testing-public/157.0.8103.38/linux-arm64/chrome-headless-shell-linux-arm64.zip"
+          },
+          {
+            "platform": "linux64",
+            "url": "https://storage.googleapis.com/chrome-for-testing-public/157.0.8103.38/linux64/chrome-headless-shell-linux64.zip"
+          },
+          {
+            "platform": "mac-arm64",
+            "url": "https://storage.googleapis.com/chrome-for-testing-public/157.0.8103.38/mac-arm64/chrome-headless-shell-mac-arm64.zip"
+          },
+          {
+            "platform": "mac-x64",
+            "url": "https://storage.googleapis.com/chrome-for-testing-public/157.0.8103.38/mac-x64/chrome-headless-shell-mac-x64.zip"
+          },
+          {
+            "platform": "win32",
+            "url": "https://storage.googleapis.com/chrome-for-testing-public/157.0.8103.38/win32/chrome-headless-shell-win32.zip"
+          },
+          {
+            "platform": "win64",
+            "url": "https://storage.googleapis.com/chrome-for-testing-public/157.0.8103.38/win64/chrome-headless-shell-win64.zip"
+          }
+        ]
+      }
+    }
+  },
+  "method": {
+    "order": [
+      "baseline1",
+      "candidate1",
+      "baseline2",
+      "candidate2",
+      "baseline3",
+      "candidate3"
+    ],
+    "timing": "shellReadyAt is page navigation to editor object present and splash removed. It is not first-input latency. Keyboard/model/visible-paragraph acceptance is a separate functional gate.",
+    "throttling": "Renderer CPU throttling only; applied and CDP error response checked on an empty unique local page before navigating to the instrumented build. Worker/browser/host processing is not equivalently throttled.",
+    "scriptTiming": "requestedAt observes script insertion; AMD load registers a factory. module:ready marks completed dependency/factory evaluation.",
+    "size": "scriptBytes sums all distinct external JS files actually requested at startup, including DOCX engine and worker sources; HTML is listed separately because it contains the inline loader. Package bytes include all shipped files.",
+    "interpretation": "Three interleaved pairs on a shared machine. A baseline sample took 33.936s; it is retained. The median difference is descriptive, not a demonstrated general opening-time improvement or a Windows/WebView2 result.",
+    "offline": "The final functional gate was replayed on the same build after checking both CDP network response errors and navigator.onLine === false before loading deferred UI, EMF and PDF. The startup timing samples did not change; the new assertions run only in the functional gate."
+  },
+  "sizeComparison": {
+    "baselineStartupScriptBytes": 23676499,
+    "candidateStartupScriptBytes": 21454508,
+    "scriptSavingsBytes": 2221991,
+    "scriptSavingsPercent": 9.384795446319998,
+    "baselineIndexBytes": 29481,
+    "candidateIndexBytes": 35438,
+    "baselineStartupScriptAndIndexBytes": 23705980,
+    "candidateStartupScriptAndIndexBytes": 21489946,
+    "baselinePackageBytes": 26024466,
+    "candidatePackageBytes": 26085283
+  },
+  "summary": {
+    "baseline": {
+      "shellReadyMs": [
+        10477,
+        6976.39999999851,
+        33936.29999999702
+      ],
+      "medianMs": 10477,
+      "minMs": 6976.39999999851,
+      "maxMs": 33936.29999999702
+    },
+    "candidate": {
+      "shellReadyMs": [
+        7373.5,
+        8843.89999999851,
+        10345.19999999553
+      ],
+      "medianMs": 8843.89999999851,
+      "minMs": 7373.5,
+      "maxMs": 10345.19999999553
+    },
+    "medianDeltaMs": -1633.1000000014901,
+    "medianDeltaPercent": -15.58747733131135
+  },
+  "pairs": [
+    {
+      "pair": 1,
+      "baseline": {
+        "resultFile": "bundle-prefetch-before-1.json",
+        "completedAtUtc": "2026-11-04T23:27:16.238922+00:00",
+        "data": {
+          "format": "classic-iife",
+          "cpuRate": 4,
+          "startup": {
+            "scripts": [
+              {
+                "file": "assets/engine-workers.js",
+                "requestedAt": 159.60000000149012,
+                "loadedAt": 1676.1999999955297,
+                "failedAt": null
+              },
+              {
+                "file": "assets/app.js",
+                "requestedAt": 159.60000000149012,
+                "loadedAt": 4315.89999999851,
+                "failedAt": null
+              }
+            ],
+            "shellReadyAt": 10477,
+            "paints": [
+              {
+                "name": "first-paint",
+                "at": 100
+              },
+              {
+                "name": "first-contentful-paint",
+                "at": 144
+              }
+            ],
+            "phase": "startup",
+            "errorEvents": [],
+            "factoryMarks": [],
+            "resources": [],
+            "files": {
+              "assets/engine-workers.js": {
+                "bytes": 7097878,
+                "sha256": "8fc611513d26aa16c265c7025826fdad920b075560d74c30688f1ed3a9c199e8"
+              },
+              "assets/app.js": {
+                "bytes": 16578621,
+                "sha256": "d4573ed664b2169c89f7944b0a02f04c456aebb4a8b27c4459e1db3f25eef7ce"
+              }
+            },
+            "scriptBytes": 23676499,
+            "index": {
+              "bytes": 29481,
+              "sha256": "9ee02e147804e0596192293a8333a4d83c5e919e57e44846c3fa796cd205b096"
+            }
+          },
+          "checks": {},
+          "browser": {
+            "id": 17,
+            "result": {
+              "protocolVersion": "1.3",
+              "product": "HeadlessChrome/157.0.8103.38",
+              "revision": "@a733b5afbb3ba618844ff8876b89ad1a774b2f18",
+              "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/157.0.8103.38 Safari/537.36",
+              "jsVersion": "15.7.112.23"
+            }
+          },
+          "testPage": "file:///workspace/scratch/27ac7824ee5b/otzaria-word-editor/dist/__qa-bundle-probe.html"
+        }
+      },
+      "candidate": {
+        "resultFile": "bundle-prefetch-after-1.json",
+        "completedAtUtc": "2026-11-04T23:27:31.275706+00:00",
+        "data": {
+          "format": "classic-amd",
+          "cpuRate": 4,
+          "startup": {
+            "scripts": [
+              {
+                "file": "assets/engine-workers.js",
+                "requestedAt": 263.6000000014901,
+                "loadedAt": 1032.1000000014901,
+                "failedAt": null
+              },
+              {
+                "file": "assets/app.js",
+                "requestedAt": 263.6000000014901,
+                "loadedAt": 2275.10000000149,
+                "failedAt": null
+              },
+              {
+                "file": "assets/docx-engine.es-CFrUeifO.js",
+                "requestedAt": 263.6000000014901,
+                "loadedAt": 3192.2000000029802,
+                "failedAt": null
+              }
+            ],
+            "shellReadyAt": 7373.5,
+            "paints": [
+              {
+                "name": "first-paint",
+                "at": 268
+              },
+              {
+                "name": "first-contentful-paint",
+                "at": 268
+              }
+            ],
+            "phase": "startup",
+            "errorEvents": [],
+            "factoryMarks": [
+              {
+                "name": "otzaria:module:assets/app:ready",
+                "at": 2118.89999999851
+              },
+              {
+                "name": "otzaria:module:assets/docx-engine.es-CFrUeifO:ready",
+                "at": 2996.89999999851
+              }
+            ],
+            "resources": [],
+            "files": {
+              "assets/engine-workers.js": {
+                "bytes": 7097878,
+                "sha256": "8fc611513d26aa16c265c7025826fdad920b075560d74c30688f1ed3a9c199e8"
+              },
+              "assets/app.js": {
+                "bytes": 2890194,
+                "sha256": "f32fafb3ecbb095e6d80ede1ae5778359844c42a38f4ff4f8b68fab5a7006dfe"
+              },
+              "assets/docx-engine.es-CFrUeifO.js": {
+                "bytes": 11466436,
+                "sha256": "6fedc710f3b11bbdfdf5847ce497d08b4f691c894721eb04b9a5cd6589fde0d9"
+              }
+            },
+            "scriptBytes": 21454508,
+            "index": {
+              "bytes": 35438,
+              "sha256": "d86e643de7b94339e2233a5938f7c2bc12c29a9d5436895762563e66051f7d05"
+            }
+          },
+          "checks": {},
+          "browser": {
+            "id": 13,
+            "result": {
+              "protocolVersion": "1.3",
+              "product": "HeadlessChrome/157.0.8103.38",
+              "revision": "@a733b5afbb3ba618844ff8876b89ad1a774b2f18",
+              "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/157.0.8103.38 Safari/537.36",
+              "jsVersion": "15.7.112.23"
+            }
+          },
+          "testPage": "file:///workspace/scratch/27ac7824ee5b/performance-work/bundle-64d7-package/dist/__qa-bundle-probe.html"
+        }
+      }
+    },
+    {
+      "pair": 2,
+      "baseline": {
+        "resultFile": "bundle-prefetch-before-2.json",
+        "completedAtUtc": "2026-11-04T23:27:46.802448+00:00",
+        "data": {
+          "format": "classic-iife",
+          "cpuRate": 4,
+          "startup": {
+            "scripts": [
+              {
+                "file": "assets/engine-workers.js",
+                "requestedAt": 125.39999999850988,
+                "loadedAt": 931.3999999985099,
+                "failedAt": null
+              },
+              {
+                "file": "assets/app.js",
+                "requestedAt": 125.39999999850988,
+                "loadedAt": 3182,
+                "failedAt": null
+              }
+            ],
+            "shellReadyAt": 6976.39999999851,
+            "paints": [
+              {
+                "name": "first-paint",
+                "at": 132
+              },
+              {
+                "name": "first-contentful-paint",
+                "at": 132
+              }
+            ],
+            "phase": "startup",
+            "errorEvents": [],
+            "factoryMarks": [],
+            "resources": [],
+            "files": {
+              "assets/engine-workers.js": {
+                "bytes": 7097878,
+                "sha256": "8fc611513d26aa16c265c7025826fdad920b075560d74c30688f1ed3a9c199e8"
+              },
+              "assets/app.js": {
+                "bytes": 16578621,
+                "sha256": "d4573ed664b2169c89f7944b0a02f04c456aebb4a8b27c4459e1db3f25eef7ce"
+              }
+            },
+            "scriptBytes": 23676499,
+            "index": {
+              "bytes": 29481,
+              "sha256": "9ee02e147804e0596192293a8333a4d83c5e919e57e44846c3fa796cd205b096"
+            }
+          },
+          "checks": {},
+          "browser": {
+            "id": 13,
+            "result": {
+              "protocolVersion": "1.3",
+              "product": "HeadlessChrome/157.0.8103.38",
+              "revision": "@a733b5afbb3ba618844ff8876b89ad1a774b2f18",
+              "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/157.0.8103.38 Safari/537.36",
+              "jsVersion": "15.7.112.23"
+            }
+          },
+          "testPage": "file:///workspace/scratch/27ac7824ee5b/otzaria-word-editor/dist/__qa-bundle-probe.html"
+        }
+      },
+      "candidate": {
+        "resultFile": "bundle-prefetch-after-2.json",
+        "completedAtUtc": "2026-11-04T23:28:02.668759+00:00",
+        "data": {
+          "format": "classic-amd",
+          "cpuRate": 4,
+          "startup": {
+            "scripts": [
+              {
+                "file": "assets/engine-workers.js",
+                "requestedAt": 263.5,
+                "loadedAt": 1153.3999999985099,
+                "failedAt": null
+              },
+              {
+                "file": "assets/app.js",
+                "requestedAt": 263.5,
+                "loadedAt": 3323,
+                "failedAt": null
+              },
+              {
+                "file": "assets/docx-engine.es-CFrUeifO.js",
+                "requestedAt": 263.5,
+                "loadedAt": 4515.89999999851,
+                "failedAt": null
+              }
+            ],
+            "shellReadyAt": 8843.89999999851,
+            "paints": [
+              {
+                "name": "first-paint",
+                "at": 192
+              },
+              {
+                "name": "first-contentful-paint",
+                "at": 260
+              }
+            ],
+            "phase": "startup",
+            "errorEvents": [],
+            "factoryMarks": [
+              {
+                "name": "otzaria:module:assets/app:ready",
+                "at": 3142
+              },
+              {
+                "name": "otzaria:module:assets/docx-engine.es-CFrUeifO:ready",
+                "at": 4297.5
+              }
+            ],
+            "resources": [],
+            "files": {
+              "assets/engine-workers.js": {
+                "bytes": 7097878,
+                "sha256": "8fc611513d26aa16c265c7025826fdad920b075560d74c30688f1ed3a9c199e8"
+              },
+              "assets/app.js": {
+                "bytes": 2890194,
+                "sha256": "f32fafb3ecbb095e6d80ede1ae5778359844c42a38f4ff4f8b68fab5a7006dfe"
+              },
+              "assets/docx-engine.es-CFrUeifO.js": {
+                "bytes": 11466436,
+                "sha256": "6fedc710f3b11bbdfdf5847ce497d08b4f691c894721eb04b9a5cd6589fde0d9"
+              }
+            },
+            "scriptBytes": 21454508,
+            "index": {
+              "bytes": 35438,
+              "sha256": "d86e643de7b94339e2233a5938f7c2bc12c29a9d5436895762563e66051f7d05"
+            }
+          },
+          "checks": {},
+          "browser": {
+            "id": 13,
+            "result": {
+              "protocolVersion": "1.3",
+              "product": "HeadlessChrome/157.0.8103.38",
+              "revision": "@a733b5afbb3ba618844ff8876b89ad1a774b2f18",
+              "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/157.0.8103.38 Safari/537.36",
+              "jsVersion": "15.7.112.23"
+            }
+          },
+          "testPage": "file:///workspace/scratch/27ac7824ee5b/performance-work/bundle-64d7-package/dist/__qa-bundle-probe.html"
+        }
+      }
+    },
+    {
+      "pair": 3,
+      "baseline": {
+        "resultFile": "bundle-prefetch-before-3.json",
+        "completedAtUtc": "2026-11-04T23:28:43.394858+00:00",
+        "data": {
+          "format": "classic-iife",
+          "cpuRate": 4,
+          "startup": {
+            "scripts": [
+              {
+                "file": "assets/engine-workers.js",
+                "requestedAt": 243.29999999701977,
+                "loadedAt": 17247.19999999553,
+                "failedAt": null
+              },
+              {
+                "file": "assets/app.js",
+                "requestedAt": 243.29999999701977,
+                "loadedAt": 28315.79999999702,
+                "failedAt": null
+              }
+            ],
+            "shellReadyAt": 33936.29999999702,
+            "paints": [
+              {
+                "name": "first-paint",
+                "at": 268
+              },
+              {
+                "name": "first-contentful-paint",
+                "at": 268
+              }
+            ],
+            "phase": "startup",
+            "errorEvents": [],
+            "factoryMarks": [],
+            "resources": [],
+            "files": {
+              "assets/engine-workers.js": {
+                "bytes": 7097878,
+                "sha256": "8fc611513d26aa16c265c7025826fdad920b075560d74c30688f1ed3a9c199e8"
+              },
+              "assets/app.js": {
+                "bytes": 16578621,
+                "sha256": "d4573ed664b2169c89f7944b0a02f04c456aebb4a8b27c4459e1db3f25eef7ce"
+              }
+            },
+            "scriptBytes": 23676499,
+            "index": {
+              "bytes": 29481,
+              "sha256": "9ee02e147804e0596192293a8333a4d83c5e919e57e44846c3fa796cd205b096"
+            }
+          },
+          "checks": {},
+          "browser": {
+            "id": 17,
+            "result": {
+              "protocolVersion": "1.3",
+              "product": "HeadlessChrome/157.0.8103.38",
+              "revision": "@a733b5afbb3ba618844ff8876b89ad1a774b2f18",
+              "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/157.0.8103.38 Safari/537.36",
+              "jsVersion": "15.7.112.23"
+            }
+          },
+          "testPage": "file:///workspace/scratch/27ac7824ee5b/otzaria-word-editor/dist/__qa-bundle-probe.html"
+        }
+      },
+      "candidate": {
+        "resultFile": "bundle-prefetch-after-3.json",
+        "completedAtUtc": "2026-11-04T23:29:01.904095+00:00",
+        "data": {
+          "format": "classic-amd",
+          "cpuRate": 4,
+          "startup": {
+            "scripts": [
+              {
+                "file": "assets/engine-workers.js",
+                "requestedAt": 138.5,
+                "loadedAt": 1452,
+                "failedAt": null
+              },
+              {
+                "file": "assets/app.js",
+                "requestedAt": 140.79999999701977,
+                "loadedAt": 3613.2999999970198,
+                "failedAt": null
+              },
+              {
+                "file": "assets/docx-engine.es-CFrUeifO.js",
+                "requestedAt": 140.79999999701977,
+                "loadedAt": 6342.39999999851,
+                "failedAt": null
+              }
+            ],
+            "shellReadyAt": 10345.19999999553,
+            "paints": [
+              {
+                "name": "first-paint",
+                "at": 152
+              },
+              {
+                "name": "first-contentful-paint",
+                "at": 152
+              }
+            ],
+            "phase": "startup",
+            "errorEvents": [],
+            "factoryMarks": [
+              {
+                "name": "otzaria:module:assets/app:ready",
+                "at": 3350.60000000149
+              },
+              {
+                "name": "otzaria:module:assets/docx-engine.es-CFrUeifO:ready",
+                "at": 5904.29999999702
+              }
+            ],
+            "resources": [],
+            "files": {
+              "assets/engine-workers.js": {
+                "bytes": 7097878,
+                "sha256": "8fc611513d26aa16c265c7025826fdad920b075560d74c30688f1ed3a9c199e8"
+              },
+              "assets/app.js": {
+                "bytes": 2890194,
+                "sha256": "f32fafb3ecbb095e6d80ede1ae5778359844c42a38f4ff4f8b68fab5a7006dfe"
+              },
+              "assets/docx-engine.es-CFrUeifO.js": {
+                "bytes": 11466436,
+                "sha256": "6fedc710f3b11bbdfdf5847ce497d08b4f691c894721eb04b9a5cd6589fde0d9"
+              }
+            },
+            "scriptBytes": 21454508,
+            "index": {
+              "bytes": 35438,
+              "sha256": "d86e643de7b94339e2233a5938f7c2bc12c29a9d5436895762563e66051f7d05"
+            }
+          },
+          "checks": {},
+          "browser": {
+            "id": 13,
+            "result": {
+              "protocolVersion": "1.3",
+              "product": "HeadlessChrome/157.0.8103.38",
+              "revision": "@a733b5afbb3ba618844ff8876b89ad1a774b2f18",
+              "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/157.0.8103.38 Safari/537.36",
+              "jsVersion": "15.7.112.23"
+            }
+          },
+          "testPage": "file:///workspace/scratch/27ac7824ee5b/performance-work/bundle-64d7-package/dist/__qa-bundle-probe.html"
+        }
+      }
+    }
+  ],
+  "functionalGate": {
+    "format": "classic-amd",
+    "cpuRate": 1,
+    "startup": {
+      "scripts": [
+        {
+          "file": "assets/engine-workers.js",
+          "requestedAt": 379.70000000298023,
+          "loadedAt": 1037,
+          "failedAt": null
+        },
+        {
+          "file": "assets/app.js",
+          "requestedAt": 379.8999999985099,
+          "loadedAt": 1329.2999999970198,
+          "failedAt": null
+        },
+        {
+          "file": "assets/docx-engine.es-CFrUeifO.js",
+          "requestedAt": 380,
+          "loadedAt": 1562.7999999970198,
+          "failedAt": null
+        }
+      ],
+      "shellReadyAt": 3332.7999999970198,
+      "paints": [
+        {
+          "name": "first-paint",
+          "at": 348
+        },
+        {
+          "name": "first-contentful-paint",
+          "at": 380
+        }
+      ],
+      "phase": "startup",
+      "errorEvents": [],
+      "factoryMarks": [
+        {
+          "name": "otzaria:module:assets/app:ready",
+          "at": 1280.8999999985099
+        },
+        {
+          "name": "otzaria:module:assets/docx-engine.es-CFrUeifO:ready",
+          "at": 1516.7999999970198
+        }
+      ],
+      "resources": [],
+      "files": {
+        "assets/engine-workers.js": {
+          "bytes": 7097878,
+          "sha256": "8fc611513d26aa16c265c7025826fdad920b075560d74c30688f1ed3a9c199e8"
+        },
+        "assets/app.js": {
+          "bytes": 2890194,
+          "sha256": "f32fafb3ecbb095e6d80ede1ae5778359844c42a38f4ff4f8b68fab5a7006dfe"
+        },
+        "assets/docx-engine.es-CFrUeifO.js": {
+          "bytes": 11466436,
+          "sha256": "6fedc710f3b11bbdfdf5847ce497d08b4f691c894721eb04b9a5cd6589fde0d9"
+        }
+      },
+      "scriptBytes": 21454508,
+      "index": {
+        "bytes": 35438,
+        "sha256": "d86e643de7b94339e2233a5938f7c2bc12c29a9d5436895762563e66051f7d05"
+      }
+    },
+    "checks": {
+      "ordinaryDocumentDefersChunks": true,
+      "docxPreloadBeforeAppFactory": true,
+      "typingModelAndVisibleParagraph": true,
+      "openDialogFailureRetryFocusAndRepeat": true,
+      "shortcutsDismissFailureFirstAndRepeat": true,
+      "macrosFirstAndRepeat": true,
+      "emfFirstAndRepeat": true,
+      "pdfFirstAndRepeat": true
+    },
+    "browser": {
+      "id": 3,
+      "result": {
+        "protocolVersion": "1.3",
+        "product": "HeadlessChrome/157.0.8103.38",
+        "revision": "@a733b5afbb3ba618844ff8876b89ad1a774b2f18",
+        "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/157.0.8103.38 Safari/537.36",
+        "jsVersion": "15.7.112.23"
+      }
+    },
+    "testPage": "file:///workspace/scratch/27ac7824ee5b/performance-work/bundle-64d7-package/dist/__qa-bundle-probe.html",
+    "offline": {
+      "enable": {
+        "id": 30,
+        "result": {}
+      },
+      "emulation": {
+        "id": 31,
+        "result": {}
+      },
+      "navigatorOnLine": false
+    },
+    "allScripts": [
+      {
+        "file": "assets/engine-workers.js",
+        "requestedAt": 379.70000000298023,
+        "loadedAt": 1037,
+        "failedAt": null
+      },
+      {
+        "file": "assets/app.js",
+        "requestedAt": 379.8999999985099,
+        "loadedAt": 1329.2999999970198,
+        "failedAt": null
+      },
+      {
+        "file": "assets/docx-engine.es-CFrUeifO.js",
+        "requestedAt": 380,
+        "loadedAt": 1562.7999999970198,
+        "failedAt": null
+      },
+      {
+        "file": "assets/OpenDocumentDialog-DWdgTIzn.js",
+        "requestedAt": 8357,
+        "loadedAt": null,
+        "failedAt": 8367.89999999851
+      },
+      {
+        "file": "assets/OpenDocumentDialog-DWdgTIzn.js",
+        "requestedAt": 8540.20000000298,
+        "loadedAt": 8565.89999999851,
+        "failedAt": null
+      },
+      {
+        "file": "assets/ShortcutManagerDialog-BDjRhbSP.js",
+        "requestedAt": 9771.89999999851,
+        "loadedAt": null,
+        "failedAt": 9778.20000000298
+      },
+      {
+        "file": "assets/ShortcutManagerDialog-BDjRhbSP.js",
+        "requestedAt": 10354,
+        "loadedAt": 10376.70000000298,
+        "failedAt": null
+      },
+      {
+        "file": "assets/MacrosDialog-CIpYbCRf.js",
+        "requestedAt": 11936.70000000298,
+        "loadedAt": 11957.89999999851,
+        "failedAt": null
+      },
+      {
+        "file": "assets/pdf-3U86c3sd.js",
+        "requestedAt": 15925.89999999851,
+        "loadedAt": 15962.39999999851,
+        "failedAt": null
+      },
+      {
+        "file": "assets/pdf.worker.min-t-CYmkGJ.es-5X1AL_vx.js",
+        "requestedAt": 15925.89999999851,
+        "loadedAt": 15986.29999999702,
+        "failedAt": null
+      }
+    ],
+    "errorEvents": [
+      {
+        "phase": "emf-0",
+        "at": 13917,
+        "message": "ResizeObserver loop completed with undelivered notifications.",
+        "filename": "file:///workspace/scratch/27ac7824ee5b/performance-work/bundle-64d7-package/dist/__qa-bundle-probe.html",
+        "lineno": 0,
+        "colno": 0,
+        "error": null
+      },
+      {
+        "phase": "emf-1",
+        "at": 14978.29999999702,
+        "message": "ResizeObserver loop completed with undelivered notifications.",
+        "filename": "file:///workspace/scratch/27ac7824ee5b/performance-work/bundle-64d7-package/dist/__qa-bundle-probe.html",
+        "lineno": 0,
+        "colno": 0,
+        "error": null
+      }
+    ],
+    "errorQuietWindow": {
+      "durationMs": 500,
+      "beforeCount": 2,
+      "afterCount": 2
+    },
+    "unhandled": [
+      "uncaught: ResizeObserver loop completed with undelivered notifications.",
+      "uncaught: ResizeObserver loop completed with undelivered notifications."
+    ],
+    "resizeObserverWarnings": [
+      {
+        "phase": "emf-0",
+        "at": 13917,
+        "message": "ResizeObserver loop completed with undelivered notifications.",
+        "filename": "file:///workspace/scratch/27ac7824ee5b/performance-work/bundle-64d7-package/dist/__qa-bundle-probe.html",
+        "lineno": 0,
+        "colno": 0,
+        "error": null
+      },
+      {
+        "phase": "emf-1",
+        "at": 14978.29999999702,
+        "message": "ResizeObserver loop completed with undelivered notifications.",
+        "filename": "file:///workspace/scratch/27ac7824ee5b/performance-work/bundle-64d7-package/dist/__qa-bundle-probe.html",
+        "lineno": 0,
+        "colno": 0,
+        "error": null
+      }
+    ],
+    "unexpectedErrors": []
+  },
+  "artifact": {
+    "builtDirectlyToFreshOutDir": true,
+    "excluded": [],
+    "checkerSha256": "348497854ace3dfb83922de6a95c25b68adc1e1fd7ded9d519297e27213fcc3e",
+    "baseline": {
+      "totalBytes": 26024466,
+      "files": {
+        "assets/acronyms.js": {
+          "bytes": 710218,
+          "sha256": "ff39b459ded790055ad133272f05592e99944bfaf28d7d2d0323f66b6ebc683f"
+        },
+        "assets/app.js": {
+          "bytes": 16578621,
+          "sha256": "d4573ed664b2169c89f7944b0a02f04c456aebb4a8b27c4459e1db3f25eef7ce"
+        },
+        "assets/engine-workers.js": {
+          "bytes": 7097878,
+          "sha256": "8fc611513d26aa16c265c7025826fdad920b075560d74c30688f1ed3a9c199e8"
+        },
+        "assets/static-completion.js": {
+          "bytes": 31818,
+          "sha256": "8f0a6ea88aae81417f4e058b4c24e959b0b83beb360ed12b17fa7088290b834a"
+        },
+        "assets/torah-dictionary.js": {
+          "bytes": 1311102,
+          "sha256": "b811e2a23f8d1d86e36781aaff45aa6454134912f3a48c07f4fcabf710db89cc"
+        },
+        "fonts/Assistant-Bold.ttf": {
+          "bytes": 49752,
+          "sha256": "d8e13c55ff6153e231f19c10485794f368ba113a6a3c23c471288764a48d6d7a"
+        },
+        "fonts/Assistant-Medium.ttf": {
+          "bytes": 49756,
+          "sha256": "e8dc47984065569a1eaf5922ec110c70a0e5b1e6cf049f584b8636aff11be9eb"
+        },
+        "fonts/Assistant-Regular.ttf": {
+          "bytes": 49792,
+          "sha256": "d60ad12ff68c1739adbc6ffef0890e0deba35a73b2e5844e6babaac40ad78da8"
+        },
+        "fonts/Assistant-SemiBold.ttf": {
+          "bytes": 49804,
+          "sha256": "b714f898c622b8b9e28b35a4e4df369ca6f7e37cb49c134d55ec39f32cbe0e6e"
+        },
+        "index.html": {
+          "bytes": 29481,
+          "sha256": "9ee02e147804e0596192293a8333a4d83c5e919e57e44846c3fa796cd205b096"
+        },
+        "manifest.json": {
+          "bytes": 1667,
+          "sha256": "1c174334cda5e804fa5e8ea40debe70b9437a62920c8ece790d402f833ddab9c"
+        },
+        "third-party/ASSISTANT-LICENSE.txt": {
+          "bytes": 4709,
+          "sha256": "8b85dca4f823b61a9a559f203ef2e7195c0f3d5bd1c27bb98ebd62e13f4274b7"
+        },
+        "third-party/DOCX-ENGINE-LICENSE.md": {
+          "bytes": 23717,
+          "sha256": "cb750acaec9e1fa7b106d326d0a7db0f3811c022048b09affc73842258419172"
+        },
+        "third-party/DOCX-ENGINE-NOTICE.md": {
+          "bytes": 1207,
+          "sha256": "06cf72094a4114548a78d37c9e14d5ebbd3594347db3b05d97878a5ca6a1139a"
+        },
+        "third-party/SUPERDOC-LICENSE.txt": {
+          "bytes": 34523,
+          "sha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef"
+        },
+        "third-party/SUPERDOC-NOTICE.txt": {
+          "bytes": 421,
+          "sha256": "fead6b351ad76dea4c5dab0cca7e4798863f8341d5b4bf1afbde94e1c53bb72a"
+        }
+      }
+    },
+    "candidate": {
+      "totalBytes": 26085283,
+      "files": {
+        "assets/FindReplaceSurface-B5dzB2sG.es-CD2lA0sH.js": {
+          "bytes": 9821,
+          "sha256": "6a057091bf39f88ac0d92e23d1d59e647c25d4b634aee994ca3e60497bbe8ff7"
+        },
+        "assets/MacrosDialog-CIpYbCRf.js": {
+          "bytes": 27351,
+          "sha256": "c466d9d7b1e9f0247b806d2f1b3ebe237dab545ffed819a255e0522ee1a32c3c"
+        },
+        "assets/OpenDocumentDialog-DWdgTIzn.js": {
+          "bytes": 55472,
+          "sha256": "4d49f4bfb20a9978e911b1f4b7d5fb4344ed1b0122c4b5f85d11b7970c3d2a7d"
+        },
+        "assets/PasswordPromptSurface-Ciu8aSmK.es-9F-TDGeO.js": {
+          "bytes": 2926,
+          "sha256": "125af0235ab3a1a39b3e986e5a71f9e2e2db430c0fabc88bc750d554cd9293e4"
+        },
+        "assets/PdfViewer-B8y_9or_.es-C34ApYZ9.js": {
+          "bytes": 8960,
+          "sha256": "7fd007fdcab0b3b0ad607e3e7329b23aaadee26c404f89b6b4deda56de69cc02"
+        },
+        "assets/ShortcutManagerDialog-BDjRhbSP.js": {
+          "bytes": 16486,
+          "sha256": "0fe20889744d9c49e192f3b21f172c18dbfd47942ffaea4780172f959d6e5368"
+        },
+        "assets/acronyms.js": {
+          "bytes": 710218,
+          "sha256": "ff39b459ded790055ad133272f05592e99944bfaf28d7d2d0323f66b6ebc683f"
+        },
+        "assets/app.js": {
+          "bytes": 2890194,
+          "sha256": "f32fafb3ecbb095e6d80ede1ae5778359844c42a38f4ff4f8b68fab5a7006dfe"
+        },
+        "assets/docx-engine.es-CFrUeifO.js": {
+          "bytes": 11466436,
+          "sha256": "6fedc710f3b11bbdfdf5847ce497d08b4f691c894721eb04b9a5cd6589fde0d9"
+        },
+        "assets/engine-workers.js": {
+          "bytes": 7097878,
+          "sha256": "8fc611513d26aa16c265c7025826fdad920b075560d74c30688f1ed3a9c199e8"
+        },
+        "assets/pdf-3U86c3sd.js": {
+          "bytes": 439063,
+          "sha256": "6525bd26c6ced5807bc372642b37365522f11c77508e76a104e9530952d93a36"
+        },
+        "assets/pdf.worker.min-t-CYmkGJ.es-5X1AL_vx.js": {
+          "bytes": 1652284,
+          "sha256": "79a1adf0bbcae1ee0bf2dd7fe9b2103a04d0d684dd9bfffe329db87a1617bf81"
+        },
+        "assets/static-completion.js": {
+          "bytes": 31818,
+          "sha256": "8f0a6ea88aae81417f4e058b4c24e959b0b83beb360ed12b17fa7088290b834a"
+        },
+        "assets/torah-dictionary.js": {
+          "bytes": 1311102,
+          "sha256": "b811e2a23f8d1d86e36781aaff45aa6454134912f3a48c07f4fcabf710db89cc"
+        },
+        "bundle-report.json": {
+          "bytes": 64488,
+          "sha256": "0f4ce8b2c6e33f92162ff98f57a7e5dcc6464166b6decef8a7f1c044233ae830"
+        },
+        "fonts/Assistant-Bold.ttf": {
+          "bytes": 49752,
+          "sha256": "d8e13c55ff6153e231f19c10485794f368ba113a6a3c23c471288764a48d6d7a"
+        },
+        "fonts/Assistant-Medium.ttf": {
+          "bytes": 49756,
+          "sha256": "e8dc47984065569a1eaf5922ec110c70a0e5b1e6cf049f584b8636aff11be9eb"
+        },
+        "fonts/Assistant-Regular.ttf": {
+          "bytes": 49792,
+          "sha256": "d60ad12ff68c1739adbc6ffef0890e0deba35a73b2e5844e6babaac40ad78da8"
+        },
+        "fonts/Assistant-SemiBold.ttf": {
+          "bytes": 49804,
+          "sha256": "b714f898c622b8b9e28b35a4e4df369ca6f7e37cb49c134d55ec39f32cbe0e6e"
+        },
+        "index.html": {
+          "bytes": 35438,
+          "sha256": "d86e643de7b94339e2233a5938f7c2bc12c29a9d5436895762563e66051f7d05"
+        },
+        "manifest.json": {
+          "bytes": 1667,
+          "sha256": "1c174334cda5e804fa5e8ea40debe70b9437a62920c8ece790d402f833ddab9c"
+        },
+        "third-party/ASSISTANT-LICENSE.txt": {
+          "bytes": 4709,
+          "sha256": "8b85dca4f823b61a9a559f203ef2e7195c0f3d5bd1c27bb98ebd62e13f4274b7"
+        },
+        "third-party/DOCX-ENGINE-LICENSE.md": {
+          "bytes": 23717,
+          "sha256": "cb750acaec9e1fa7b106d326d0a7db0f3811c022048b09affc73842258419172"
+        },
+        "third-party/DOCX-ENGINE-NOTICE.md": {
+          "bytes": 1207,
+          "sha256": "06cf72094a4114548a78d37c9e14d5ebbd3594347db3b05d97878a5ca6a1139a"
+        },
+        "third-party/SUPERDOC-LICENSE.txt": {
+          "bytes": 34523,
+          "sha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef"
+        },
+        "third-party/SUPERDOC-NOTICE.txt": {
+          "bytes": 421,
+          "sha256": "fead6b351ad76dea4c5dab0cca7e4798863f8341d5b4bf1afbde94e1c53bb72a"
+        }
+      }
+    }
+  },
+  "intermediateWithoutDocxPreload": {
+    "implementationCommit": "0772da5036b0c097e600e43d569cfe4317b08a29",
+    "reasonForRevision": "The first split waited for the app to run before requesting its dynamic DOCX engine. The final implementation preloads only the engine/static closure without evaluating factories early.",
+    "summary": {
+      "baseline": {
+        "shellReadyMs": [
+          7721.80000000447,
+          10880.89999999851,
+          7392.60000000149
+        ],
+        "medianMs": 7721.80000000447,
+        "minMs": 7392.60000000149,
+        "maxMs": 10880.89999999851
+      },
+      "candidate": {
+        "shellReadyMs": [
+          7291.5999999940395,
+          8992.40000000596,
+          9162.60000000149
+        ],
+        "medianMs": 8992.40000000596,
+        "minMs": 7291.5999999940395,
+        "maxMs": 9162.60000000149
+      },
+      "medianDeltaMs": 1270.6000000014901,
+      "medianDeltaPercent": 16.454712631779564
+    },
+    "pairs": [
+      {
+        "pair": 1,
+        "baseline": {
+          "resultFile": "bundle-before-1.json",
+          "completedAtUtc": "2026-11-04T22:56:52.086313+00:00",
+          "data": {
+            "format": "classic-iife",
+            "cpuRate": 4,
+            "startup": {
+              "scripts": [
+                {
+                  "file": "assets/engine-workers.js",
+                  "requestedAt": 274,
+                  "loadedAt": 1685.5,
+                  "failedAt": null
+                },
+                {
+                  "file": "assets/app.js",
+                  "requestedAt": 275.5,
+                  "loadedAt": 3777.10000000149,
+                  "failedAt": null
+                }
+              ],
+              "shellReadyAt": 7721.80000000447,
+              "paints": [
+                {
+                  "name": "first-paint",
+                  "at": 68
+                },
+                {
+                  "name": "first-contentful-paint",
+                  "at": 268
+                }
+              ],
+              "phase": "startup",
+              "errorEvents": [],
+              "factoryMarks": [],
+              "resources": [],
+              "files": {
+                "assets/engine-workers.js": {
+                  "bytes": 7097878,
+                  "sha256": "8fc611513d26aa16c265c7025826fdad920b075560d74c30688f1ed3a9c199e8"
+                },
+                "assets/app.js": {
+                  "bytes": 16578621,
+                  "sha256": "d4573ed664b2169c89f7944b0a02f04c456aebb4a8b27c4459e1db3f25eef7ce"
+                }
+              },
+              "scriptBytes": 23676499,
+              "index": {
+                "bytes": 29481,
+                "sha256": "9ee02e147804e0596192293a8333a4d83c5e919e57e44846c3fa796cd205b096"
+              }
+            },
+            "checks": {},
+            "browser": {
+              "id": 14,
+              "result": {
+                "protocolVersion": "1.3",
+                "product": "HeadlessChrome/157.0.8103.38",
+                "revision": "@a733b5afbb3ba618844ff8876b89ad1a774b2f18",
+                "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/157.0.8103.38 Safari/537.36",
+                "jsVersion": "15.7.112.23"
+              }
+            },
+            "testPage": "file:///workspace/scratch/27ac7824ee5b/otzaria-word-editor/dist/__qa-bundle-probe.html"
+          }
+        },
+        "candidate": {
+          "resultFile": "bundle-after-1.json",
+          "completedAtUtc": "2026-11-04T22:57:05.879833+00:00",
+          "data": {
+            "format": "classic-amd",
+            "cpuRate": 4,
+            "startup": {
+              "scripts": [
+                {
+                  "file": "assets/engine-workers.js",
+                  "requestedAt": 152.29999999701977,
+                  "loadedAt": 808.2999999970198,
+                  "failedAt": null
+                },
+                {
+                  "file": "assets/app.js",
+                  "requestedAt": 152.69999999552965,
+                  "loadedAt": 2380,
+                  "failedAt": null
+                },
+                {
+                  "file": "assets/docx-engine.es-CFrUeifO.js",
+                  "requestedAt": 2379.89999999851,
+                  "loadedAt": 4411.5999999940395,
+                  "failedAt": null
+                }
+              ],
+              "shellReadyAt": 7291.5999999940395,
+              "paints": [
+                {
+                  "name": "first-paint",
+                  "at": 104
+                },
+                {
+                  "name": "first-contentful-paint",
+                  "at": 152
+                }
+              ],
+              "phase": "startup",
+              "errorEvents": [],
+              "factoryMarks": [
+                {
+                  "name": "otzaria:module:assets/app:ready",
+                  "at": 2144.5999999940395
+                },
+                {
+                  "name": "otzaria:module:assets/docx-engine.es-CFrUeifO:ready",
+                  "at": 4188.19999999553
+                }
+              ],
+              "resources": [],
+              "files": {
+                "assets/engine-workers.js": {
+                  "bytes": 7097878,
+                  "sha256": "8fc611513d26aa16c265c7025826fdad920b075560d74c30688f1ed3a9c199e8"
+                },
+                "assets/app.js": {
+                  "bytes": 2890194,
+                  "sha256": "f32fafb3ecbb095e6d80ede1ae5778359844c42a38f4ff4f8b68fab5a7006dfe"
+                },
+                "assets/docx-engine.es-CFrUeifO.js": {
+                  "bytes": 11466436,
+                  "sha256": "6fedc710f3b11bbdfdf5847ce497d08b4f691c894721eb04b9a5cd6589fde0d9"
+                }
+              },
+              "scriptBytes": 21454508,
+              "index": {
+                "bytes": 34805,
+                "sha256": "45e875fd0785febb7f5aab50cd226b2dc6f9dba9efb6cd1470f399c8e95183bf"
+              }
+            },
+            "checks": {},
+            "browser": {
+              "id": 14,
+              "result": {
+                "protocolVersion": "1.3",
+                "product": "HeadlessChrome/157.0.8103.38",
+                "revision": "@a733b5afbb3ba618844ff8876b89ad1a774b2f18",
+                "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/157.0.8103.38 Safari/537.36",
+                "jsVersion": "15.7.112.23"
+              }
+            },
+            "testPage": "file:///workspace/scratch/27ac7824ee5b/performance-work/bundle-0772-package/dist/__qa-bundle-probe.html"
+          }
+        }
+      },
+      {
+        "pair": 2,
+        "baseline": {
+          "resultFile": "bundle-before-2.json",
+          "completedAtUtc": "2026-11-04T22:57:23.235273+00:00",
+          "data": {
+            "format": "classic-iife",
+            "cpuRate": 4,
+            "startup": {
+              "scripts": [
+                {
+                  "file": "assets/engine-workers.js",
+                  "requestedAt": 136.10000000149012,
+                  "loadedAt": 933.6000000014901,
+                  "failedAt": null
+                },
+                {
+                  "file": "assets/app.js",
+                  "requestedAt": 136.10000000149012,
+                  "loadedAt": 6245.30000000447,
+                  "failedAt": null
+                }
+              ],
+              "shellReadyAt": 10880.89999999851,
+              "paints": [
+                {
+                  "name": "first-paint",
+                  "at": 140
+                },
+                {
+                  "name": "first-contentful-paint",
+                  "at": 140
+                }
+              ],
+              "phase": "startup",
+              "errorEvents": [],
+              "factoryMarks": [],
+              "resources": [],
+              "files": {
+                "assets/engine-workers.js": {
+                  "bytes": 7097878,
+                  "sha256": "8fc611513d26aa16c265c7025826fdad920b075560d74c30688f1ed3a9c199e8"
+                },
+                "assets/app.js": {
+                  "bytes": 16578621,
+                  "sha256": "d4573ed664b2169c89f7944b0a02f04c456aebb4a8b27c4459e1db3f25eef7ce"
+                }
+              },
+              "scriptBytes": 23676499,
+              "index": {
+                "bytes": 29481,
+                "sha256": "9ee02e147804e0596192293a8333a4d83c5e919e57e44846c3fa796cd205b096"
+              }
+            },
+            "checks": {},
+            "browser": {
+              "id": 16,
+              "result": {
+                "protocolVersion": "1.3",
+                "product": "HeadlessChrome/157.0.8103.38",
+                "revision": "@a733b5afbb3ba618844ff8876b89ad1a774b2f18",
+                "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/157.0.8103.38 Safari/537.36",
+                "jsVersion": "15.7.112.23"
+              }
+            },
+            "testPage": "file:///workspace/scratch/27ac7824ee5b/otzaria-word-editor/dist/__qa-bundle-probe.html"
+          }
+        },
+        "candidate": {
+          "resultFile": "bundle-after-2.json",
+          "completedAtUtc": "2026-11-04T22:57:38.793187+00:00",
+          "data": {
+            "format": "classic-amd",
+            "cpuRate": 4,
+            "startup": {
+              "scripts": [
+                {
+                  "file": "assets/engine-workers.js",
+                  "requestedAt": 159.30000000447035,
+                  "loadedAt": 1297.8000000044703,
+                  "failedAt": null
+                },
+                {
+                  "file": "assets/app.js",
+                  "requestedAt": 159.30000000447035,
+                  "loadedAt": 2591.2000000029802,
+                  "failedAt": null
+                },
+                {
+                  "file": "assets/docx-engine.es-CFrUeifO.js",
+                  "requestedAt": 2590.7000000029802,
+                  "loadedAt": 4755.60000000149,
+                  "failedAt": null
+                }
+              ],
+              "shellReadyAt": 8992.40000000596,
+              "paints": [
+                {
+                  "name": "first-paint",
+                  "at": 168
+                },
+                {
+                  "name": "first-contentful-paint",
+                  "at": 168
+                }
+              ],
+              "phase": "startup",
+              "errorEvents": [],
+              "factoryMarks": [
+                {
+                  "name": "otzaria:module:assets/app:ready",
+                  "at": 2310
+                },
+                {
+                  "name": "otzaria:module:assets/docx-engine.es-CFrUeifO:ready",
+                  "at": 4558
+                }
+              ],
+              "resources": [],
+              "files": {
+                "assets/engine-workers.js": {
+                  "bytes": 7097878,
+                  "sha256": "8fc611513d26aa16c265c7025826fdad920b075560d74c30688f1ed3a9c199e8"
+                },
+                "assets/app.js": {
+                  "bytes": 2890194,
+                  "sha256": "f32fafb3ecbb095e6d80ede1ae5778359844c42a38f4ff4f8b68fab5a7006dfe"
+                },
+                "assets/docx-engine.es-CFrUeifO.js": {
+                  "bytes": 11466436,
+                  "sha256": "6fedc710f3b11bbdfdf5847ce497d08b4f691c894721eb04b9a5cd6589fde0d9"
+                }
+              },
+              "scriptBytes": 21454508,
+              "index": {
+                "bytes": 34805,
+                "sha256": "45e875fd0785febb7f5aab50cd226b2dc6f9dba9efb6cd1470f399c8e95183bf"
+              }
+            },
+            "checks": {},
+            "browser": {
+              "id": 16,
+              "result": {
+                "protocolVersion": "1.3",
+                "product": "HeadlessChrome/157.0.8103.38",
+                "revision": "@a733b5afbb3ba618844ff8876b89ad1a774b2f18",
+                "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/157.0.8103.38 Safari/537.36",
+                "jsVersion": "15.7.112.23"
+              }
+            },
+            "testPage": "file:///workspace/scratch/27ac7824ee5b/performance-work/bundle-0772-package/dist/__qa-bundle-probe.html"
+          }
+        }
+      },
+      {
+        "pair": 3,
+        "baseline": {
+          "resultFile": "bundle-before-3.json",
+          "completedAtUtc": "2026-11-04T22:57:52.885209+00:00",
+          "data": {
+            "format": "classic-iife",
+            "cpuRate": 4,
+            "startup": {
+              "scripts": [
+                {
+                  "file": "assets/engine-workers.js",
+                  "requestedAt": 131.80000000447035,
+                  "loadedAt": 897.5,
+                  "failedAt": null
+                },
+                {
+                  "file": "assets/app.js",
+                  "requestedAt": 131.80000000447035,
+                  "loadedAt": 3327.2000000029802,
+                  "failedAt": null
+                }
+              ],
+              "shellReadyAt": 7392.60000000149,
+              "paints": [
+                {
+                  "name": "first-paint",
+                  "at": 72
+                },
+                {
+                  "name": "first-contentful-paint",
+                  "at": 136
+                }
+              ],
+              "phase": "startup",
+              "errorEvents": [],
+              "factoryMarks": [],
+              "resources": [],
+              "files": {
+                "assets/engine-workers.js": {
+                  "bytes": 7097878,
+                  "sha256": "8fc611513d26aa16c265c7025826fdad920b075560d74c30688f1ed3a9c199e8"
+                },
+                "assets/app.js": {
+                  "bytes": 16578621,
+                  "sha256": "d4573ed664b2169c89f7944b0a02f04c456aebb4a8b27c4459e1db3f25eef7ce"
+                }
+              },
+              "scriptBytes": 23676499,
+              "index": {
+                "bytes": 29481,
+                "sha256": "9ee02e147804e0596192293a8333a4d83c5e919e57e44846c3fa796cd205b096"
+              }
+            },
+            "checks": {},
+            "browser": {
+              "id": 15,
+              "result": {
+                "protocolVersion": "1.3",
+                "product": "HeadlessChrome/157.0.8103.38",
+                "revision": "@a733b5afbb3ba618844ff8876b89ad1a774b2f18",
+                "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/157.0.8103.38 Safari/537.36",
+                "jsVersion": "15.7.112.23"
+              }
+            },
+            "testPage": "file:///workspace/scratch/27ac7824ee5b/otzaria-word-editor/dist/__qa-bundle-probe.html"
+          }
+        },
+        "candidate": {
+          "resultFile": "bundle-after-3.json",
+          "completedAtUtc": "2026-11-04T22:58:09.026888+00:00",
+          "data": {
+            "format": "classic-amd",
+            "cpuRate": 4,
+            "startup": {
+              "scripts": [
+                {
+                  "file": "assets/engine-workers.js",
+                  "requestedAt": 147,
+                  "loadedAt": 968.2000000029802,
+                  "failedAt": null
+                },
+                {
+                  "file": "assets/app.js",
+                  "requestedAt": 147,
+                  "loadedAt": 1936.2999999970198,
+                  "failedAt": null
+                },
+                {
+                  "file": "assets/docx-engine.es-CFrUeifO.js",
+                  "requestedAt": 1934.7000000029802,
+                  "loadedAt": 4130.60000000149,
+                  "failedAt": null
+                }
+              ],
+              "shellReadyAt": 9162.60000000149,
+              "paints": [
+                {
+                  "name": "first-paint",
+                  "at": 68
+                },
+                {
+                  "name": "first-contentful-paint",
+                  "at": 140
+                }
+              ],
+              "phase": "startup",
+              "errorEvents": [],
+              "factoryMarks": [
+                {
+                  "name": "otzaria:module:assets/app:ready",
+                  "at": 1780.2999999970198
+                },
+                {
+                  "name": "otzaria:module:assets/docx-engine.es-CFrUeifO:ready",
+                  "at": 3932.2000000029802
+                }
+              ],
+              "resources": [],
+              "files": {
+                "assets/engine-workers.js": {
+                  "bytes": 7097878,
+                  "sha256": "8fc611513d26aa16c265c7025826fdad920b075560d74c30688f1ed3a9c199e8"
+                },
+                "assets/app.js": {
+                  "bytes": 2890194,
+                  "sha256": "f32fafb3ecbb095e6d80ede1ae5778359844c42a38f4ff4f8b68fab5a7006dfe"
+                },
+                "assets/docx-engine.es-CFrUeifO.js": {
+                  "bytes": 11466436,
+                  "sha256": "6fedc710f3b11bbdfdf5847ce497d08b4f691c894721eb04b9a5cd6589fde0d9"
+                }
+              },
+              "scriptBytes": 21454508,
+              "index": {
+                "bytes": 34805,
+                "sha256": "45e875fd0785febb7f5aab50cd226b2dc6f9dba9efb6cd1470f399c8e95183bf"
+              }
+            },
+            "checks": {},
+            "browser": {
+              "id": 15,
+              "result": {
+                "protocolVersion": "1.3",
+                "product": "HeadlessChrome/157.0.8103.38",
+                "revision": "@a733b5afbb3ba618844ff8876b89ad1a774b2f18",
+                "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/157.0.8103.38 Safari/537.36",
+                "jsVersion": "15.7.112.23"
+              }
+            },
+            "testPage": "file:///workspace/scratch/27ac7824ee5b/performance-work/bundle-0772-package/dist/__qa-bundle-probe.html"
+          }
+        }
+      }
+    ],
+    "artifactHandling": {
+      "originalCheckFailedOnStaleChunks": {
+        "assets/docx-engine.es-5U7uLq6Y.js": {
+          "bytes": 11466486,
+          "sha256": "10267b233c567bf5f2fd64ee4ceab9d9f6f1da99dcf203bcb5c4abf1331f8496",
+          "reason": "Old AMD chunk absent from current bundle-report, loader allowlist, and every packaged source"
+        },
+        "assets/pdf-DlL6LFk8.js": {
+          "bytes": 449650,
+          "sha256": "3a7c9383a648b98d611e3d05a3869f4b3aaf1c6b457f37e3b4020fd66b304ab0",
+          "reason": "Old AMD chunk absent from current bundle-report, loader allowlist, and every packaged source"
+        }
+      },
+      "runtimeUsedByteIdenticalCopyWithOnlyThoseStaleChunksExcluded": true,
+      "finalBuildHasNoSuchExclusions": true
+    }
+  },
+  "baselineResizeObserverComparison": [
+    {
+      "name": "baseline",
+      "browser": {
+        "id": 9,
+        "result": {
+          "protocolVersion": "1.3",
+          "product": "HeadlessChrome/157.0.8103.38",
+          "revision": "@a733b5afbb3ba618844ff8876b89ad1a774b2f18",
+          "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/157.0.8103.38 Safari/537.36",
+          "jsVersion": "15.7.112.23"
+        }
+      },
+      "errors": [
+        {
+          "step": "emf-1",
+          "message": "ResizeObserver loop completed with undelivered notifications.",
+          "at": 13895.69999999553,
+          "filename": "file:///workspace/scratch/27ac7824ee5b/otzaria-word-editor/dist/__qa-resize-comparison.html",
+          "line": 0,
+          "error": null
+        }
+      ]
+    },
+    {
+      "name": "split",
+      "browser": {
+        "id": 16,
+        "result": {
+          "protocolVersion": "1.3",
+          "product": "HeadlessChrome/157.0.8103.38",
+          "revision": "@a733b5afbb3ba618844ff8876b89ad1a774b2f18",
+          "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/157.0.8103.38 Safari/537.36",
+          "jsVersion": "15.7.112.23"
+        }
+      },
+      "errors": [
+        {
+          "step": "emf-1",
+          "message": "ResizeObserver loop completed with undelivered notifications.",
+          "at": 16009.39999999851,
+          "filename": "file:///workspace/scratch/27ac7824ee5b/performance-work/bundle-0772-package/dist/__qa-resize-comparison.html",
+          "line": 0,
+          "error": null
+        }
+      ]
+    }
+  ],
+  "compatibilityFindings": {
+    "oldChromium": "134.0.6998.35",
+    "oldChromiumPdfFailure": "Uint8Array.toHex is absent in that runtime; the unchanged modern embedded PDF worker requires it. Final PDF pixel gate uses Chrome 157.",
+    "pdfVersionMatch": "The baseline lock resolved PDF.js API 5.7.284 beside SuperDoc 2.23 embedded worker 5.5.207. The candidate pins the API to 5.5.207 and verifies real PDF rendering."
+  },
+  "collectors": {
+    "startupSamplesAndInitialFunctionalGate": {
+      "commit": "64d7c9eefe78d82aa14b7b8141c1b901eca55b7e",
+      "sha256": {
+        "scripts/bundle-probe.mjs": "826b368c8071514e5c2258b7a0b219c712bee935c4fcf1e845034b251e38ed45",
+        "scripts/qa/harness.mjs": "94da078ca23690fbb2f6803ab15752b96411f6a96a622da4b8074d814ac35024"
+      }
+    },
+    "offlineEnforcedFunctionalGate": {
+      "commit": "dc7af91b416d95721f18e76837fa7e08f1ca7e53",
+      "sha256": {
+        "scripts/bundle-probe.mjs": "70b1381b4de623e03baad890d00dd86a3e110b622012a667dad4e342fbe85a2e",
+        "scripts/qa/harness.mjs": "94da078ca23690fbb2f6803ab15752b96411f6a96a622da4b8074d814ac35024"
+      }
+    }
+  },
+  "functionalGateBeforeOfflineAssertions": {
+    "format": "classic-amd",
+    "cpuRate": 1,
+    "startup": {
+      "scripts": [
+        {
+          "file": "assets/engine-workers.js",
+          "requestedAt": 207.70000000298023,
+          "loadedAt": 894,
+          "failedAt": null
+        },
+        {
+          "file": "assets/app.js",
+          "requestedAt": 207.89999999850988,
+          "loadedAt": 1162,
+          "failedAt": null
+        },
+        {
+          "file": "assets/docx-engine.es-CFrUeifO.js",
+          "requestedAt": 207.89999999850988,
+          "loadedAt": 1420,
+          "failedAt": null
+        }
+      ],
+      "shellReadyAt": 2958,
+      "paints": [
+        {
+          "name": "first-paint",
+          "at": 168
+        },
+        {
+          "name": "first-contentful-paint",
+          "at": 212
+        }
+      ],
+      "phase": "startup",
+      "errorEvents": [],
+      "factoryMarks": [
+        {
+          "name": "otzaria:module:assets/app:ready",
+          "at": 1119.6000000014901
+        },
+        {
+          "name": "otzaria:module:assets/docx-engine.es-CFrUeifO:ready",
+          "at": 1365.1000000014901
+        }
+      ],
+      "resources": [],
+      "files": {
+        "assets/engine-workers.js": {
+          "bytes": 7097878,
+          "sha256": "8fc611513d26aa16c265c7025826fdad920b075560d74c30688f1ed3a9c199e8"
+        },
+        "assets/app.js": {
+          "bytes": 2890194,
+          "sha256": "f32fafb3ecbb095e6d80ede1ae5778359844c42a38f4ff4f8b68fab5a7006dfe"
+        },
+        "assets/docx-engine.es-CFrUeifO.js": {
+          "bytes": 11466436,
+          "sha256": "6fedc710f3b11bbdfdf5847ce497d08b4f691c894721eb04b9a5cd6589fde0d9"
+        }
+      },
+      "scriptBytes": 21454508,
+      "index": {
+        "bytes": 35438,
+        "sha256": "d86e643de7b94339e2233a5938f7c2bc12c29a9d5436895762563e66051f7d05"
+      }
+    },
+    "checks": {
+      "ordinaryDocumentDefersChunks": true,
+      "docxPreloadBeforeAppFactory": true,
+      "typingModelAndVisibleParagraph": true,
+      "openDialogFailureRetryFocusAndRepeat": true,
+      "shortcutsDismissFailureFirstAndRepeat": true,
+      "macrosFirstAndRepeat": true,
+      "emfFirstAndRepeat": true,
+      "pdfFirstAndRepeat": true
+    },
+    "browser": {
+      "id": 3,
+      "result": {
+        "protocolVersion": "1.3",
+        "product": "HeadlessChrome/157.0.8103.38",
+        "revision": "@a733b5afbb3ba618844ff8876b89ad1a774b2f18",
+        "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/157.0.8103.38 Safari/537.36",
+        "jsVersion": "15.7.112.23"
+      }
+    },
+    "testPage": "file:///workspace/scratch/27ac7824ee5b/performance-work/bundle-64d7-package/dist/__qa-bundle-probe.html",
+    "allScripts": [
+      {
+        "file": "assets/engine-workers.js",
+        "requestedAt": 207.70000000298023,
+        "loadedAt": 894,
+        "failedAt": null
+      },
+      {
+        "file": "assets/app.js",
+        "requestedAt": 207.89999999850988,
+        "loadedAt": 1162,
+        "failedAt": null
+      },
+      {
+        "file": "assets/docx-engine.es-CFrUeifO.js",
+        "requestedAt": 207.89999999850988,
+        "loadedAt": 1420,
+        "failedAt": null
+      },
+      {
+        "file": "assets/OpenDocumentDialog-DWdgTIzn.js",
+        "requestedAt": 5076.70000000298,
+        "loadedAt": null,
+        "failedAt": 5103.80000000447
+      },
+      {
+        "file": "assets/OpenDocumentDialog-DWdgTIzn.js",
+        "requestedAt": 5266.30000000447,
+        "loadedAt": 5304.10000000149,
+        "failedAt": null
+      },
+      {
+        "file": "assets/ShortcutManagerDialog-BDjRhbSP.js",
+        "requestedAt": 6442.70000000298,
+        "loadedAt": null,
+        "failedAt": 6448.60000000149
+      },
+      {
+        "file": "assets/ShortcutManagerDialog-BDjRhbSP.js",
+        "requestedAt": 7023.10000000149,
+        "loadedAt": 7041.39999999851,
+        "failedAt": null
+      },
+      {
+        "file": "assets/MacrosDialog-CIpYbCRf.js",
+        "requestedAt": 8633.70000000298,
+        "loadedAt": 8653.70000000298,
+        "failedAt": null
+      },
+      {
+        "file": "assets/pdf-3U86c3sd.js",
+        "requestedAt": 12198.20000000298,
+        "loadedAt": 12265.10000000149,
+        "failedAt": null
+      },
+      {
+        "file": "assets/pdf.worker.min-t-CYmkGJ.es-5X1AL_vx.js",
+        "requestedAt": 12198.20000000298,
+        "loadedAt": 12318.39999999851,
+        "failedAt": null
+      }
+    ],
+    "errorEvents": [
+      {
+        "phase": "emf-0",
+        "at": 10568.39999999851,
+        "message": "ResizeObserver loop completed with undelivered notifications.",
+        "filename": "file:///workspace/scratch/27ac7824ee5b/performance-work/bundle-64d7-package/dist/__qa-bundle-probe.html",
+        "lineno": 0,
+        "colno": 0,
+        "error": null
+      },
+      {
+        "phase": "emf-1",
+        "at": 11568.10000000149,
+        "message": "ResizeObserver loop completed with undelivered notifications.",
+        "filename": "file:///workspace/scratch/27ac7824ee5b/performance-work/bundle-64d7-package/dist/__qa-bundle-probe.html",
+        "lineno": 0,
+        "colno": 0,
+        "error": null
+      }
+    ],
+    "errorQuietWindow": {
+      "durationMs": 500,
+      "beforeCount": 2,
+      "afterCount": 2
+    },
+    "unhandled": [
+      "uncaught: ResizeObserver loop completed with undelivered notifications.",
+      "uncaught: ResizeObserver loop completed with undelivered notifications."
+    ],
+    "resizeObserverWarnings": [
+      {
+        "phase": "emf-0",
+        "at": 10568.39999999851,
+        "message": "ResizeObserver loop completed with undelivered notifications.",
+        "filename": "file:///workspace/scratch/27ac7824ee5b/performance-work/bundle-64d7-package/dist/__qa-bundle-probe.html",
+        "lineno": 0,
+        "colno": 0,
+        "error": null
+      },
+      {
+        "phase": "emf-1",
+        "at": 11568.10000000149,
+        "message": "ResizeObserver loop completed with undelivered notifications.",
+        "filename": "file:///workspace/scratch/27ac7824ee5b/performance-work/bundle-64d7-package/dist/__qa-bundle-probe.html",
+        "lineno": 0,
+        "colno": 0,
+        "error": null
+      }
+    ],
+    "unexpectedErrors": []
+  },
+  "functionalGateResultFile": "bundle-preload-offline-runtime.json"
+}
