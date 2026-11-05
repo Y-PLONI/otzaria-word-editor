@@ -82,6 +82,12 @@ export function classicChunks(options: ClassicChunkOptions = {}): Plugin {
       const { entryFiles, preloadFiles, startupFiles } = classicStartupPlan(bundle, options);
       const chunks = Object.fromEntries(files.map((file) => {
         const chunk = bundle[file] as OutputChunk;
+        // Page/worker asset URLs use renderBuiltUrl above. The minimal AMD
+        // loader intentionally omits require.toUrl; reject any return of this
+        // helper in final output, even if its receiver has been renamed.
+        if (/\.\s*toUrl\b/.test(chunk.code)) {
+          this.error(`Unsupported AMD asset URL helper in ${file}: use the Vite page/worker URL paths`);
+        }
         const modules = Object.entries(chunk.modules).map(([id, module]) => ({
           id: id.replace(/\\/g, '/').replace(/^.*\/node_modules\//, 'node_modules/').replace(`${process.cwd().replace(/\\/g, '/')}/`, ''),
           renderedLength: module.renderedLength,

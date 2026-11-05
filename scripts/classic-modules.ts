@@ -125,9 +125,6 @@ export function installClassicModules(files: readonly string[]): ClassicModules 
         void Promise.resolve().then(() => Promise.all(requests.map((request) => load(resolve(request, id)))))
           .then((values) => accept(...values), (error: unknown) => reject(error));
       };
-      // Rollup's emitted file URLs use this AMD hook and already carry a
-      // relative filename, including its real extension.
-      require.toUrl = (request: string) => new URL(request, module.uri).href;
       const values = await Promise.all(definition.dependencies.map((request) => {
         if (request === 'exports') return entry.exports;
         if (request === 'module') return module;

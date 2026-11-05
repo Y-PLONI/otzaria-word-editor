@@ -240,16 +240,14 @@ describe('classic module loader', () => {
     expect(document.scripts).toHaveLength(2);
   });
 
-  it('runs actual Rollup AMD chunks, including lazy code, module.uri and asset URLs', async () => {
+  it('runs actual Rollup AMD chunks, including lazy code and module.uri', async () => {
     const sources: Record<string, string> = {
       entry: `export const uri = import.meta.url; export const later = () => import('optional');`,
       optional: `export const answer = 42;`,
     };
-    let assetRef = '';
     const build = await rollup({ input: 'entry', plugins: [{
       name: 'fixture', resolveId: (id) => id,
-      buildStart() { assetRef = this.emitFile({ type: 'asset', fileName: 'assets/fixture.txt', source: 'fixture' }); },
-      load: (id) => sources[id] + (id === 'entry' ? `export const asset = import.meta.ROLLUP_FILE_URL_${assetRef};` : ''),
+      load: (id) => sources[id],
     }, classicChunks()] });
     try {
       const { output } = await build.generate({
@@ -267,15 +265,30 @@ describe('classic module loader', () => {
       };
       const first = modules.load('assets/app');
       run('assets/app.js');
-      const app = await first as { uri: string; asset: string; later(): Promise<{ answer: number }> };
+      const app = await first as { uri: string; later(): Promise<{ answer: number }> };
       expect(app.uri).toBe(scriptFor('assets/app').src);
-      expect(app.asset).toBe(new URL('fixture.txt', scriptFor('assets/app').src).href);
       expect(document.scripts).toHaveLength(1);
       const deferred = app.later();
       await vi.waitFor(() => expect(document.scripts).toHaveLength(2));
       run('assets/optional.js');
       expect(await deferred).toEqual({ answer: 42 });
       expect((await app.later()).answer).toBe(42);
+    } finally { await build.close(); }
+  });
+
+  it.each(['require', 'r'])('rejects unsupported Rollup file URLs with AMD receiver %s', async (receiver) => {
+    let assetRef = '';
+    const build = await rollup({ input: 'entry', plugins: [{
+      name: 'file-url-fixture', resolveId: (id) => id,
+      buildStart() { assetRef = this.emitFile({ type: 'asset', fileName: 'assets/fixture.txt', source: 'fixture' }); },
+      load: () => `export const asset = import.meta.ROLLUP_FILE_URL_${assetRef};`,
+      // Rename the actual emitted parameter/call, preserving the 'require'
+      // dependency ID: the build contract must not depend on an identifier.
+      renderChunk(code) { return { code: code.replace(/\brequire(?=\s*[.,)])/g, receiver), map: null }; },
+    }, classicChunks()] });
+    try {
+      await expect(build.generate({ format: 'amd', entryFileNames: 'assets/app.js' }))
+        .rejects.toThrow('Unsupported AMD asset URL helper');
     } finally { await build.close(); }
   });
 
