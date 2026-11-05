@@ -391,6 +391,35 @@ export function findFragment(host: HTMLElement, blockId: string, caretOffset: nu
   return best ? { fragment: best, caretPm } : null;
 }
 
+/**
+ * שורה של נקודה זכורה אחרי גלילה או פריסה מחדש. זהות השורה מכריעה בתפר
+ * בין שורות; אם היא הוחלפה, אפשר לשחזר רק כשנותרה מועמדת יחידה להיסט.
+ * ה-y הישן אינו ראיה למיקום אחרי שינוי פריסה.
+ */
+export function findPaintedLine(
+  host: HTMLElement,
+  blockId: string,
+  pm: number,
+  preferred: Element,
+): { fragment: HTMLElement; line: Element; caretPm: number } | null {
+  const contains = (line: Element): boolean => pm >= attr(line, 'data-pm-start') && pm <= attr(line, 'data-pm-end');
+  const parent = preferred.parentElement;
+  if (parent && parent.matches(FRAGMENT_SELECTOR) && host.contains(preferred)
+    && blockIdOf(parent) === blockId && contains(preferred)) {
+    return { fragment: parent, line: preferred, caretPm: pm };
+  }
+  let found: { fragment: HTMLElement; line: Element; caretPm: number } | null = null;
+  for (const fragment of Array.from(host.querySelectorAll<HTMLElement>(FRAGMENT_SELECTOR))) {
+    if (blockIdOf(fragment) !== blockId) continue;
+    for (const line of linesOf(fragment)) {
+      if (!contains(line)) continue;
+      if (found) return null;
+      found = { fragment, line, caretPm: pm };
+    }
+  }
+  return found;
+}
+
 const isPage = (el: Element | null): boolean => !!el && el.classList.contains(PAGE_CLASS);
 
 /**
@@ -478,6 +507,30 @@ export function lineAt(lines: readonly Element[], caretPm: number, caretY: numbe
     }
   }
   return best;
+}
+
+/** מלבן בקואורדינטות המסך. */
+export interface SelectionRect {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
+
+/**
+ * כיוון השורה שמתחת למלבן: `true` לעברית, `false` ללטינית, `null` כשאין שם
+ * שורה של פסקה בגוף הזרימה — תא טבלה, למשל, שפסקאותיו בלי טווח משלהן.
+ */
+export function lineDirectionUnder(host: HTMLElement, rect: SelectionRect): boolean | null {
+  for (const fragment of Array.from(host.querySelectorAll(FRAGMENT_SELECTOR))) {
+    for (const line of linesOf(fragment)) {
+      const box = line.getBoundingClientRect();
+      if (box.bottom < rect.top || box.top > rect.bottom) continue;
+      if (box.right < rect.left || box.left > rect.right) continue;
+      return line.getAttribute('dir') === 'rtl';
+    }
+  }
+  return null;
 }
 
 /**
