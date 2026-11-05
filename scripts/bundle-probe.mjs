@@ -140,7 +140,7 @@ try {
     heldFile = join(dist, openFile);
     renameSync(heldFile, `${heldFile}.held`);
     await app.press('o', 'KeyO', 79, 2);
-    await wait('!!document.querySelector(".panel-load-state[role=alert]")', 'missing chunk is recoverable');
+    await wait('!!document.querySelector(".panel-load-state [role=alert]")', 'missing chunk is recoverable');
     renameSync(`${heldFile}.held`, heldFile);
     heldFile = undefined;
     await app.js('document.querySelector(".panel-load-state button").focus()');
@@ -165,7 +165,7 @@ try {
     renameSync(heldFile, `${heldFile}.held`);
     await app.tab('קובץ');
     assert.equal(await app.click('ניהול קיצורים'), true);
-    await wait('!!document.querySelector(".panel-load-state[role=alert]")', 'shortcut manager missing chunk');
+    await wait('!!document.querySelector(".panel-load-state [role=alert]")', 'shortcut manager missing chunk');
     await close();
     await wait('!document.querySelector(".panel-load-state")', 'Escape dismisses a failed lazy manager');
     renameSync(`${heldFile}.held`, heldFile);

@@ -60,7 +60,6 @@ export function lazyPanel(loader: () => Promise<{ default: Component }>): Compon
       async function open(): Promise<void> {
         if (loading || component.value || disposed) return;
         loading = true;
-        restoreFallbackFocus();
         error.value = false;
         try {
           const panel = await load();

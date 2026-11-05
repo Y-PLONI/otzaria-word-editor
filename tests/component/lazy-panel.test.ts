@@ -104,7 +104,7 @@ describe('lazy panel', () => {
     cleanups.push(() => wrapper.unmount());
     await flushPromises();
     if (movedOutside) other.focus();
-    const retry = wrapper.get<HTMLButtonElement>('[role="alert"] button');
+    const retry = wrapper.get<HTMLButtonElement>('.panel-load-state button');
     retry.element.focus();
     expect(document.activeElement).toBe(retry.element);
     await retry.trigger('click');
