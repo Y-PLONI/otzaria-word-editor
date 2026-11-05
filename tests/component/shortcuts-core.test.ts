@@ -22,12 +22,13 @@ import {
   type SuperdocDouble,
 } from './harness';
 import { pageBreakTracker } from '../../src/engine/page-break';
+import type { CreateEditorOptions, EditorSession } from '../../src/engine/create-editor';
 import type { SaveCoordinatorDeps } from '../../src/sessions/save-coordinator';
 
 const stub = vi.hoisted(() => ({
   saveNowCalls: [] as Array<{ forceSaveAs?: boolean } | undefined>,
-  session: null as unknown,
-  adapter: null as unknown,
+  openEditor: null as ((container: HTMLElement) => EditorSession) | null,
+  adapters: new WeakMap<object, CommandDouble>(),
   pickCalls: 0,
   /** מצב השמירה שהקואורדינטור מדווח. בדיקה יכולה להפוך אותו למלוכלך. */
   isDirty: false,
@@ -42,31 +43,14 @@ const stub = vi.hoisted(() => ({
   persistedCustomShortcuts: [] as unknown[],
 }));
 
-vi.mock('../../src/engine/create-editor', () => ({
-  createEditor: vi.fn(),
-  OPEN_TIMEOUT_MS: 1_000,
-}));
-
 /**
- * פריסה של המודול המקורי ודריסה של `createEditorSwap` בלבד — ולא factory
- * שמחזיר תת-קבוצה של הייצואים. מוק חלקי נשבר בכל פעם שהמעטפת מתחילה להשתמש
- * בייצוא נוסף מאותו מודול; כאן זה קרה כש-`documentScrollHost` התחיל לקרוא
- * `HOST_CLASS`/`PENDING_CLASS`. והכשל שהוא מייצר אינו נראה כמו „חסר ייצוא”
- * אלא כמו באג במוצר: הזריקה מבטלת את `onMounted` לפני שהסשן נפתח, ושלושים
- * בדיקות נופלות על מיקוד. זו הסיבה שהתבנית אחידה בכל קבצי ההרכבה.
+ * Keep the real swap lifecycle: current is null until the first open completes,
+ * and replacing/closing an editor disposes that editor's interaction lease.
+ * A pre-populated swap double prevents App from registering its first adapter.
  */
-vi.mock('../../src/sessions/editor-swap', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../src/sessions/editor-swap')>()),
-  createEditorSwap: () => ({
-    get current() {
-      return stub.session;
-    },
-    get isOpening() {
-      return false;
-    },
-    open: async () => ({ status: 'opened', session: stub.session }),
-    destroy: () => {},
-  }),
+vi.mock('../../src/engine/create-editor', () => ({
+  createEditor: vi.fn(({ container }: CreateEditorOptions) => stub.openEditor!(container)),
+  OPEN_TIMEOUT_MS: 1_000,
 }));
 
 vi.mock('../../src/sessions/save-coordinator', async (importOriginal) => ({
@@ -101,7 +85,7 @@ vi.mock('../../src/sessions/save-coordinator', async (importOriginal) => ({
 
 vi.mock('../../src/engine/command-adapter', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../src/engine/command-adapter')>()),
-  createCommandAdapter: () => stub.adapter,
+  createCommandAdapter: (ui: object) => stub.adapters.get(ui)!,
 }));
 
 vi.mock('../../src/engine/search', async (importOriginal) => {
@@ -213,6 +197,8 @@ let superdoc: SuperdocDouble;
 async function mountShell() {
   const wrapper = mount(App, { attachTo: document.body });
   await settle(12);
+  expect(stub.resets, 'the initial document actually opened before testing shortcuts').toBe(1);
+  expect(wrapper.find('.status-load__skip').exists(), 'opening has finished').toBe(false);
   return wrapper;
 }
 
@@ -256,14 +242,34 @@ beforeEach(() => {
   stub.confirmAnswer = false;
   stub.storedCustomShortcuts = null;
   stub.persistedCustomShortcuts.length = 0;
-  adapter = createCommandDouble();
+  adapter = createCommandDouble({ states: { 'document-mode': { value: 'editing' } } });
   superdoc = createSuperdocDouble();
-  stub.adapter = adapter;
-  stub.session = {
-    superdoc: superdoc.host,
-    ui: { selection: { observe: () => () => {} } },
-    onDispose: () => {},
-    destroy: () => {},
+  stub.adapters = new WeakMap();
+  let first = true;
+  stub.openEditor = (container) => {
+    // Each candidate owns its mode and subscriptions; it must not inherit the
+    // previous editor's temporary viewing mode during a repeated open.
+    const doc = first ? superdoc : createSuperdocDouble();
+    const commands = first ? adapter : createCommandDouble();
+    first = false;
+    commands.setState('document-mode', { value: commands.getState('document-mode').value ?? 'editing' });
+    doc.host.setDocumentMode = vi.fn(mode => commands.setState('document-mode', { value: mode }));
+    const ui = { selection: { observe: () => () => {} } } as unknown as EditorSession['ui'];
+    stub.adapters.set(ui, commands);
+    const disposers: Array<() => void> = [];
+    let destroyed = false;
+    return {
+      superdoc: doc.host, ui, container,
+      onDispose(dispose) {
+        if (destroyed) dispose();
+        else disposers.push(dispose);
+      },
+      destroy() {
+        if (destroyed) return;
+        destroyed = true;
+        for (const dispose of disposers.splice(0)) dispose();
+      },
+    };
   };
 });
 
@@ -316,7 +322,6 @@ describe('פקודות המנוע', () => {
 
   it('פקודה חסומה מדווחת בעברית ואינה נופלת', async () => {
     adapter = createCommandDouble({ failures: { undo: 'history-empty' } });
-    stub.adapter = adapter;
     const wrapper = await mountShell();
 
     press({ code: 'KeyZ', ctrlKey: true });
@@ -335,7 +340,6 @@ describe('פקודות המנוע', () => {
    */
   it('„בטל” מפס הכותרת מדווח סירוב, כמו הקיצור', async () => {
     adapter = createCommandDouble({ failures: { undo: 'history-empty' } });
-    stub.adapter = adapter;
     const wrapper = await mountShell();
 
     // המצב נדחף כמו שהמנוע דוחף אותו. הכפתור מתחיל מנוטרל, ולחיצה על כפתור
@@ -396,7 +400,6 @@ describe('פקודות המנוע', () => {
 
   it('Ctrl+Z שה-controller דוחה (history-empty) עדיין מנקה — אין דרך לדעת מבחוץ שהמנוע לא ביטל', async () => {
     adapter = createCommandDouble({ failures: { undo: 'history-empty' } });
-    stub.adapter = adapter;
     pageBreakTracker.remember('p-blocked', true);
 
     await mountShell();
@@ -502,7 +505,6 @@ describe('פקודות המנוע', () => {
 
   it('„חזור” מפס הכותרת מדווח סירוב אף הוא', async () => {
     adapter = createCommandDouble({ failures: { redo: 'history-empty' } });
-    stub.adapter = adapter;
     const wrapper = await mountShell();
 
     adapter.setState('redo', { enabled: true });
@@ -523,7 +525,6 @@ describe('פקודות המנוע', () => {
     // ההבדל מכפתור: כפתור מנוטרל אינו נלחץ בכלל, וקיצור אין דרך „לנטרל”.
     // לכן הוא כן מגיע לאדפטר — והתשובה היא סירוב מנומק ולא שינוי שקט במסמך.
     adapter = createCommandDouble({ states: { bold: { enabled: false } } });
-    stub.adapter = adapter;
     const wrapper = await mountShell();
 
     press({ code: 'KeyB', ctrlKey: true });
@@ -702,7 +703,6 @@ describe('פעולות שתלויות במצב המנוע', () => {
     // מונה מקומי היה מטפס גם כשהמסמך דוחה את הפקודה, ואז הלחיצה הבאה הייתה
     // מחשבת מגודל שאינו במסמך. זו בדיוק הרגרסיה שהכפתורים ברצועה סבלו ממנה.
     adapter = createCommandDouble({ states: { 'font-size': { value: 12 } } });
-    stub.adapter = adapter;
     await mountShell();
 
     press({ key: ']', code: 'BracketRight', ctrlKey: true });
@@ -715,7 +715,6 @@ describe('פעולות שתלויות במצב המנוע', () => {
 
   it('Ctrl+[ יורד בסולם של Word', async () => {
     adapter = createCommandDouble({ states: { 'font-size': { value: 14 } } });
-    stub.adapter = adapter;
     await mountShell();
 
     press({ key: '[', code: 'BracketLeft', ctrlKey: true });
@@ -726,7 +725,6 @@ describe('פעולות שתלויות במצב המנוע', () => {
 
   it('גודל שהמנוע אינו מדווח נופל לברירת המחדל ולא ל-NaN', async () => {
     adapter = createCommandDouble({ states: { 'font-size': { value: undefined } } });
-    stub.adapter = adapter;
     await mountShell();
 
     press({ key: ']', code: 'BracketRight', ctrlKey: true });
@@ -739,12 +737,6 @@ describe('פעולות שתלויות במצב המנוע', () => {
     // `toggleVertAlign` דורש טווח מסומן — בלעדיו הוא נכשל סגור לפני שהוא
     // מגיע ל-`format.vertAlign`, וזו התנהגות נכונה שהבדיקה אינה מודדת כאן.
     superdoc = createSuperdocDouble({ selection: { hasRange: true, text: 'טקסט' } });
-    stub.session = {
-      superdoc: superdoc.host,
-      ui: { selection: { observe: () => () => {} } },
-      onDispose: () => {},
-      destroy: () => {},
-    };
     await mountShell();
 
     press({ key: '=', code: 'Equal', ctrlKey: true });
@@ -781,7 +773,6 @@ describe('הפניות, סקירה ותצוגה', () => {
   it('Ctrl+Shift+E מחליף למצב מעקב לפי מה שהמנוע מדווח', async () => {
     // אין פקודה נפרדת: `document-mode` עם 'suggesting' הוא מצב המעקב.
     adapter = createCommandDouble({ states: { 'document-mode': { value: 'editing' } } });
-    stub.adapter = adapter;
     await mountShell();
 
     press({ code: 'KeyE', ctrlKey: true, shiftKey: true });
@@ -792,7 +783,6 @@ describe('הפניות, סקירה ותצוגה', () => {
 
   it('Ctrl+Shift+E ממצב מעקב חוזר לעריכה', async () => {
     adapter = createCommandDouble({ states: { 'document-mode': { value: 'suggesting' } } });
-    stub.adapter = adapter;
     await mountShell();
 
     press({ code: 'KeyE', ctrlKey: true, shiftKey: true });
@@ -1094,7 +1084,6 @@ describe('Ctrl+K והכפתור נחסמים באותו תנאי', () => {
    */
   it('פקודת „קישור” מנוטרלת — הקיצור אינו פותח דיאלוג', async () => {
     adapter = createCommandDouble({ states: { link: { enabled: false } } });
-    stub.adapter = adapter;
     await mountShell();
 
     press({ code: 'KeyK', ctrlKey: true });
@@ -1203,12 +1192,6 @@ describe('קיצורים אישיים', () => {
    */
   function withRangeSelection(): void {
     superdoc = createSuperdocDouble({ selection: { hasRange: true, text: 'abcd' } });
-    stub.session = {
-      superdoc: superdoc.host,
-      ui: { selection: { observe: () => () => {} } },
-      onDispose: () => {},
-      destroy: () => {},
-    };
   }
 
   it('הצירוף מחיל את הערכה, ולחיצה נוספת מחזירה את מה שהיה', async () => {
@@ -1216,7 +1199,6 @@ describe('קיצורים אישיים', () => {
     adapter = createCommandDouble({
       states: { 'font-family': { value: 'Arial' }, 'font-size': { value: 10 } },
     });
-    stub.adapter = adapter;
     withRangeSelection();
 
     await mountShell();
@@ -1251,7 +1233,6 @@ describe('קיצורים אישיים', () => {
     adapter = createCommandDouble({
       states: { 'font-family': { value: 'Arial' }, 'font-size': { value: 10 } },
     });
-    stub.adapter = adapter;
     withRangeSelection();
 
     await mountShell();
@@ -1321,7 +1302,6 @@ describe('קיצורים אישיים', () => {
     adapter = createCommandDouble({
       states: { 'font-family': { value: 'Arial' }, 'font-size': { value: 10 } },
     });
-    stub.adapter = adapter;
 
     const wrapper = await mountShell();
     const surface = composingSurface(wrapper);
