@@ -889,9 +889,9 @@ describe('installRtlVisualArrows', () => {
 
     expect(press(line, 'ArrowRight', { shiftKey: true }).defaultPrevented).toBe(true);
 
-    // ימינה בעברית הוא אחורה, ולכן הראש לפני העוגן והכתיבה בסדר המסמך.
-    expect(written(setSelectionTarget).target.start.offset).toBe(6);
-    expect(written(setSelectionTarget).target.end.offset).toBe(9);
+    // הראש לפני העוגן, אבל הכתיבה שומרת את start כעוגן גם עבור המקש הנייטיבי הבא.
+    expect(written(setSelectionTarget).target.start.offset).toBe(9);
+    expect(written(setSelectionTarget).target.end.offset).toBe(6);
     handle.dispose();
   });
 
@@ -904,9 +904,9 @@ describe('installRtlVisualArrows', () => {
     press(line, 'ArrowRight', { shiftKey: true });
 
     const second = setSelectionTarget.mock.calls[1]![0];
-    expect(second.target.end.offset, 'העוגן לא זז').toBe(9);
+    expect(second.target.start.offset, 'העוגן לא זז').toBe(9);
     // היסט 6 בתוך האי הלטיני, ושם ימינה הוא קדימה.
-    expect(second.target.start.offset, 'הראש התקדם').toBe(7);
+    expect(second.target.end.offset, 'הראש התקדם').toBe(7);
     handle.dispose();
   });
 
@@ -940,7 +940,7 @@ describe('installRtlVisualArrows', () => {
     handle.dispose();
   });
 
-  it('בחירה שלא נבנתה כאן בעברית: הקצוות נקראים, וההקשות בינתיים ממתינות', async () => {
+  it('בחירת עכבר בעברית: הקצוות נקראים, וההקשות בינתיים ממתינות', async () => {
     const { host, line, superdoc, setSelectionTarget } = setup();
     const story = { kind: 'story', storyType: 'body' };
     const point = (offset: number) => ({ kind: 'text', blockId: 'p1', offset, story });
@@ -960,6 +960,8 @@ describe('installRtlVisualArrows', () => {
     };
     const handle = installRtlVisualArrows({ host, superdoc });
 
+    line.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 1000, clientY: 10 }));
+    line.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientX: 960, clientY: 10 }));
     const first = press(line, 'ArrowLeft', { shiftKey: true });
     const queued = press(line, 'ArrowLeft', { shiftKey: true });
     expect(first.defaultPrevented, 'ההכרעה נופלת סינכרונית').toBe(true);
@@ -971,6 +973,86 @@ describe('installRtlVisualArrows', () => {
     expect(last.target.end.offset, 'שתי ההקשות נספרו').toBeGreaterThan(9);
     handle.dispose();
   });
+
+  /** טווח אמיתי בצורת ה-API, עם תיבות עבריות מדודות וקריאה שניתנת לעיכוב. */
+  const externalRange = () => {
+    const state = setup({
+      runs: [{ text: 'שלום עולם פשוט מאוד', chars: CLEAN }],
+      pmStart: 1,
+      pmEnd: 20,
+      caretOffset: 5,
+      caretX: 1010.1,
+    });
+    const story = { kind: 'story', storyType: 'body' };
+    const point = (offset: number) => ({ kind: 'text', blockId: 'p1', offset, story });
+    const range = {
+      empty: false,
+      target: { segments: [{ blockId: 'p1', range: { start: 0, end: 5 } }] },
+      selectionTarget: { kind: 'selection', start: point(0), end: point(5), story },
+    };
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const current = vi.fn(async () => { await gate; return range; });
+    const editor = state.superdoc.activeEditor!;
+    editor.host!.readLiveSelectionSyncSnapshot = () => ({ selectionTarget: null });
+    editor.host!.getSelectionAnchorRect = () => ({ left: 1010.1, right: 1043.4, top: 5, bottom: 15 });
+    state.line.getBoundingClientRect = () =>
+      ({ left: 900, right: 1100, top: 0, bottom: 20 }) as DOMRect;
+    editor.doc = { selection: { current } };
+    return { ...state, current, release };
+  };
+
+  it('טווח מכיוון לא ידוע נשאר למנוע ב-Shift+חץ בלי להחליף את הראש בעוגן', () => {
+    const state = externalRange();
+    const handle = installRtlVisualArrows(state);
+    // selection.current מחזיר 0..5 גם כאשר Shift+Home יצר עוגן 5 וראש 0.
+    for (const key of ['ArrowLeft', 'ArrowRight']) {
+      expect(press(state.line, key, { shiftKey: true }).defaultPrevented).toBe(false);
+    }
+    expect(state.current).not.toHaveBeenCalled();
+    expect(state.setSelectionTarget).not.toHaveBeenCalled();
+    // ההתקנה עצמה חיה: קריסה בלי Shift אינה זקוקה לידיעת הכיוון.
+    expect(press(state.line, 'ArrowLeft').defaultPrevented).toBe(true);
+    handle.dispose();
+    state.release();
+  });
+
+  it.each([
+    { shifts: [false, false], expected: [[5, 5], [6, 6]] },
+    { shifts: [false, true, false, false], expected: [[5, 5], [5, 6], [6, 6], [7, 7]] },
+  ])('תור שמתחיל בקריסה ממשיך מהסמן שקרס: $shifts', async ({ shifts, expected }) => {
+    const state = externalRange();
+    const handle = installRtlVisualArrows(state);
+    for (const shiftKey of shifts) {
+      expect(press(state.line, 'ArrowLeft', { shiftKey }).defaultPrevented).toBe(true);
+    }
+    expect(state.current).toHaveBeenCalledTimes(1);
+    expect(state.setSelectionTarget).not.toHaveBeenCalled();
+    state.release();
+    await vi.waitFor(() => expect(state.setSelectionTarget).toHaveBeenCalledTimes(expected.length));
+    expect(state.setSelectionTarget.mock.calls.map(([{ target }]) =>
+      [target.start.offset, target.end.offset])).toEqual(expected);
+    handle.dispose();
+  });
+
+  it.each(['key', 'pointer', 'dispose', 'editor'] as const)(
+    'קריאה ותור שהתיישנו אינם כותבים או מחזירים מיקוד אחרי %s', async (cancel) => {
+      const state = externalRange();
+      const handle = installRtlVisualArrows(state);
+      press(state.line, 'ArrowLeft');
+      press(state.line, 'ArrowLeft');
+      if (cancel === 'key') press(state.line, 'Home');
+      if (cancel === 'pointer') state.line.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+      if (cancel === 'dispose') handle.dispose();
+      if (cancel === 'editor') state.superdoc.activeEditor = { ...state.superdoc.activeEditor };
+      state.release();
+      await state.current.mock.results[0]!.value;
+      // גם .then של ההקשה השנייה וגם ניקוי הזנב חייבים להספיק לרוץ.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(state.setSelectionTarget).not.toHaveBeenCalled();
+      handle.dispose();
+    },
+  );
 
   it('בחירה שלא נבנתה כאן בלי שורה עברית מתחתיה נשארת למנוע', () => {
     const { host, line, superdoc, setSelectionTarget } = setup();

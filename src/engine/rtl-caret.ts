@@ -135,23 +135,26 @@
  * השמאלי. בפסקה עברית נקייה כל אלה תקינים — אותה סתירה בדיוק כמו בסמן.
  *
  * מה שעמד בדרך היה הקריאה: התצלום הסינכרוני מחזיר `selectionTarget: null` לכל
- * טווח, והמנוע מנרמל `start`/`end` לסדר המסמך. שתי הידיות שפותרות את זה:
+ * טווח, ו-`doc.selection.current()` מחזיר `start`/`end` בסדר המסמך, בלי כיוון.
+ * בכתיבה דרך `setSelectionTarget`, לעומת זאת, start הוא העוגן ו-end הוא הראש;
+ * שומרים על הסדר הזה גם בבחירה לאחור, כדי שההקשה הבאה של המנוע תמשיך מאותו ראש.
  *
  *   • **בחירה שאנחנו בונים — זוכרים.** העוגן והראש מוחזקים ב-`HeldSelection`,
- *     וההקשה הבאה ממשיכה מהראש שנזכר בלי לשאול את המנוע. „נשכח” בכל מקש אחר
- *     ובכל לחיצת עכבר, בכל מקום בדף — אלה המסלולים שמשנים בחירה.
- *   • **בחירה שלא בנינו** (עכבר, `Shift+End`, `Ctrl+A`). `getSelectionAnchorRect()`
- *     סינכרוני ומחזיר את מלבן הבחירה גם כשהתצלום `null`, ולכן ההכרעה אם ההקשה
- *     שלנו נופלת בתוך ה-keydown; את הקצוות קוראים פעם אחת מ-`doc.selection
- *     .current()`, והקשות שמגיעות בינתיים ממתינות בתור. הראש הוא סוף הבחירה,
- *     אלא אם העכבר נגרר אחורה (`dragWentBackward`).
- *     תמונה אינה מגיעה לכאן: לחיצה עליה נותנת סמן מכווץ ולא בחירה (נמדד).
+ *     וההקשה הבאה ממשיכה מהראש שנזכר בלי לשאול את המנוע. „נשכח” בכל מקש אחר,
+ *     בכל לחיצת עכבר, בהחלפת עורך ובסגירת ההתקנה. גם קריאה שבדרך מתבטלת.
+ *   • **בחירת עכבר שלא בנינו.** `getSelectionAnchorRect()` סינכרוני ומחזיר
+ *     את מלבן הבחירה גם כשהתצלום `null`, ולכן ההכרעה נופלת בתוך ה-keydown.
+ *     את הקצוות קוראים פעם אחת מ-`doc.selection.current()` ואת כיוון הגרירה
+ *     זוכרים. הקשות שבאות בינתיים ממתינות בתור; גם אחרי קריסה התור ממשיך
+ *     מהסמן שנוצר, עד שהתצלום החי חוזר להיות מקור האמת.
+ *   • **טווח שכיוונו לא ידוע** (למשל אחרי `Shift+Home/End`, `Ctrl+Shift+חץ`
+ *     או פקודה) נשאר של המנוע ב-`Shift+חץ`. ה-API הציבורי אינו מגלה מי הראש,
+ *     ואין מניחים שהוא סוף הטווח. לקריסה בחץ רגיל מספיקים הקצוות המסודרים.
  *
- * מה שנשאר למנוע: `Shift+חץ` בשורה לטינית כשהבחירה לא התחילה אצלנו, וכל מה
- * שלמעלה כ„נשאר למנוע”. שני גבולות שנשארו: אחרי `Shift+Home` או
- * ‏`Ctrl+Shift+חץ` הראש נחשב סוף הבחירה גם כשהוא בתחילתה, כי אלה אינם משאירים
- * עקבות; וקריסה בחץ רגיל הולכת לפי הכיוון הלוגי של השורה, ולכן קצה שיושב בתוך
- * אי ספרות אינו הקצה המצויר.
+ * מה שנשאר למנוע: `Shift+חץ` בשורה לטינית כשהבחירה לא התחילה אצלנו, טווח
+ * שכיוונו לא ידוע, וכל מה שלמעלה כ„נשאר למנוע”. קריסה בחץ רגיל הולכת לפי
+ * הכיוון הלוגי של השורה, ולכן קצה שיושב בתוך אי ספרות אינו בהכרח הקצה המצויר.
+ * בחירת עכבר שראשה אינו מצויר עדיין אינה ניתנת להמשך במסלול האסינכרוני הזה.
  *
  * ## פסקה ריקה
  *
@@ -530,10 +533,12 @@ export function installRtlVisualArrows({ host, superdoc }: RtlCaretOptions): Rtl
   let reading: Promise<void> | null = null;
   /** כל „שכחה” מבטלת קריאה שבדרך: התשובה שלה מתארת בחירה שכבר אינה. */
   let generation = 0;
+  let stateEditor = superdoc?.activeEditor;
 
   const forget = (): void => {
     held = null;
     drag = null;
+    pressedAt = null;
     reading = null;
     generation += 1;
   };
@@ -604,24 +609,26 @@ export function installRtlVisualArrows({ host, superdoc }: RtlCaretOptions): Rtl
     story,
   });
 
-  /** כותב בחירה בסדר המסמך: המנוע מנרמל ממילא, ואין סיבה לסמוך על זה בין פסקאות. */
+  /** start הוא העוגן ו-end הוא הראש; רק קריאת selection.current מנרמלת את הסדר. */
   const writeHeld = (selection: HeldSelection): void => {
     const { anchor, head, story, coordinateSpace } = selection;
     const a = pointOf(anchor, story);
     const b = pointOf(head, story);
-    if (head.pm < anchor.pm) write(b, a, story, coordinateSpace);
-    else write(a, b, story, coordinateSpace);
+    write(a, b, story, coordinateSpace);
   };
 
   /** הקשה על בחירה מוחזקת. `false` — ההקשה אינה שלנו. */
   const stepHeld = (selection: HeldSelection, toRight: boolean, extending: boolean): boolean => {
     const { anchor, head, story, coordinateSpace } = selection;
 
-    if (!extending) {
+    if (!extending && anchor.pm !== head.pm) {
       const toEnd = movesForward(toRight, head.rtl);
-      const point = pointOf(toEnd === head.pm < anchor.pm ? anchor : head, story);
+      const edge = toEnd === (head.pm < anchor.pm) ? anchor : head;
+      const point = pointOf(edge, story);
+      const spot = edge === head ? head : paintedSpot(host, edge.blockId, edge.offset, head.y);
       write(point, point, story, coordinateSpace);
-      held = null;
+      // התור ממשיך מהקריסה, גם לפני שהתצלום והציור מתעדכנים.
+      held = spot ? { anchor: spot, head: spot, story, coordinateSpace } : null;
       return true;
     }
 
@@ -629,6 +636,7 @@ export function installRtlVisualArrows({ host, superdoc }: RtlCaretOptions): Rtl
     if (!next) return false;
     if (next === STAY) return true;
     selection.head = next;
+    if (!extending) selection.anchor = next;
     writeHeld(selection);
     return true;
   };
@@ -640,9 +648,10 @@ export function installRtlVisualArrows({ host, superdoc }: RtlCaretOptions): Rtl
     extending: boolean,
   ): Promise<void> => {
     const mine = generation;
+    const owner = superdoc?.activeEditor;
     const gesture = drag;
     const { selectionTarget } = await readDocSelection(superdoc);
-    if (mine !== generation) return;
+    if (mine !== generation || owner !== superdoc?.activeEditor) return;
 
     const range = selectionTarget as NonNullable<LiveSelectionSnapshot['selectionTarget']> | null;
     const start = range?.start;
@@ -652,13 +661,18 @@ export function installRtlVisualArrows({ host, superdoc }: RtlCaretOptions): Rtl
     const coordinateSpace = range?.coordinateSpace;
 
     if (!extending) {
-      const point = movesForward(toRight, true) ? end : start;
+      const toEnd = movesForward(toRight, true);
+      const point = toEnd ? end : start;
+      const spot = isTextPoint(point)
+        ? paintedSpot(host, point.blockId, point.offset, toEnd ? rect.bottom : rect.top)
+        : null;
+      held = spot ? { anchor: spot, head: spot, story, coordinateSpace } : null;
       write(point, point, story, coordinateSpace);
       return;
     }
-    if (!isTextPoint(start) || !isTextPoint(end)) return;
+    if (!gesture || !isTextPoint(start) || !isTextPoint(end)) return;
 
-    const backward = gesture ? dragWentBackward(gesture.dx, gesture.dy, true) : false;
+    const backward = dragWentBackward(gesture.dx, gesture.dy, true);
     const [anchor, tip] = backward ? [end, start] : [start, end];
     const head = paintedSpot(host, tip.blockId, tip.offset, backward ? rect.top : rect.bottom);
     if (!head) return;
@@ -674,10 +688,25 @@ export function installRtlVisualArrows({ host, superdoc }: RtlCaretOptions): Rtl
     stepHeld(held, toRight, true);
   };
 
+  /** רק הזנב האחרון של התור רשאי לסיים את הקריאה. */
+  const trackReading = (pending: Promise<void>): void => {
+    reading = pending;
+    void pending.finally(() => {
+      if (reading !== pending) return;
+      reading = null;
+      // מחוץ לתור חץ רגיל חוזר למדידה של הסמן החי.
+      if (held && held.anchor.pm === held.head.pm) held = null;
+    });
+  };
+
   const onKeyDown = (event: KeyboardEvent): void => {
     if (!isHorizontalArrow(event)) return;
 
     const editor = superdoc?.activeEditor;
+    if (editor !== stateEditor) {
+      forget();
+      stateEditor = editor;
+    }
     const setSelectionTarget = editor?.authoring?.setSelectionTarget;
     const readSnapshot = editor?.host?.readLiveSelectionSyncSnapshot;
     if (typeof setSelectionTarget !== 'function' || typeof readSnapshot !== 'function') return;
@@ -694,9 +723,11 @@ export function installRtlVisualArrows({ host, superdoc }: RtlCaretOptions): Rtl
     if (reading) {
       swallow();
       const mine = generation;
-      reading = reading.then(() => {
-        if (mine === generation && held) stepHeld(held, toRight, extending);
-      });
+      trackReading(reading.then(() => {
+        if (mine === generation && stateEditor === superdoc?.activeEditor && held) {
+          stepHeld(held, toRight, extending);
+        }
+      }));
       return;
     }
 
@@ -715,13 +746,13 @@ export function installRtlVisualArrows({ host, superdoc }: RtlCaretOptions): Rtl
 
     const selection = snapshot?.selectionTarget;
     if (!selection) {
+      // ה-API הציבורי מחזיר טווח מסודר, בלי כיוון. אחרי Shift+Home/End,
+      // בחירה בפקודה וכדומה איננו יודעים מי הראש; המנוע שומר אותו בעצמו.
+      if (extending && !drag) return;
       const rect = editor?.host?.getSelectionAnchorRect?.call(editor.host);
       if (!rect || lineDirectionUnder(host, rect) !== true) return;
       swallow();
-      const mine = generation;
-      reading = readThenStep(rect, toRight, extending).finally(() => {
-        if (mine === generation) reading = null;
-      });
+      trackReading(readThenStep(rect, toRight, extending));
       return;
     }
 
@@ -821,6 +852,7 @@ export function installRtlVisualArrows({ host, superdoc }: RtlCaretOptions): Rtl
 
   return {
     dispose() {
+      forget();
       host.removeEventListener('keydown', onKeyDown, true);
       window.removeEventListener('keydown', onAnyKeyDown, true);
       window.removeEventListener('pointerdown', onPointerDown, true);
