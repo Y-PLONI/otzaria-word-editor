@@ -615,6 +615,40 @@ export function paintedFirstBlockId(host: ParentNode | null | undefined): string
   return firstId;
 }
 
+export interface PaintedParagraphEnd {
+  blockId: string;
+  element: HTMLElement;
+  continuesFromPrevious: boolean;
+}
+
+/**
+ * Identity-mapped body endings on one painted page, for ¶. Only the final
+ * fragment can contain a paragraph mark. Header/footer stories are excluded;
+ * tables have no top-level paragraph identity and are left to the engine.
+ * null means the expected mapping is unavailable, so callers must retain the
+ * complete legacy sequence instead of matching a filtered DOM to all blocks.
+ */
+export function paintedParagraphEnds(page: HTMLElement): readonly PaintedParagraphEnd[] | null {
+  const fragments = Array.from(page.querySelectorAll('.superdoc-fragment[data-layout-story="body"]'));
+  if (fragments.length === 0) return null;
+  const result: PaintedParagraphEnd[] = [];
+  for (const fragment of fragments) {
+    const blockId = fragment.getAttribute('data-source-node-id');
+    if (!blockId) {
+      // Verified on 2.23: table fragments carry boundaries but no paragraph ID.
+      // A paragraph without identity is an unavailable map, not an empty page.
+      if (fragment.hasAttribute('data-table-boundaries')) continue;
+      return null;
+    }
+    if (flag(fragment, CONTINUES_ON_NEXT)) continue;
+    const start = attr(fragment, 'data-pm-start');
+    const end = attr(fragment, 'data-pm-end');
+    if (!(fragment instanceof HTMLElement) || !Number.isFinite(start) || !Number.isFinite(end) || end < start) return null;
+    result.push({ blockId, element: fragment, continuesFromPrevious: flag(fragment, CONTINUES_FROM_PREV) });
+  }
+  return result;
+}
+
 /* ------------------------------------------------------------------ */
 /* מיקום טקסט שהוחלף — לסימון התיקון האוטומטי                           */
 /* ------------------------------------------------------------------ */

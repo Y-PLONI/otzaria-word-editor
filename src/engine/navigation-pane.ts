@@ -20,6 +20,7 @@
  */
 import type { SuperDoc } from 'superdoc';
 import type { MaybePromise } from './document-api';
+import { getDocumentReadRevision, type DocumentReadRevision } from './document-read-state';
 
 /** כותרת אחת ברשימה. */
 export interface NavHeading {
@@ -36,6 +37,7 @@ interface NavBlockEntry {
   text?: unknown;
   styleId?: unknown;
   headingLevel?: unknown;
+  isEmpty?: unknown;
 }
 
 interface NavSelectionInfo {
@@ -48,7 +50,8 @@ export interface NavigationDocumentApi {
       includeText: boolean;
       offset: number;
       limit: number;
-    }) => MaybePromise<{ blocks?: readonly NavBlockEntry[] } | undefined>;
+      nodeIds?: string[];
+    }) => MaybePromise<{ blocks?: readonly NavBlockEntry[]; revision?: string } | undefined>;
   } | null;
   selection?: {
     current?: () => MaybePromise<NavSelectionInfo | undefined>;
@@ -91,6 +94,14 @@ const BLOCKS_MAX_PAGES = 50;
 /** תקרת Word: „רמה 9”. */
 const MAX_LEVEL = 9;
 
+const outlines = new WeakMap<NavigationDocumentApi, { revision: DocumentReadRevision; outline: NavOutline }>();
+
+/** Also used by the component's explicit revision prop, including hosts without update events. */
+export function invalidateNavOutline(target: NavigationTarget): void {
+  const doc = hostOf(target)?.activeEditor?.doc;
+  if (doc) outlines.delete(doc);
+}
+
 function hostOf(target: NavigationTarget): NavigationHost | null {
   return (target as NavigationHost | null | undefined) ?? null;
 }
@@ -131,18 +142,32 @@ export async function readNavOutline(
   target: NavigationTarget,
   isCurrent: () => boolean = () => true,
 ): Promise<NavOutline | null> {
-  const list = hostOf(target)?.activeEditor?.doc?.blocks?.list;
+  const doc = hostOf(target)?.activeEditor?.doc;
+  const blocks = doc?.blocks;
+  const list = blocks?.list;
   if (typeof list !== 'function') return null;
+
+  const revision = getDocumentReadRevision(doc!);
+  const current = () => isCurrent() && getDocumentReadRevision(doc!) === revision;
+  if (!current()) return null;
+  const cached = outlines.get(doc!);
+  if (cached?.revision === revision) return cached.outline;
 
   const headings: NavHeading[] = [];
   const ordinals = new Map<string, number>();
+  const candidates: Array<Omit<NavHeading, 'text'>> = [];
   let offset = 0;
   let complete = false;
+  let engineRevision: string | undefined;
+  const sameRevision = (value: string | undefined): boolean => {
+    if (engineRevision === undefined) engineRevision = value;
+    return value === undefined || value === engineRevision;
+  };
   try {
     for (let page = 0; page < BLOCKS_MAX_PAGES; page += 1) {
-      const result = await list({ includeText: true, offset, limit: BLOCKS_PAGE_SIZE });
-      if (!isCurrent()) return null;
-      const entries = result?.blocks ?? [];
+      const result = await list.call(blocks, { includeText: false, offset, limit: BLOCKS_PAGE_SIZE });
+      if (!current() || !Array.isArray(result?.blocks) || !sameRevision(result?.revision)) return null;
+      const entries = result.blocks;
       entries.forEach((entry, index) => {
         if (typeof entry?.nodeId !== 'string') return;
         ordinals.set(entry.nodeId, offset + index);
@@ -151,9 +176,7 @@ export async function readNavOutline(
           typeof entry.headingLevel === 'number' ? entry.headingLevel : undefined,
         );
         if (level === null) return;
-        const text = typeof entry.text === 'string' ? headingText(entry.text) : '';
-        if (!text) return;
-        headings.push({ blockId: entry.nodeId, text, level, ordinal: offset + index });
+        candidates.push({ blockId: entry.nodeId, level, ordinal: offset + index });
       });
       if (entries.length < BLOCKS_PAGE_SIZE) {
         complete = true;
@@ -162,14 +185,37 @@ export async function readNavOutline(
       offset += entries.length;
     }
     if (!complete) {
-      const extra = await list({ includeText: false, offset, limit: 1 });
-      if (!isCurrent()) return null;
-      complete = (extra?.blocks?.length ?? 0) === 0;
+      const extra = await list.call(blocks, { includeText: false, offset, limit: 1 });
+      if (!current() || !Array.isArray(extra?.blocks) || !sameRevision(extra?.revision)) return null;
+      complete = extra.blocks.length === 0;
+    }
+    // Identity filtering happens before pagination in the public API. Keep the
+    // ordinals from the metadata pass: filtered results have a different order.
+    for (let start = 0; start < candidates.length; start += BLOCKS_PAGE_SIZE) {
+      if (!current()) return null;
+      const batch = candidates.slice(start, start + BLOCKS_PAGE_SIZE);
+      const result = await list.call(blocks, {
+        includeText: true, nodeIds: batch.map((entry) => entry.blockId), offset: 0, limit: batch.length,
+      });
+      if (!current() || !Array.isArray(result?.blocks) || !sameRevision(result?.revision)) return null;
+      const texts = new Map(result.blocks.map((entry) => [entry.nodeId, entry]));
+      for (const entry of batch) {
+        // Missing text is an incomplete read, not proof that a heading is empty.
+        const full = texts.get(entry.blockId);
+        if (!full) return null;
+        const raw = full.text;
+        if (raw == null && full.isEmpty === true) continue;
+        if (typeof raw !== 'string') return null;
+        const text = headingText(raw);
+        if (text) headings.push({ ...entry, text });
+      }
     }
   } catch {
     return null;
   }
-  return { headings, ordinals, partial: !complete };
+  const outline = { headings, ordinals, partial: !complete };
+  outlines.set(doc!, { revision, outline });
+  return outline;
 }
 
 /**

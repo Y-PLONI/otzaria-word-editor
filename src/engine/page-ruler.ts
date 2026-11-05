@@ -890,6 +890,21 @@ export function measureAllPageTextRuns(
   return out;
 }
 
+/** Pages intersecting the viewport plus a short scroll-ahead margin. */
+export function visiblePageElements(host: HTMLElement, marginPx = 400): readonly HTMLElement[] {
+  const viewport = host.getBoundingClientRect();
+  return Array.from(host.querySelectorAll(`[${PAGE_INDEX_ATTRIBUTE}]`))
+    .filter((node): node is HTMLElement => node instanceof HTMLElement)
+    .map((el) => ({ el, index: Number(el.getAttribute(PAGE_INDEX_ATTRIBUTE)) }))
+    .filter(({ el, index }) => {
+      if (!Number.isInteger(index)) return false;
+      const box = el.getBoundingClientRect();
+      return box.bottom >= viewport.top - marginPx && box.top <= viewport.bottom + marginPx;
+    })
+    .sort((a, b) => a.index - b.index)
+    .map(({ el }) => el);
+}
+
 /**
  * שתי רשימות מלבנים גולמיים שקולות. חצי פיקסל הוא הרזולוציה שכל המדידות כאן
  * עובדות בה — מתחתיה זו רעידה של `getClientRects` ולא תזוזה.
