@@ -46,6 +46,8 @@ export interface PickerOption {
    * נפתר בכרום נקי, ושער שדורש הסכמה על כל שורה היה נכשל עליו תמיד.
    */
   measured?: boolean;
+  /** הזמינות טרם נבדקה — אין דגימה ואין טענה שהגופן חסר. */
+  pending?: boolean;
   /**
    * הגופן **מותקן** במכונה, ובכל זאת הדפדפן אינו מצייר אותו.
    *
@@ -102,7 +104,7 @@ export interface CurrentShape {
    * חסר = לא נשאל, והאפשרות נחשבת זמינה. זו ההתנהגות שהייתה, ולכן בורר
    * הגודל אינו משתנה.
    */
-  readonly available?: (value: string) => boolean;
+  readonly available?: (value: string) => boolean | undefined;
 }
 
 /**
@@ -127,10 +129,12 @@ export function withCurrent<T extends PickerOption>(
    */
   if (current === '' || options.some((option) => option.value === current)) return options;
 
-  const measured = shape.available !== undefined;
-  const available = shape.available?.(current) ?? true;
+  const available = shape.available ? shape.available(current) : true;
+  const measured = shape.available !== undefined && available !== undefined;
   const added: PickerOption = shape.preview
-    ? available
+    ? available === undefined
+      ? { value: current, label: current, pending: true, measured: false }
+      : available
       ? { value: current, label: current, preview: current, measured }
       : { value: current, label: current, unavailable: true, measured }
     : { value: current, label: current };

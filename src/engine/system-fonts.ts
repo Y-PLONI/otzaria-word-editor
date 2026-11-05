@@ -65,7 +65,7 @@
  */
 import type { FontFamilyOption } from 'superdoc/ui';
 import { tryCall } from '../host/otzaria-client';
-import { canMeasureFonts, isFamilyAvailable } from './docx-fonts';
+import { cachedFamilyAvailability, cachedHebrewCoverage, canMeasureFonts, isFamilyAvailable } from './docx-fonts';
 
 /**
  * משפחה אחת, בצורה שהיא גם מה שהמארח מחזיר וגם מה שרשימת המועמדים כתובה בה.
@@ -170,6 +170,14 @@ export const MEASURED_CANDIDATES: readonly InstalledFont[] = [
   ...LATIN_CANDIDATES.map((name) => candidate(name, ['latin'])),
 ];
 
+/** תוצאת הביניים של סריקת המועמדים; אין כאן מדידה סינכרונית. */
+export function cachedInstalledFonts(): InstalledFontsSnapshot {
+  return toSnapshot(MEASURED_CANDIDATES
+    .filter((font) => cachedFamilyAvailability(font.name) === true)
+    .map((font) => ({ ...font, scripts: cachedHebrewCoverage(font.name) === true ? ['hebrew'] : [] })),
+  'measured');
+}
+
 /* ------------------------------------------------------------------ */
 /* המנייה                                                              */
 /* ------------------------------------------------------------------ */
@@ -213,9 +221,9 @@ function waitForWebFonts(): Promise<unknown> {
  * thread בדיוק בשניות הראשונות שאחרי הפתיחה, וזו התלונה שהובילה לכאן.
  *
  * שלב א' הוא קריאת RPC אחת ומיון. הבורר מתמלא ממנו מיד, וכל מה שחסר בו הוא
- * הסימון של השמות שהדפדפן אינו פותר (`unresolved`) — כלומר שורה שתיראה
- * זמינה עד שהמדידה תנחת, לא שורה חסרה. `verifyInstalledFonts` הוא שלב ב',
- * ומי שקורא לו קובע מתי: זמן idle, או פתיחת הבורר.
+ * הסימון של השמות שהדפדפן אינו פותר (`unresolved`). עד לבדיקה הזמינות
+ * אינה ידועה ואין דגימה. App.vue בודקת בתור idle הניתן להשהיה;
+ * `verifyInstalledFonts` נשארת כניסה נפרדת למי שממתין לתוצאה מלאה.
  *
  * מארח שאינו מכיר את המתודה אינו מקבל כאן כלום — שכבה 2 היא **כולה** מדידה,
  * ולכן היא שייכת לשלב ב'. ראו `loadInstalledFonts` להסבר על השכבות.
@@ -280,7 +288,8 @@ export async function verifyInstalledFonts(
  * שני השלבים יחד. אינה זורקת לעולם — כל כשל מחזיר פחות ידיעה, לא חריגה.
  *
  * מי שרוצה את הרשימה מיד ואת המדידה בזמן שנוח לו קורא לשני השלבים בנפרד —
- * וזה מה ש-App.vue עושה. כאן הם יחד, למי שרק רוצה את התשובה המלאה.
+ * App.vue משתמשת בתור המדידות הניתן להשהיה שב-font-probes.ts. כאן נשמרת
+ * נקודת הכניסה החד־פעמית, למי שצריך להמתין לתשובה המלאה.
  */
 export async function loadInstalledFonts(
   deps: InstalledFontsDeps = {},

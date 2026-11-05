@@ -48,6 +48,9 @@ export const STATUS_NOTIFIER: InjectionKey<(text: string) => void> = Symbol('sta
  */
 export const FONT_OPTIONS: InjectionKey<Ref<FontOptions>> = Symbol('fontOptions');
 
+/** קידום גופנים שנבחרו או נראים בבורר לראש תור המדידה בזמן פנוי. */
+export const FONT_PROBE_PRIORITIES: InjectionKey<(families: readonly string[]) => void> = Symbol('fontProbePriorities');
+
 /**
  * גלריית הסגנונות של המסמך הפתוח (`ui.styles` דרך engine/style-gallery.ts).
  *

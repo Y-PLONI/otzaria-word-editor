@@ -37,9 +37,8 @@
  * מפסיק לעבוד, בלי שדבר בבורר משתנה. לכן יש כאן אלמנט משלנו, והוא **נצבר**
  * ולא נדרס: כל בחירה מוסיפה לו כלל.
  *
- * ומה שכן נשען על המסלול ההוא: פתיחת מסמך מקדמת את דור המדידה ומנקה את מטמון
- * הזמינות (`advanceAliasGeneration`), אבל הכללים שלנו נשארים ב-DOM — ולכן
- * המדידה הטרייה פשוט מוצאת אותם שוב. אין כאן מה לתקן, וזו הסיבה שאין.
+ * מטמון הזמינות נשכח רק למשפחה שהכללים שלה השתנו. הכללים שלנו נשארים
+ * ב-DOM גם בפתיחת מסמך, ולכן אין צורך לסרוק שוב את כל גופני הבורר.
  */
 import { tryCall } from '../host/otzaria-client';
 import type { ResolveFontFamiliesResult } from '../types/otzaria_plugin';
@@ -78,7 +77,7 @@ const refused = new Set<string>();
 const inFlight = new Map<string, Promise<boolean>>();
 
 /** מי שרוצה לדעת שמשפחה חדשה הפכה ניתנת לציור. ראו `onPickerFontsChanged`. */
-const listeners = new Set<() => void>();
+const listeners = new Set<(family: string) => void>();
 
 /**
  * הודעה שמשפחה נוספת הפכה ניתנת לציור — ולכן יש מה להרכיב מחדש בבורר.
@@ -89,17 +88,17 @@ const listeners = new Set<() => void>();
  *
  * מחזירה מבטל מנוי, כדי שאתר הקריאה לא יצטרך לזכור את הפונקציה שהעביר.
  */
-export function onPickerFontsChanged(listener: () => void): () => void {
+export function onPickerFontsChanged(listener: (family: string) => void): () => void {
   listeners.add(listener);
   return () => {
     listeners.delete(listener);
   };
 }
 
-function notifyChanged(): void {
+function notifyChanged(family: string): void {
   for (const listener of [...listeners]) {
     try {
-      listener();
+      listener(family);
     } catch (error) {
       // מנוי שנכשל אינו סיבה לבטל את שאר המנויים, ובוודאי לא את ההזרקה
       // שכבר הצליחה.
@@ -182,7 +181,7 @@ async function fetchAndInject(
       return false;
     }
 
-    notifyChanged();
+    notifyChanged(family);
     return true;
   } catch (error) {
     console.warn(`[otzaria-word] שליפת הגופן ${family} מאוצריא נכשלה`, error);
