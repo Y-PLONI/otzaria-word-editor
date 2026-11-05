@@ -2259,17 +2259,16 @@ function updateShellView(patch: Partial<SessionView>): void {
  * עריכה) ועשויה להיקרא בזמן שהטאב הזה ברקע.
  */
 function createOpenEditorForSession(session: DocumentSession): OpenEditor {
-  return async (host, source, signal) => {
-    // נקשר למופע שנוצר כאן, גם אם ה-session עבר בינתיים למסמך אחר.
-    let opened: EditorSession | null = null;
-    opened = await createEditor({
+  return (host, source, signal) => {
+    return createEditor({
       container: host,
       source,
       signal,
       onError: (err) => console.error('[otzaria-word] שגיאת מנוע:', err),
       onStatus: (message, isError) => setStatus(message, isError),
       onUpdate: () => {
-        invalidateDocumentReads(opened?.superdoc.activeEditor?.doc);
+        // createEditor invalidates the originating document before notifying
+        // this session, including commits made before its promise resolves.
         session.save.markDirty();
         session.metrics?.noteDocumentChanged();
         session.textCursor?.noteDocumentChanged();
@@ -2287,7 +2286,6 @@ function createOpenEditorForSession(session: DocumentSession): OpenEditor {
       },
       onPaginationUpdate: (totalPages) => session.metrics?.notePaginationUpdate(totalPages),
     });
-    return opened;
   };
 }
 
