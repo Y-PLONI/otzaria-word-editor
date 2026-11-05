@@ -704,6 +704,7 @@ import {
   SESSION_VERSION,
   type DocumentSessionId,
   type SessionDocumentEntry,
+  type SessionDraft,
   type SessionState,
   type SessionView,
 } from './sessions/session-state';
@@ -725,6 +726,7 @@ import {
   deleteWorkspaceEntry,
   readWorkspaceBytes,
   writeWorkspaceBytes,
+  type WorkspaceWrite,
 } from './host/workspace';
 import { onPluginHidden, onPluginShown } from './host/lifecycle';
 import { revealZone, type RevealBounds, type RevealZone } from './composables/focus-mode';
@@ -2124,6 +2126,7 @@ function initSessionKeeper(getSession: () => DocumentSession, id: DocumentSessio
     writeDraft: async (content, path) =>
       writeWorkspaceBytes(path, new Uint8Array(await content.arrayBuffer())),
     removeDraft: (path) => deleteWorkspaceEntry(path),
+    rescueDraft: (draft) => rescueUnloadedDraft(getSession(), draft),
     draftPaths: draftSlotPaths(id),
     readCaret: (previous) => {
       const active = getSession().swap.current;
@@ -6866,9 +6869,12 @@ async function backupDiscardedDocumentNow(session: DocumentSession): Promise<voi
     return;
   }
 
-  const list = normalizeBackups(await loadDiscardBackups());
-  const slot = nextBackupSlot(list);
-  const written = await writeWorkspaceBytes(backupPathFor(slot), bytes);
+  const written = await storeDiscardBackup(bytes, {
+    name: sessionDisplayTitle(session),
+    // מי שישחזר צריך לדעת מאיזה קובץ זה בא. אחרי הסגירה הידיעה הזאת נעלמת
+    // עם הטאב, ואי אפשר לאסוף אותה מאוחר יותר.
+    token: activeEntry(session.keeper.state)?.document?.token ?? null,
+  });
   if (written !== 'written') {
     setStatus(
       written === 'too-large'
@@ -6876,23 +6882,52 @@ async function backupDiscardedDocumentNow(session: DocumentSession): Promise<voi
         : 'שמירת העותק לשחזור נכשלה',
       true,
     );
-    return;
   }
+}
 
-  const next = rememberDiscard(list, {
-    slot,
-    name: sessionDisplayTitle(session),
-    size: bytes.byteLength,
-    discardedAt: Date.now(),
-    // מי שישחזר צריך לדעת מאיזה קובץ זה בא. אחרי הסגירה הידיעה הזאת נעלמת
-    // עם הטאב, ואי אפשר לאסוף אותה מאוחר יותר.
-    token: activeEntry(session.keeper.state)?.document?.token ?? null,
-  });
+/** כותבת בייטים למשבצת גיבוי, ורק אם הכתיבה הצליחה — רושמת אותה. רצה בתור. */
+async function storeDiscardBackup(
+  bytes: Uint8Array,
+  meta: Pick<DiscardedDocument, 'name' | 'token'>,
+): Promise<WorkspaceWrite> {
+  const list = normalizeBackups(await loadDiscardBackups());
+  const slot = nextBackupSlot(list);
+  const written = await writeWorkspaceBytes(backupPathFor(slot), bytes);
+  if (written !== 'written') return written;
+
+  // `Date.now()` גם לטיוטה ישנה שניצלה: `rememberDiscard` חותך את הישנים
+  // ביותר, ותאריך הטיוטה היה עלול להפיל אותה מהרשימה ברגע שנכנסה אליה.
+  const next = rememberDiscard(list, { slot, ...meta, size: bytes.byteLength, discardedAt: Date.now() });
   await saveDiscardBackups(next);
   // הרשימה שבזיכרון היא מה שמזין את המונה על „נסגרו בלי לשמור” ואת מסך
   // השחזור. בלי השורה הזאת הכפתור היה מופיע רק בהפעלה הבאה — כלומר בדיוק לא
   // ברגע שבו המשתמש מחפש את מה שהרגע ויתר עליו.
   discardedBackups.value = sortedBackups(next);
+  return written;
+}
+
+/**
+ * `rescueDraft` של הזוכר: טיוטה שהטאב לא נטען ממנה עוברת ל„נסגרו בלי לשמור”
+ * לפני שהטאב דורס או מוחק אותה (ראו `draftLoaded` ב-session-keeper.ts).
+ *
+ * המקרה שבשבילו זה נכתב: שחזור שלא הביא את הטיוטה, טאב שנפתח ריק, והקלדה
+ * ראשונה בו. בלי זה הטיוטה — לפעמים העותק היחיד של מסמך שמעולם לא נשמר —
+ * נדרסת בשקט בתוך דקה.
+ */
+async function rescueUnloadedDraft(session: DocumentSession, draft: SessionDraft): Promise<boolean> {
+  let rescued = false;
+  await enqueueDiscardedStorageOperation(async () => {
+    const bytes = await readWorkspaceBytes(draft.path);
+    if (!bytes) return;
+    const entry = activeEntry(session.keeper.state);
+    const fromThisDocument = (entry?.document?.token ?? null) === draft.documentToken;
+    const name = draft.name ?? (fromThisDocument ? entry?.document?.name : undefined) ?? 'מסמך חדש';
+    rescued = await storeDiscardBackup(bytes, { name: stripWordExtension(name), token: draft.documentToken }) === 'written';
+  });
+  if (rescued) {
+    guardIfActive(session, () => setStatus('שינויים קודמים שלא נטענו כאן נשמרו ב„נסגרו בלי לשמור”'));
+  }
+  return rescued;
 }
 
 async function forgetDiscarded(slot: number): Promise<void> {
