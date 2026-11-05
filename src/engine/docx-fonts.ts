@@ -418,10 +418,17 @@ export function substitutesFor(font: DeclaredFont): string[] {
 let documentAliases = new Map<string, string>();
 let documentAliasStyle: HTMLStyleElement | null = null;
 let lastHostedAliases: { key: string; result: ResolveFontFamiliesResult } | null = null;
+/** טעינה שייכת לכללים ול-FontFaceSet שבהם התחילה, לא רק לתשובת המארח. */
+let hostedAliasLoads: {
+  style: HTMLStyleElement;
+  css: string;
+  fontSet: FontFaceSet;
+  families: Map<string, Promise<void>>;
+} | null = null;
 
 /**
- * מכינה גופנים לפני יצירת המנוע. רק כללים שהשתנו מבטלים תשובות במטמון;
- * פתיחה חוזרת עם אותם כללים אינה כותבת CSS ואינה טוענת אותם שוב.
+ * מכינה גופנים לפני יצירת המנוע. CSS זהה אינו נכתב שוב; פתיחה חוזרת
+ * מצטרפת לטעינה ממתינה או משתמשת בטעינה מוצלחת שכבר הושלמה.
  */
 export async function installDocumentFontAliases(fontTableXml: string | null): Promise<string[]> {
   const style = aliasStyleElement();
@@ -430,6 +437,7 @@ export async function installDocumentFontAliases(fontTableXml: string | null): P
     for (const name of documentAliases.keys()) forgetFamilyAvailability(name);
     documentAliases = new Map();
     documentAliasStyle = style;
+    hostedAliasLoads = null;
   }
 
   // אליאס מהמסמך הקודם אינו גופן מותקן: אחרת פתיחה חוזרת הייתה רואה אותו
@@ -458,12 +466,17 @@ export async function installDocumentFontAliases(fontTableXml: string | null): P
   ));
   if (style.textContent !== css) {
     style.textContent = css;
-    // ממתינים לבייטים הדרושים לפריסה, לא לסריקת כל גופני הבורר.
-    await loadHostedAliases(hostedFonts);
+    hostedAliasLoads = null;
   }
+  // הכללים כבר מותקנים גם בזמן ההמתנה. סיום ישן אינו מחזיר בעלות על
+  // אליאסים שהוסרו בינתיים, ופתיחה נוספת אינה טועה לחשוב שהם גופני מערכת.
   documentAliases = aliases;
+  // CSS זהה יכול עדיין להיטען אחרי „דלג”: כל פתיחה מצטרפת להמתנה הקיימת.
+  await loadHostedAliases(hostedFonts, style);
   // אחרי ההמתנה: מדידה בחלון הטעינה אינה יכולה להשאיר תשובה מיושנת.
-  for (const name of changed) forgetFamilyAvailability(name);
+  if (style === documentAliasStyle && style.textContent === css) {
+    for (const name of changed) forgetFamilyAvailability(name);
+  }
   return plan.missing.map((font) => font.name);
 }
 
@@ -474,19 +487,37 @@ export async function installDocumentFontAliases(fontTableXml: string | null): P
  * שימש בטקסט של המנוע מתחיל להיטען. `ready` לבדו אינו מספיק: הוא יכול להיפתר
  * לפני שמשפחה שלא צוירה עדיין בכלל נכנסה למצב `loading`.
  */
-async function loadHostedAliases(fonts: readonly DeclaredFont[]): Promise<void> {
+async function loadHostedAliases(fonts: readonly DeclaredFont[], style: HTMLStyleElement): Promise<void> {
   const fontSet = typeof document === 'undefined' ? undefined : document.fonts;
   if (!fontSet || typeof fontSet.load !== 'function' || fonts.length === 0) return;
 
-  await Promise.all(
-    fonts.map(async (font) => {
-      try {
-        await fontSet.load(`72px ${JSON.stringify(font.name)}`, PROBE_TEXT);
-      } catch {
-        // האליאס הוא שיפור פריסה; אם הדפדפן דוחה אותו נשארים במסלול ה-fallback.
-      }
-    }),
-  );
+  const css = style.textContent ?? '';
+  if (hostedAliasLoads?.style !== style || hostedAliasLoads.css !== css || hostedAliasLoads.fontSet !== fontSet) {
+    hostedAliasLoads = { style, css, fontSet, families: new Map() };
+  }
+  const loads = hostedAliasLoads;
+  await Promise.all(fonts.map((font) => {
+    const key = familyProbeKey(font.name);
+    const existing = loads.families.get(key);
+    if (existing) return existing;
+
+    // ה-Promise נרשם לפני בקשת הדפדפן, גם אם load זורקת סינכרונית.
+    const loading = Promise.resolve().then(() => fontSet.load(`72px ${JSON.stringify(font.name)}`, PROBE_TEXT))
+      .then((faces) => {
+        if (faces.length === 0) {
+          // לא נמצאה פאה מתאימה; fallback אינו הוכחה שהמשפחה נטענה.
+          loads.families.delete(key);
+          return;
+        }
+        // גם ניסיון חוזר באותו CSS מרענן תשובת fallback שנמדדה אחרי כשל.
+        if (hostedAliasLoads === loads && style.textContent === css) forgetFamilyAvailability(font.name);
+      }, () => {
+        // כשל אינו מפיל פתיחה ואינו נשמר כ„מוכן”: פתיחה מאוחרת תנסה שוב.
+        loads.families.delete(key);
+      });
+    loads.families.set(key, loading);
+    return loading;
+  }));
 }
 
 /**
