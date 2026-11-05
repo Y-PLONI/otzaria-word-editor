@@ -463,6 +463,8 @@ import {
   registerSendToDocumentItem,
   registerEditBookItem,
   handleSendToDocument,
+  sendToDocumentText,
+  SEND_TO_DOCUMENT_ITEM_ID,
   takePendingContextMenuClicks,
   type SendToDocumentEvent,
   type ReaderResult,
@@ -2794,6 +2796,10 @@ async function openDocumentInto(
   attempt.stage(LOAD_STAGES.arranging, 'מסדר את התצוגה…');
 
   const editor = outcome.session;
+  if (session) {
+    if (file) openedFileTokens.set(session, file.token);
+    else openedFileTokens.delete(session);
+  }
   const adapter = createCommandAdapter(editor.ui);
   commandAdapter.value = adapter;
 
@@ -3517,6 +3523,12 @@ async function onSave(forceSaveAs = false): Promise<void> {
  * הוא עדיין מסמך אמיתי של המשתמש, ופתיחה נוספת לא אמורה לדרוס אותו במקום.
  */
 function isActiveTabReplaceable(): boolean {
+  const current = activeSession.value;
+  // A late startup citation must still find the previous blank tab. A fresh
+  // placeholder with no stored session can continue to be reused normally.
+  if (collectingStartupRequests && current === startupOriginalTarget) return false;
+  const remembered = current ? activeEntry(current.keeper.state) : null;
+  if (remembered?.document || remembered?.draft) return false;
   return !saveSnapshot.value.isDirty && saveSnapshot.value.targetToken === null;
 }
 
@@ -4362,8 +4374,12 @@ function onDocumentTabSelect(id: DocumentSessionId): void {
  * ולכן זו אותה פונקציה בדיוק שפותחת את הטאב הפעיל בעלייה — כולל שחזור
  * הטיוטה, הסמן והזום, וכולל המסלול של קובץ שאינו נגיש יותר.
  */
-async function openPendingTab(session: DocumentSession): Promise<void> {
+async function openPendingTab(
+  session: DocumentSession,
+  options: { allowBlankFallback?: boolean } = {},
+): Promise<boolean> {
   session.pendingRestore = false;
+  if (collectingStartupRequests) startupAttemptedSessions.add(session.id);
   /**
    * הנעילה מורמת **לפני** ה-`await` הראשון, ולא נשענת על `isOpening` של
    * `openDocument`.
@@ -4376,13 +4392,15 @@ async function openPendingTab(session: DocumentSession): Promise<void> {
    * בקובץ שבו פתיחה מתחילה בלי שדבר מגן עליה.
    */
   pendingTabLoad = true;
+  let opened = false;
   try {
     // `slept` ולא „ממתין”: טאב ששוחזר מהפעלה קודמת ונטען כאן לראשונה מקבל את
     // הנוסח על ההפעלה הקודמת, וטאב שנרדם באותה הפעלה — את זה שמדבר על עכשיו.
-    await reopenPreviousSession(session.keeper.state, session.slept);
-    session.slept = false;
+    opened = await reopenPreviousSession(session.keeper.state, session.slept, options);
+    if (opened) session.slept = false;
   } finally {
     pendingTabLoad = false;
+    if (!opened && options.allowBlankFallback === false) session.pendingRestore = true;
   }
 
   // והמיקום השמור, עכשיו. `activateTab` כבר קרא ל-`restorePaneScroll` — אבל
@@ -4393,6 +4411,7 @@ async function openPendingTab(session: DocumentSession): Promise<void> {
   // עטופה בבדיקת „עוד הפעיל”: הפתיחה אורכת שניות, והמשתמש עשוי להיות בטאב
   // אחר מזמן — ואז זו הייתה כתיבה לתוך המסמך הלא נכון.
   if (activeSession.value === session) restorePaneScroll(session, session.ui.scroll);
+  return opened;
 }
 
 /**
@@ -5725,17 +5744,23 @@ let directionShortcut: { dispose: () => void } | null = null;
 let undoRedoWatcher: UndoRedoWatcher | null = null;
 
 /** לחיצה אחת על „שלח למסמך” — מה-latch או מהמאזין החי, אותו מסלול בדיוק. */
-function runSendToDocument(event: SendToDocumentEvent): void {
-  void handleSendToDocument(event, {
-    host: activeSuperdoc.value,
-    resolveHost: () => activeSuperdoc.value,
-  }).then((outcome) => {
-    if (outcome.ok) {
-      setStatus(outcome.value === 'at-cursor' ? 'הקטע נוסף במקום הסמן' : 'הקטע נוסף בסוף המסמך');
-    } else if (outcome.message) {
-      setStatus(outcome.message);
-    }
+async function runSendToDocument(event: SendToDocumentEvent, target?: DocumentSession): Promise<void> {
+  const resolveHost = () => target ? target.swap.current?.superdoc : activeSuperdoc.value;
+  const outcome = await handleSendToDocument(event, {
+    host: resolveHost(),
+    resolveHost,
   });
+  if (outcome.ok) {
+    setStatus(outcome.value === 'at-cursor' ? 'הקטע נוסף במקום הסמן' : 'הקטע נוסף בסוף המסמך');
+  } else if (outcome.message) {
+    setStatus(outcome.message);
+  }
+}
+
+function queueSendToDocument(event: SendToDocumentEvent): void {
+  if (event?.itemId !== undefined && event.itemId !== SEND_TO_DOCUMENT_ITEM_ID) return;
+  if (collectingStartupRequests && sendToDocumentText(event)) startupSendEvents.push(event);
+  else void runSendToDocument(event);
 }
 
 /**
@@ -5747,7 +5772,8 @@ function runSendToDocument(event: SendToDocumentEvent): void {
  * אחריו `takePendingContextMenuClicks`, שמעביר את ה-latch למצב חי. שניהם
  * באותה משימה סינכרונית, ואין חלון שבו אירוע נופל בין השניים.
  *
- * ההמתנה למסמך היא בצד השני, ב-`handleSendToDocument`: כאן עוד אין מסמך.
+ * בזמן האתחול התור ממתין לשחזור המסמך המקורי והסמן שלו. לאחר מכן
+ * `handleSendToDocument` מטפל בהמתנה הרגילה למסמך זמין.
  *
  * עטופה ב-try: `on` פונה ל-SDK דרך `bridge()`, שזורק כשאין `window.Otzaria`.
  * פריט בתפריט ההקשר אינו תנאי לעליית העורך, ולכן כשל כאן נרשם וזהו —
@@ -5763,18 +5789,16 @@ function registerSendToDocument(): void {
       if (!outcome.ok) console.warn('[otzaria-word]', outcome.message);
     });
 
-    contextMenuListener = on('contextMenu.itemClicked', (event) => runSendToDocument(event));
-    for (const pending of takePendingContextMenuClicks()) runSendToDocument(pending);
+    contextMenuListener = on('contextMenu.itemClicked', (event) => queueSendToDocument(event));
+    for (const pending of takePendingContextMenuClicks()) queueSendToDocument(pending);
   } catch (error) {
     console.warn('[otzaria-word] רישום „שלח למסמך” נכשל', error);
   }
 }
 
 /**
- * נפתרת כשהעלייה סיימה לפתוח את המסמך של ההפעלה הקודמת — בהצלחה או בכשל.
- *
- * קובץ שהגיע מתוסף אחר ממתין לה: `reopenPreviousSession` פותחת לתוך הטאב
- * הפעיל, ופתיחה שנייה שהייתה רצה במקביל הייתה נכתבת לאותו טאב.
+ * אחרי פתיחת המסמך הראשון ושחזור יעד „שלח למסמך”, אפשר לשחרר את יתר
+ * הבקשות לתור הרגיל. בקשת פתיחה מוקדמת יכולה להיות המסמך הראשון בעצמה.
  */
 let startupSettled: () => void = () => {};
 const startupDone = new Promise<void>((resolve) => {
@@ -5786,6 +5810,72 @@ const startupDone = new Promise<void>((resolve) => {
  * שהראשונה נפתחה אינה אמורה להתחרות בה על הטאב הפעיל.
  */
 let receivedFiles: Promise<void> = startupDone;
+let collectingStartupRequests = true;
+let startupOriginalTarget: DocumentSession | null = null;
+const startupOpenRequests: Array<() => Promise<boolean>> = [];
+const startupSendEvents: SendToDocumentEvent[] = [];
+const startupAttemptedSessions = new Set<DocumentSessionId>();
+
+function queueOpenRequest(request: () => Promise<boolean>): void {
+  if (collectingStartupRequests) startupOpenRequests.push(request);
+  else receivedFiles = receivedFiles.then(async () => { await request(); });
+}
+
+/** Records are already restored; instantiate only the first requested document. */
+async function openStartupDocument(restored: DocumentSession): Promise<void> {
+  let opened = false;
+  let failureMessage = '';
+  const restoredSessions = new Set(sessions.values());
+  // Send-to-document needs the old active document and its restored caret.
+  while (!startupSendEvents.length && startupOpenRequests.length && !opened) {
+    opened = await startupOpenRequests.shift()!();
+    if (!opened && isStatusError.value) failureMessage = statusText.value;
+  }
+  async function restoreOriginalTarget(): Promise<void> {
+    activateTab(restored);
+    if (restored.pendingRestore) {
+      if (startupAttemptedSessions.has(restored.id)) {
+        // A failed explicit request for this very tab must not retry it twice.
+        restored.pendingRestore = false;
+        await openDocument(undefined, { remember: false });
+      } else await openPendingTab(restored);
+    }
+  }
+  if (!opened) await restoreOriginalTarget();
+
+  // A failed new opening may leave an empty placeholder. Keep all restored
+  // records and anything with document data, and remove only unused new tabs.
+  let removed = false;
+  for (const session of sessions.values()) {
+    const entry = activeEntry(session.keeper.state);
+    if (restoredSessions.has(session) || session === activeSession.value ||
+      session.swap.current || entry?.document || entry?.draft) continue;
+    sessions.delete(session.id);
+    const index = recentTabs.indexOf(session.id);
+    if (index >= 0) recentTabs.splice(index, 1);
+    await session.destroy();
+    removed = true;
+  }
+  const active = activeSession.value;
+  if (removed && active) {
+    await persistCombinedSession(active, active.keeper.state).catch((error: unknown) => {
+      console.warn('[otzaria-word] שמירת רשומת הטאבים נכשלה', error);
+    });
+  }
+  if (!opened && failureMessage) setStatus(failureMessage, true);
+  // This is the last awaited work: sends arriving during opening or cleanup
+  // still target the original tab, after its caret has been restored.
+  if (startupSendEvents.length) await restoreOriginalTarget();
+  while (startupSendEvents.length) await runSendToDocument(startupSendEvents.shift()!, restored);
+}
+
+function finishStartupRequests(): void {
+  collectingStartupRequests = false;
+  startupOriginalTarget = null;
+  for (const request of startupOpenRequests.splice(0)) queueOpenRequest(request);
+  startupAttemptedSessions.clear();
+  startupSettled();
+}
 
 /** החלפת הטאב ממתינה גם להכרעה על עבודה לא שמורה ולכתיבה שרצה. */
 async function untilOpenIdle(): Promise<void> {
@@ -5804,16 +5894,17 @@ async function untilOpenIdle(): Promise<void> {
  * פותח „שמור בשם”. הסימון הוא גם מה שמחזיר אותו אחרי סגירת אוצריא: מסמך
  * בלי token ובלי טיוטה היה חוזר בהפעלה הבאה כמסמך ריק.
  */
-async function openReceivedFile(received: Exclude<ReceivedFile, { kind: 'ignore' }>): Promise<void> {
+async function openReceivedFile(received: Exclude<ReceivedFile, { kind: 'ignore' }>): Promise<boolean> {
   if (received.kind === 'rejected') {
     setStatus(received.message, true);
-    return;
+    return false;
   }
 
   await untilOpenIdle();
   try {
     ensureOpenTargetTab();
     const opened = await openDocument(undefined, { draft: received.blob, name: received.name });
+    if (opened && activeSession.value) activeSession.value.pendingRestore = false;
     if (opened && keeper) {
       receivedFileOpening = true;
       // כאן אין יעד כתיבה ואין autosave לקובץ המקורי. זו קבלה חדשה, לא
@@ -5825,7 +5916,7 @@ async function openReceivedFile(received: Exclude<ReceivedFile, { kind: 'ignore'
       });
       if (written !== 'written') {
         setStatus(`${received.name} נפתח, אך לא נוצר עותק לשחזור — יש לשמור לקובץ כדי למנוע אובדן`, true);
-        return;
+        return true;
       }
     }
     setStatus(
@@ -5834,6 +5925,7 @@ async function openReceivedFile(received: Exclude<ReceivedFile, { kind: 'ignore'
         : `${received.name} לא נפתח`,
       !opened,
     );
+    return opened;
   } finally {
     receivedFileOpening = false;
   }
@@ -5842,19 +5934,21 @@ async function openReceivedFile(received: Exclude<ReceivedFile, { kind: 'ignore'
 function queueReceivedFile(event: PageOpenedEvent): void {
   const received = readReceivedFile(event);
   if (received.kind === 'ignore') return;
-  receivedFiles = receivedFiles
-    .then(() => openReceivedFile(received))
-    .catch((error: unknown) => {
+  queueOpenRequest(async () => {
+    try { return await openReceivedFile(received); }
+    catch (error: unknown) {
       console.warn('[otzaria-word] פתיחת קובץ מתוסף אחר נכשלה', error);
       setStatus(`${received.kind === 'file' ? received.name : 'הקובץ'} לא נפתח`, true);
-    });
+      return false;
+    }
+  });
 }
 
 /**
  * קובץ Word שתוסף אחר שולח (`plugin.page_opened`) — ראו host/received-file.ts.
  *
  * אותו סדר בדיוק כמו `registerSendToDocument`: המאזין החי קודם, ורק אחריו
- * ריקון ה-latch, באותה משימה סינכרונית. הפתיחה עצמה ממתינה ל-`startupDone`.
+ * ריקון ה-latch, באותה משימה סינכרונית. בקשה מוקדמת מועמדת לפתיחה הראשונה.
  */
 function registerReceivedFiles(): void {
   if (!isAvailable()) return;
@@ -5872,13 +5966,17 @@ function registerReceivedFiles(): void {
  * מחזיר אותו token לאותו קובץ; מפתח הספר לבדו אינו מזהה טאבים ממסלולים אחרים.
  * טאב רדום/שטרם נטען מחזיק את היעד בזוכר, עד שקואורדינטור השמירה ייטען.
  */
-function findWritableFileTab(token: string): DocumentSessionId | null {
+const openedFileTokens = new WeakMap<DocumentSession, string>();
+
+function findFileTab(token: string): DocumentSessionId | null {
   for (const session of sessions.values()) {
     if (session.save.snapshot.targetToken === token) return session.id;
-    if (session.pendingRestore) {
-      const file = activeEntry(session.keeper.state)?.document;
-      if (file?.writable && file.token === token) return session.id;
-    }
+    const file = activeEntry(session.keeper.state)?.document;
+    if (session.pendingRestore && file?.token === token) return session.id;
+    // A read-only file has no write target. Its remembered record alone is
+    // insufficient: a failed restoration may have opened a blank fallback.
+    if (session.swap.current && session.save.snapshot.targetToken === null &&
+      openedFileTokens.get(session) === token) return session.id;
   }
   return null;
 }
@@ -5887,14 +5985,14 @@ function findWritableFileTab(token: string): DocumentSessionId | null {
  * פותחת את ספר ה-Word שהיה מוצג בקורא. ראו host/edit-book.ts.
  *
  * אותו מסלול כמו ענף „הספרייה” של „פתח מסמך” (`openLibraryBook`), ומחוץ
- * לדיאלוג: ממתינה לסוף שחזור ההפעלה ולשקט, כמו קובץ מתוסף אחר.
+ * לדיאלוג: מועמדת לפתיחה הראשונה, ואחריה עוברת בתור כמו קובץ מתוסף אחר.
  */
-async function openEditBook(event: EditBookEvent): Promise<void> {
+async function openEditBook(event: EditBookEvent): Promise<boolean> {
   const request = readEditBookClick(event);
-  if (request.kind === 'ignore') return;
+  if (request.kind === 'ignore') return false;
   if (request.kind === 'rejected') {
     setStatus(request.message, true);
-    return;
+    return false;
   }
 
   const { book } = request;
@@ -5910,15 +6008,19 @@ async function openEditBook(event: EditBookEvent): Promise<void> {
   }
   if (!result.ok) {
     setStatus(result.message, true);
-    return;
+    return false;
   }
 
   // רק אחרי שה-host פתר את זהות הקובץ: גם טאב שנפתח מ„אחרונים”, מבורר
   // הקבצים או בהפעלה קודמת יכול כבר להחזיק את העבודה העדכנית על אותו קובץ.
-  const existing = findWritableFileTab(result.value.token);
+  const existing = findFileTab(result.value.token);
   if (existing) {
-    onDocumentTabSelect(existing);
-    return;
+    const target = sessions.get(existing)!;
+    activateTab(target);
+    if (target.pendingRestore) {
+      return openPendingTab(target, { allowBlankFallback: !collectingStartupRequests });
+    }
+    return target.swap.current !== null;
   }
 
   ensureOpenTargetTab();
@@ -5928,17 +6030,21 @@ async function openEditBook(event: EditBookEvent): Promise<void> {
       ? `„${book.title}” נפתח לעריכה — „שמור” כותב לקובץ עצמו`
       : `„${book.title}” הוא ספר של הספרייה — „שמור” ישמור עותק במקום אחר`,
   });
+  if (opened && activeSession.value) activeSession.value.pendingRestore = false;
   if (!opened) setStatus(`„${book.title}” לא נפתח`, true);
+  return opened;
 }
 
 function queueEditBook(event: EditBookEvent): void {
   if (event?.itemId !== EDIT_BOOK_ITEM_ID) return;
-  receivedFiles = receivedFiles
-    .then(() => openEditBook(event))
-    .catch((error: unknown) => {
+  queueOpenRequest(async () => {
+    try { return await openEditBook(event); }
+    catch (error: unknown) {
       console.warn('[otzaria-word] „ערוך בוורד לאוצריא” נכשל', error);
       setStatus('הספר לא נפתח', true);
-    });
+      return false;
+    }
+  });
 }
 
 /**
@@ -6146,6 +6252,7 @@ onMounted(async () => {
     // כל טאב שלא שוחזר, ומהרגע שכל הטאבים חוזרים אין טאב כזה — הלולאה הזאת
     // הייתה מוחקת בדיוק את העבודה שלא נשמרה, של כל טאב שאינו הפעיל.
     const restored = restoreTabs(stored);
+    startupOriginalTarget = stored?.documents.some((entry) => entry.id === restored.id) ? restored : null;
     applyShellPreferences(stored);
 
     // ההאזנה למעבר לרקע נרשמת כאן, אחרי שיש למי לדווח. שלושת המקורות
@@ -6172,23 +6279,24 @@ onMounted(async () => {
       if (typeof requestAnimationFrame === 'function') requestAnimationFrame(repair);
     });
 
-    // טעינת מסמך אחרון או פתיחת מסמך ריק. תחנת „פותח את המסמך” מדווחת
+    // בקשת פתיחה מפורשת קודמת לטעינת המסמך האחרון; „שלח למסמך” שומרת
+    // את יעד ההפעלה הקודמת. תחנת „פותח את המסמך” מדווחת
     // מ-createEditor ולא מכאן: כאן היא הייתה מוקדמת בשנייה ויותר — הפתיחה
     // ממתינה קודם לחבילת המנוע, ומסך טעינה שאומר „פותח” בזמן שהוא מוריד
     // 9MB מתאר את השלב הלא נכון.
     try {
-      await reopenPreviousSession(restored.keeper.state);
+      await openStartupDocument(restored);
     } finally {
       // גם פתיחה שנכשלה מסירה את מסך הטעינה, ולא רק כדי „לא להיתקע”: הודעת
       // הכשל יושבת בשורת המצב שמתחת, ומסך טעינה שנשאר פרוש מסתיר בדיוק את
       // מה שצריך להיקרא.
       splashDone();
       if (customShortcutsNotice !== '') setStatus(customShortcutsNotice);
-      startupSettled();
+      finishStartupRequests();
     }
   } else {
     splashDone();
-    startupSettled();
+    finishStartupRequests();
   }
 });
 
@@ -6289,8 +6397,8 @@ async function loadPreviousSession(): Promise<SessionState | null> {
  *
  * עד כאן שוחזר טאב אחד בלבד — הפעיל — ושאר הטאבים שהמשתמש הותיר פתוחים פשוט
  * נעלמו, וטיוטותיהם נמחקו. עכשיו **כל** רשומה שבאוסף מקבלת טאב, בסדר שהיה,
- * עם השם שלה ועם הנקודה של „לא נשמר”; מה שנטען לתוך מנוע מיד הוא המסמך הפעיל
- * בלבד, וכל טאב אחר נטען ברגע שעוברים אליו (`openPendingTab`).
+ * עם השם שלה ועם הנקודה של „לא נשמר”. ברגיל נטען תחילה המסמך הפעיל;
+ * בקשת פתיחה מפורשת יכולה להקדים אותו. היתר נטענים בבחירה בהם (`openPendingTab`).
  *
  * ההחלטה הזאת אינה קיצור דרך אלא מה שנכון גם לכשעצמו. כל מסמך פתוח הוא מופע
  * SuperDoc מלא עם ה-workers שלו; פתיחת חמישה מסמכים בעלייה הייתה מכפילה פי
@@ -6323,8 +6431,7 @@ function restoreTabs(stored: SessionState | null): DocumentSession {
   // ה-`!` בטוח: `activeId` נבחר מתוך `entries`, וכל רשומה שבו יצרה טאב.
   const activeTab = active!;
   activateTab(activeTab);
-  // הטאב הפעיל נפתח מיד (`reopenPreviousSession` ב-onMounted) ולכן אינו ממתין.
-  activeTab.pendingRestore = false;
+  // גם הפעיל נשאר ממתין עד ההכרעה: בקשת פתיחה מפורשת עשויה לפתוח טאב אחר.
 
   // אין כאן ניקוי טיוטות יתומות, ובכוונה: כל רשומה שהגיעה לכאן קיבלה טאב.
   // רשומה שנשמטה בקריאה (מזהה כפול, ראו `readDocuments`) כבר אינה ב-`stored`
@@ -6371,7 +6478,8 @@ function applyShellPreferences(session: SessionState | null): void {
 async function reopenPreviousSession(
   session: SessionState | null,
   fromThisRun = false,
-): Promise<void> {
+  options: { allowBlankFallback?: boolean } = {},
+): Promise<boolean> {
   const entry = activeEntry(session);
   const remembered = entry?.document ?? null;
   const file = remembered ? await resolveRememberedFile(remembered) : null;
@@ -6385,14 +6493,18 @@ async function reopenPreviousSession(
       ? await readDraftBytes(entry.draft.path)
       : null;
 
-    await openDocument(undefined, { draft: orphan ?? undefined });
+    if (!orphan && options.allowBlankFallback === false) {
+      setStatus(`${remembered.name} לא נמצא`, true);
+      return false;
+    }
+    const opened = await openDocument(undefined, { draft: orphan ?? undefined });
     setStatus(
       orphan
         ? `${remembered.name} לא נמצא — השינויים שלא נשמרו נפתחו כמסמך חדש`
         : `${remembered.name} לא נמצא — נפתח מסמך חדש`,
       !orphan,
     );
-    return;
+    return opened && orphan !== null;
   }
 
   const draft = await recoverDraft(session, file);
@@ -6402,15 +6514,17 @@ async function reopenPreviousSession(
     draft: draft ?? undefined, restore, name: entry?.draft?.name,
   })) {
     if (draft) setStatus(restoredDraftMessage(session, fromThisRun));
-    return;
+    return true;
   }
 
   // הפתיחה נכשלה. מסמך חדש עדיף על מסך ריק — אבל הרשומה **אינה** מתעדכנת
   // אליו: הכשל עשוי להיות זמני (worker שלא עלה, קובץ נעול), ואילו רישום
   // המסמך הריק היה מוחק את המסמך האחרון מהרשומה ומנתק אותה מהטיוטה שמחזיקה
   // את העבודה. בהפעלה הבאה מנסים שוב, בדיוק מאותה נקודה.
+  if (options.allowBlankFallback === false) return false;
   await openDocument(undefined, { remember: false });
   setStatus('המסמך האחרון לא נפתח — נפתח מסמך חדש', true);
+  return false;
 }
 
 /**
