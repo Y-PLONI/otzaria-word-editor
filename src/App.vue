@@ -157,6 +157,7 @@
         :viewport-source="rulerViewport"
         :blocks="formattingMarksBlocks"
         :visible="formattingMarksVisible"
+        @scope-change="formattingMarksModel?.setBlockIds($event)"
       />
       <SpellingOverlay
         ref="spellingOverlayRef"
@@ -2298,7 +2299,6 @@ function createOpenEditorForSession(session: DocumentSession): OpenEditor {
         // this session, including commits made before its promise resolves.
         session.save.markDirty();
         session.metrics?.noteDocumentChanged();
-        session.formattingMarks?.noteDocumentChanged();
         if (session === activeSession.value) navDocRevision.value += 1;
         // המילון משותף לכל הטאבים, ולכן זה מונה אחד ולא שדה של ה-session.
         // המחיר: עריכה בטאב **ברקע** מריצה מדידה על המסמך שעל המסך. היא לא
@@ -3189,7 +3189,7 @@ async function openDocumentInto(
    * העיצוב כבויים (ברירת המחדל של הפקד).
    */
   const sessionFormattingMarks = createFormattingMarksModel({
-    read: () => readFormattingMarksBlocks(editor.superdoc),
+    read: (nodeIds, isCurrent) => readFormattingMarksBlocks(editor.superdoc, nodeIds, isCurrent),
     onChange: (next) => {
       if (session) session.ui.formattingMarksBlocks = next;
       if (!session || session === activeSession.value) formattingMarksBlocks.value = next;
@@ -3197,6 +3197,11 @@ async function openDocumentInto(
   });
   formattingMarksModel = sessionFormattingMarks;
   if (session) session.formattingMarks = sessionFormattingMarks;
+  // Style commands and Undo/Redo can invalidate reads without moving the
+  // viewport or changing its block IDs. Observe the document revision itself.
+  editor.onDispose(observeDocumentReadInvalidation(
+    editor.superdoc.activeEditor?.doc, sessionFormattingMarks.noteDocumentChanged,
+  ));
   editor.onDispose(() => {
     sessionFormattingMarks.dispose();
     if (session && session.formattingMarks === sessionFormattingMarks) session.formattingMarks = null;

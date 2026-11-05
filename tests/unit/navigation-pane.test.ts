@@ -12,29 +12,34 @@ import {
   navSectionIndex,
   readCaretBlockId,
   readNavOutline,
+  invalidateNavOutline,
   type NavigationTarget,
+  type NavigationHost,
 } from '../../src/engine/navigation-pane';
+import { invalidateDocumentReads } from '../../src/engine/document-read-state';
 
 interface FakeBlock {
   nodeId: string;
-  text?: string;
+  text?: string | null;
+  isEmpty?: boolean;
   styleId?: string | null;
   headingLevel?: number;
 }
 
-function fakeHost(blocks: FakeBlock[], options: { throwOnList?: boolean } = {}): NavigationTarget {
+function fakeHost(blocks: FakeBlock[], options: { throwOnList?: boolean } = {}) {
   return {
     activeEditor: {
       doc: {
         blocks: {
-          list: ({ offset, limit }: { offset: number; limit: number }) => {
+          list: ({ offset, limit, nodeIds, includeText }: { offset: number; limit: number; nodeIds?: string[]; includeText: boolean }) => {
             if (options.throwOnList) throw new Error('engine gone');
-            return { blocks: blocks.slice(offset, offset + limit) };
+            const selected = nodeIds ? blocks.filter((block) => nodeIds.includes(block.nodeId)) : blocks;
+            return { blocks: selected.slice(offset, offset + limit).map((block) => includeText ? block : { ...block, text: undefined }) };
           },
         },
       },
     },
-  } as NavigationTarget;
+  } satisfies NavigationHost;
 }
 
 describe('navHeadingLevel', () => {
@@ -104,12 +109,66 @@ describe('readNavOutline', () => {
     const list = vi.fn(async () => ({ blocks: Array.from({ length: 500 }, (_, i) => ({ nodeId: String(i) })) }));
     const host = { activeEditor: { doc: { blocks: { list } } } } as NavigationTarget;
     expect(await readNavOutline(host, () => false)).toBeNull();
-    expect(list).toHaveBeenCalledTimes(1);
+    expect(list).not.toHaveBeenCalled();
   });
 
   it('null כשאין API או שהקריאה נזרקה', async () => {
     expect(await readNavOutline(null)).toBeNull();
     expect(await readNavOutline(fakeHost([], { throwOnList: true }))).toBeNull();
+  });
+
+  it('requests full text only for heading IDs and retains the complete ordinal map', async () => {
+    const all = [{ nodeId: 'body', styleId: 'Normal', text: 'large body' }, { nodeId: 'h', styleId: 'Heading1', text: 'heading' }];
+    const host = fakeHost(all);
+    const doc = host.activeEditor!.doc!;
+    const list = vi.spyOn(doc.blocks!, 'list');
+    const outline = await readNavOutline(host);
+    expect(list.mock.calls.map(([input]) => input)).toEqual([
+      { includeText: false, offset: 0, limit: 500 },
+      { includeText: true, nodeIds: ['h'], offset: 0, limit: 1 },
+    ]);
+    expect(outline?.ordinals.get('body')).toBe(0);
+    expect(outline?.headings[0]?.ordinal).toBe(1);
+    expect(await readNavOutline(host)).toBe(outline);
+    expect(list).toHaveBeenCalledTimes(2);
+    all[1]!.text = 'edited heading';
+    invalidateDocumentReads(doc);
+    expect((await readNavOutline(host))?.headings[0]?.text).toBe('edited heading');
+    expect(list).toHaveBeenCalledTimes(4);
+    all[1]!.styleId = 'Normal';
+    invalidateNavOutline(host);
+    expect((await readNavOutline(host))?.headings).toEqual([]);
+    expect(list).toHaveBeenCalledTimes(5);
+  });
+
+  it('keeps bounded batches when every paragraph is a heading', async () => {
+    const host = fakeHost(Array.from({ length: 1203 }, (_, i) => ({ nodeId: String(i), text: `h${i}`, headingLevel: 1 })));
+    const list = vi.spyOn(host.activeEditor!.doc!.blocks!, 'list');
+    const outline = await readNavOutline(host);
+    expect(outline?.headings).toHaveLength(1203);
+    expect(list.mock.calls.filter(([input]) => input.includeText).map(([input]) => input.nodeIds?.length)).toEqual([500, 500, 203]);
+  });
+
+  it('does not publish a mixed engine revision or cache a failed text read', async () => {
+    const list = vi.fn()
+      .mockResolvedValueOnce({ blocks: [{ nodeId: 'h', headingLevel: 1 }], revision: 'one' })
+      .mockResolvedValueOnce({ blocks: [{ nodeId: 'h', text: 'old' }], revision: 'two' })
+      .mockResolvedValueOnce({ blocks: [{ nodeId: 'h', headingLevel: 1 }], revision: 'two' })
+      .mockResolvedValueOnce({ blocks: [{ nodeId: 'h', text: 'new' }], revision: 'two' });
+    const host = { activeEditor: { doc: { blocks: { list } } } };
+    expect(await readNavOutline(host)).toBeNull();
+    expect((await readNavOutline(host))?.headings[0]?.text).toBe('new');
+  });
+
+  it('cancels before fetching heading text after the metadata request becomes stale', async () => {
+    let current = true;
+    const list = vi.fn(() => { current = false; return { blocks: [{ nodeId: 'h', headingLevel: 1 }] }; });
+    expect(await readNavOutline({ activeEditor: { doc: { blocks: { list } } } }, () => current)).toBeNull();
+    expect(list).toHaveBeenCalledTimes(1);
+  });
+  it('accepts an explicitly empty heading with null text, but rejects an incomplete nonempty one', async () => {
+    expect((await readNavOutline(fakeHost([{ nodeId: 'h', headingLevel: 1, text: null, isEmpty: true }])))?.headings).toEqual([]);
+    expect(await readNavOutline(fakeHost([{ nodeId: 'h', headingLevel: 1 }]))).toBeNull();
   });
 });
 
