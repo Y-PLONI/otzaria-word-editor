@@ -749,7 +749,7 @@ export function watchAllPageContentRects(options: AllPageContentRectsWatchOption
 export interface PageTextRun {
   /** `nodeValue` הגולמי של הצומת. */
   text: string;
-  /** מלבן אחד לכל שורה חזותית שהצומת פרוס עליה (עטיפה), בסדר מסמך. */
+  /** מלבן אחד לכל שורה חזותית, בסדר מסמך; מציין פסקה ריקה יכול להיות ברוחב אפס. */
   rects: readonly RawTextRect[];
   /**
    * מאיזה צד "אחרי התו האחרון" של **הריצה הזאת עצמה** — ראו `directionFromText`
@@ -828,7 +828,8 @@ export function measurePageTextRuns(pageEl: HTMLElement, reference: HTMLElement)
     const list = range.getClientRects();
     for (let i = 0; i < list.length; i++) {
       const r = list[i]!;
-      if (!(r.width > 0) || !(r.height > 0)) continue;
+      if (!isGlyphOrEmptyRunRect(node as Text, r)) continue;
+      // ¶ uses the real empty-paragraph anchor; only pointer snapping needs a wider hit box.
       rects.push({
         leftPx: r.left - referenceBox.left,
         topPx: r.top - referenceBox.top,
