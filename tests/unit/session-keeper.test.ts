@@ -19,6 +19,7 @@ import {
   draftSlotPaths,
   emptySession,
   withActiveEntry,
+  type SessionDraft,
   type SessionState,
 } from '../../src/sessions/session-state';
 import type { CaretAnchor } from '../../src/engine/caret-anchor';
@@ -51,6 +52,10 @@ interface Harness {
   removals: number;
   /** הנתיבים שנמחקו, לפי הסדר. */
   removedPaths: string[];
+  /** הטיוטות שהועברו ל„נסגרו בלי לשמור”. */
+  rescued: SessionDraft[];
+  /** מה ש-`rescueDraft` הבא יחזיר. */
+  rescueResult: boolean;
   /** האם פעולה כבדה רצה — `SaveCoordinator.hold`. */
   held: boolean;
   /** האם הייצוא הבא ייכשל. */
@@ -75,6 +80,8 @@ function harness(): Harness {
     draftPaths: [] as string[],
     removals: 0,
     removedPaths: [] as string[],
+    rescued: [] as SessionDraft[],
+    rescueResult: true,
     held: false,
     exportFails: false,
     exports: 0,
@@ -106,6 +113,10 @@ function harness(): Harness {
       state.removals += 1;
       state.removedPaths.push(path);
     },
+    rescueDraft: async (draft) => {
+      state.rescued.push(draft);
+      return state.rescueResult;
+    },
     draftPaths: DRAFT_PATHS,
     readCaret: async () => state.caret,
     isDirty: () => state.dirty,
@@ -136,6 +147,15 @@ function harness(): Harness {
     },
     get removedPaths() {
       return state.removedPaths;
+    },
+    get rescued() {
+      return state.rescued;
+    },
+    get rescueResult() {
+      return state.rescueResult;
+    },
+    set rescueResult(value: boolean) {
+      state.rescueResult = value;
     },
     get held() {
       return state.held;
@@ -1178,5 +1198,161 @@ describe('checkpoint', () => {
 
     await expect(h.keeper.checkpoint()).resolves.toBeUndefined();
     warn.mockRestore();
+  });
+});
+
+describe('טיוטה שהמנוע לא נטען ממנה', () => {
+  // הרשומה שהגיעה מהשטח אחרי שדרוג ל-7.0: מסמך חדש שמעולם לא נשמר, והעבודה
+  // כולה בטיוטה. השחזור לא הביא אותה, הטאב נפתח ריק — והקלדה ראשונה בו
+  // הייתה כותבת מסמך ריק בדיוק על המשבצת שלה.
+  const unsaved: SessionDraft = { path: DRAFT_PATH, savedAt: 1, documentToken: null, sourceSize: null };
+
+  function restoredBlank(): Harness {
+    const h = harness();
+    h.keeper.adopt(withActiveEntry(emptySession(), { document: null, draft: unsaved }));
+    h.keeper.setDocument(null);
+    return h;
+  }
+
+  it('מועברת לגיבוי לפני הכתיבה הראשונה', async () => {
+    const h = restoredBlank();
+    h.dirty = true;
+    h.keeper.noteChange();
+    await h.tick(DRAFT_DELAY_MS);
+
+    expect(h.rescued).toEqual([unsaved]);
+    expect(h.drafts).toHaveLength(1);
+    // והכתיבות הבאות כבר אינן שואלות: הטיוטה עכשיו של מה שבמנוע.
+    h.keeper.noteChange();
+    await h.tick(DRAFT_DELAY_MS);
+    expect(h.rescued).toHaveLength(1);
+  });
+
+  it('כשההעברה נכשלה, אף כתיבה אינה נוחתת עליה — גם לא השנייה, וגם אחרי שמירה', async () => {
+    const h = harness();
+    // והרשומה מחזיקה גם „קודמת” במשבצת השנייה: היא זו שמוותרים עליה.
+    h.keeper.adopt(withActiveEntry(emptySession(), {
+      document: null,
+      draft: unsaved,
+      previousDraft: { path: DRAFT_PATHS[1], savedAt: 0, documentToken: null, sourceSize: null },
+    }));
+    h.keeper.setDocument(null);
+    h.rescueResult = false;
+    h.dirty = true;
+    for (let i = 0; i < 3; i++) {
+      h.keeper.noteChange();
+      await h.tick(DRAFT_DELAY_MS);
+    }
+    const point = h.keeper.captureSave();
+    h.dirty = false;
+    await h.keeper.noteSaved(point);
+    h.dirty = true;
+    h.keeper.noteChange();
+    await h.tick(DRAFT_DELAY_MS);
+
+    expect(h.draftPaths.length).toBeGreaterThan(1);
+    expect(h.draftPaths).not.toContain(DRAFT_PATH);
+    // וכל הזדמנות מנסה להעביר אותה שוב.
+    expect(h.rescued.length).toBeGreaterThan(1);
+  });
+
+  it('הצלחה מאוחרת משחררת את המשבצת', async () => {
+    const h = restoredBlank();
+    h.rescueResult = false;
+    h.dirty = true;
+    h.keeper.noteChange();
+    await h.tick(DRAFT_DELAY_MS);
+    h.rescueResult = true;
+    h.keeper.noteChange();
+    await h.tick(DRAFT_DELAY_MS);
+    h.keeper.noteChange();
+    await h.tick(DRAFT_DELAY_MS);
+
+    expect(h.rescued).toHaveLength(2);
+    expect(h.draftPaths).toEqual([DRAFT_PATHS[1], DRAFT_PATHS[1], DRAFT_PATHS[1]]);
+  });
+
+  it('מסמך ריק שנפתח בלי setDocument (פתיחה שנכשלה) — הטיוטה שנכתבה קודם אינה שלו', async () => {
+    // טאב שנרדם: הטיוטה נכתבה ממנו עצמו, ואז ההתעוררות נכשלה ונפתח ריק
+    // ב-`remember: false` — בלי `adopt` ובלי `setDocument`.
+    const h = harness();
+    h.keeper.setDocument(null);
+    h.dirty = true;
+    h.keeper.noteChange();
+    await h.keeper.flush();
+    expect(h.draftPaths).toEqual([DRAFT_PATH]);
+
+    h.keeper.noteDraftNotLoaded();
+    h.keeper.noteChange();
+    await h.tick(DRAFT_DELAY_MS);
+
+    expect(h.rescued.map((draft) => draft.path)).toEqual([DRAFT_PATH]);
+  });
+
+  it('„לא לשמור” בזמן שכתיבת טיוטה באוויר — הכתיבה אינה דורסת את מה שעוד לא הועבר', async () => {
+    const h = restoredBlank();
+    h.dirty = true;
+    let release!: () => void;
+    const exported = new Promise<void>((resolve) => { release = resolve; });
+    const original = h.deps.exportDocument;
+    h.deps.exportDocument = async () => { await exported; return original(); };
+    h.keeper.noteChange();
+    await vi.advanceTimersByTimeAsync(DRAFT_DELAY_MS);
+
+    const discarding = h.keeper.discardDraft();
+    release();
+    await discarding;
+    await h.tick(0);
+
+    expect(h.draftPaths).toEqual([]);
+    expect(h.rescued).toEqual([unsaved]);
+  });
+
+  it('טיוטה שנפתחה ממנה אינה מועברת, ונכתבת באותה משבצת', async () => {
+    const h = harness();
+    h.keeper.adopt(withActiveEntry(emptySession(), { document: null, draft: unsaved }));
+    h.keeper.setDocument(null, { keepDraft: true });
+    h.dirty = true;
+    h.keeper.noteChange();
+    await h.tick(DRAFT_DELAY_MS);
+
+    expect(h.rescued).toEqual([]);
+    expect(h.draftPaths).toEqual([DRAFT_PATH]);
+  });
+
+  it('„לא לשמור” על מנוע מלוכלך מעביר אותה לפני המחיקה', async () => {
+    const h = restoredBlank();
+    h.dirty = true;
+    await h.keeper.discardDraft();
+
+    expect(h.rescued).toEqual([unsaved]);
+  });
+
+  it('„לא לשמור” שההעברה בו נכשלה אינו מוחק אותה', async () => {
+    const h = restoredBlank();
+    h.rescueResult = false;
+    h.dirty = true;
+    await h.keeper.discardDraft();
+
+    expect(h.removedPaths).not.toContain(DRAFT_PATH);
+  });
+
+  it('„לא לשמור” על מנוע נקי אינו מעביר — הסוגר כבר גיבה מהטיוטה עצמה', async () => {
+    const h = restoredBlank();
+    await h.keeper.discardDraft();
+
+    expect(h.rescued).toEqual([]);
+  });
+
+  it('שמירה של מה שבמנוע מעבירה אותה במקום להפוך אותה ל„קודמת”', async () => {
+    const h = restoredBlank();
+    h.dirty = true;
+    h.keeper.noteChange();
+    const point = h.keeper.captureSave();
+    h.dirty = false;
+    await h.keeper.noteSaved(point, { document: { token: 'n', name: 'חדש.docx', writable: true } });
+
+    expect(h.rescued).toEqual([unsaved]);
+    expect(activeEntry(h.keeper.state)?.previousDraft).toBeNull();
   });
 });

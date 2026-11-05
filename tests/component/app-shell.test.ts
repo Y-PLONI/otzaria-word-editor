@@ -144,6 +144,8 @@ const stub = vi.hoisted(() => ({
   forgotLastDocument: false,
   /** כמה פתיחות הבאות ייכשלו. */
   openFailures: 0,
+  /** `markDirty` מסמן „מלוכלך” באמת — בשביל הבדיקות שצריכות כתיבת טיוטה מהזוכר. */
+  dirtyOnMark: false,
   /**
    * מה שהשלב המקדים מדווח על המסמך שנפתח. `notice` הוא ההודעה על תיקון שנכתב
    * לתוך המסמך; `vba` הוא המאקרו שנקרא ממנו. שניהם מתחרים על שורת המצב עם
@@ -307,6 +309,7 @@ vi.mock('../../src/sessions/save-coordinator', async (importOriginal) => ({
       get snapshot() { return snapshot; },
       markDirty: () => {
         stub.markDirtyCalls += 1;
+        if (stub.dirtyOnMark) snapshot.isDirty = true;
       },
       markRestored: () => {
         stub.markRestoredCalls += 1;
@@ -577,6 +580,7 @@ beforeEach(() => {
   stub.lastDocument = null;
   stub.forgotLastDocument = false;
   stub.openFailures = 0;
+  stub.dirtyOnMark = false;
   stub.preflight = { notice: null, vba: null };
   stub.preflightGate = null;
   stub.preflightSignals.length = 0;
@@ -1571,6 +1575,40 @@ describe('חזרה למה שהיה', () => {
       stub.persistedSessions as Array<{ documents?: Array<{ document?: unknown }> } | null>
     ).filter((record) => (record?.documents?.[0]?.document ?? null) == null);
     expect(forgotten, 'רשומה ששכחה את המסמך האחרון').toEqual([]);
+  });
+
+  it('טיוטה שהשחזור לא הביא אינה נדרסת בעריכה הראשונה — היא עוברת ל„נסגרו בלי לשמור”', async () => {
+    // המקרה מהשטח: מסמך חדש שמעולם לא נשמר, העבודה כולה בטיוטה שבמשבצת
+    // הראשונה של הטאב. הפתיחה נכשלת, נפתח ריק (`remember: false`), והכתיבה
+    // הראשונה הייתה נוחתת בדיוק על המשבצת הזאת.
+    const DRAFT_A = 'session-draft-doc-1-a.docx';
+    stub.storedSession = storedSession({
+      document: null,
+      draft: { path: DRAFT_A, savedAt: 1, documentToken: null, sourceSize: null },
+    });
+    stub.draftsByPath[DRAFT_A] = new Uint8Array([80, 75, 3, 4, 7]);
+    stub.openFailures = 1;
+    stub.dirtyOnMark = true;
+
+    const wrapper = await mountShell();
+    const blank = new Uint8Array([80, 75, 3, 4]);
+    (stub.superdoc!.host as unknown as { export: () => Promise<Blob> }).export = () =>
+      Promise.resolve(Object.assign(new Blob([blank]), { arrayBuffer: () => Promise.resolve(blank.buffer) }));
+
+    wrapper.getComponent(TitleBar).vm.$emit('update-title', 'משהו חדש');
+    window.dispatchEvent(new Event('pagehide'));
+    await settle(16);
+
+    const backup = stub.workspaceWrites.find((write) => write.path.startsWith('discarded-'));
+    expect([...(backup?.bytes ?? [])], 'העבודה עברה לגיבוי').toEqual([80, 75, 3, 4, 7]);
+    const overwritten = stub.workspaceWrites.filter((write) => write.path === DRAFT_A);
+    expect(
+      overwritten.every((write) => write.path !== DRAFT_A || backup !== undefined),
+      'המשבצת נכתבה רק אחרי שהעבודה כבר בגיבוי',
+    ).toBe(true);
+    expect(stub.workspaceWrites.indexOf(backup!)).toBeLessThan(
+      overwritten.length ? stub.workspaceWrites.indexOf(overwritten[0]!) : Infinity,
+    );
   });
 
   it('שמירה אוטומטית מעבירה את הטיוטה לקודמת — לא רק שמירה ידנית', async () => {

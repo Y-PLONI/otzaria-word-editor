@@ -188,3 +188,49 @@ describe('saveCanvasColor', () => {
     expect(call).not.toHaveBeenCalledWith('storage.set', expect.anything());
   });
 });
+
+/**
+ * כשל בקריאת הרשומה אינו „אין רשומה”. ב-7.0 הקריאה יצאה לפני האתחול של
+ * אוצריא, נכשלה, והעלייה כתבה רשומה ריקה מעל 14 טאבים וטיוטותיהם.
+ */
+describe('רשומה שלא נקראה אינה נדרסת', () => {
+  async function freshSettings(): Promise<typeof import('../../src/host/settings')> {
+    vi.resetModules();
+    return import('../../src/host/settings');
+  }
+
+  it('אחרי כשל קריאה, כתיבה רגילה אינה מגיעה לאוצריא', async () => {
+    const settings = await freshSettings();
+    const call = vi.fn(async (method: string) =>
+      method === 'storage.get'
+        ? { success: false, data: null, error: { message: 'busy' } }
+        : { success: true, data: true, error: null });
+    window.Otzaria = { call } as never;
+
+    await expect(settings.loadSessionRecord()).resolves.toBeNull();
+    await settings.saveSessionRecord({ version: 2, documents: [] });
+
+    expect(call).not.toHaveBeenCalledWith('storage.set', expect.anything());
+  });
+
+  it('וכתיבה שחייבת להצליח מדווחת שלא נכתבה', async () => {
+    const settings = await freshSettings();
+    window.Otzaria = {
+      call: async () => ({ success: false, data: null, error: { message: 'busy' } }),
+    } as never;
+
+    await settings.loadSessionRecord();
+    await expect(settings.saveSessionRecord({ version: 2 }, true)).rejects.toThrow();
+  });
+
+  it('קריאה שהצליחה — גם בלי ערך — אינה חוסמת דבר', async () => {
+    const settings = await freshSettings();
+    const call = vi.fn(async () => ({ success: true, data: null, error: null }));
+    window.Otzaria = { call } as never;
+
+    await expect(settings.loadSessionRecord()).resolves.toBeNull();
+    await settings.saveSessionRecord({ version: 2 });
+
+    expect(call).toHaveBeenCalledWith('storage.set', { key: 'session', value: { version: 2 } });
+  });
+});

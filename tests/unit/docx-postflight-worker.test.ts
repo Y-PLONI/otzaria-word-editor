@@ -83,7 +83,7 @@ function savingWithDrafts(host: SuperDoc) {
   keeper = createSessionKeeper({
     id: 'typing-during-postflight', persist: async () => {},
     exportDocument: () => exportDocx(host, { postflight: false }),
-    writeDraft, removeDraft: async () => {}, draftPaths: ['draft-a.docx', 'draft-b.docx'],
+    writeDraft, removeDraft: async () => {}, rescueDraft: async () => true, draftPaths: ['draft-a.docx', 'draft-b.docx'],
     readCaret: async () => null,
     isDirty: () => h.coordinator.snapshot.isDirty,
     isSaving: () => h.coordinator.snapshot.isSaving,

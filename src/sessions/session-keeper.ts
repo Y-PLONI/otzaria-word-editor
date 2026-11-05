@@ -69,6 +69,7 @@ import {
   withActiveEntry,
   type DocumentSessionId,
   type SessionDocument,
+  type SessionDraft,
   type SessionState,
   type SessionView,
 } from './session-state';
@@ -105,6 +106,11 @@ export interface SessionKeeperDeps {
   writeDraft: (content: Blob, path: string) => Promise<WorkspaceWrite>;
   /** מוחקת קובץ טיוטה. */
   removeDraft: (path: string) => Promise<void>;
+  /**
+   * מעבירה טיוטה שהמנוע **לא נטען ממנה** לרשימת „נסגרו בלי לשמור”, ומחזירה
+   * האם הצליחה. נקראת לפני שהזוכר דורס או מוחק אותה — ראו `draftLoaded`.
+   */
+  rescueDraft: (draft: SessionDraft) => Promise<boolean>;
   /**
    * שתי המשבצות שהטיוטה נכתבת אליהן (`draftSlotPaths`). הבחירה ביניהן
    * היא של המודול הזה ולא של הקורא — ראו `nextDraftPath`.
@@ -240,6 +246,12 @@ export interface SessionKeeper {
   checkpoint(): Promise<void>;
   /** המשתמש ביקש במפורש למחוק שינויים שלא נשמרו. ראו את המימוש. */
   discardDraft(): Promise<void>;
+  /**
+   * במנוע נפתח תוכן שאינו הטיוטה שברשומה, בלי `setDocument` — המסמך הריק
+   * שנפתח כשפתיחה נכשלה (`remember: false`). בלי ההודעה הזוכר של טאב שנרדם
+   * היה ממשיך להאמין שהטיוטה היא של מה שעל המסך, ודורס אותה. ראו `draftLoaded`.
+   */
+  noteDraftNotLoaded(): void;
   /** כותב עכשיו את כל מה שיש. אידמפוטנטי — ראו host/lifecycle.ts. */
   flush(): Promise<void>;
   dispose(): void;
@@ -284,6 +296,19 @@ export function createSessionKeeper(deps: SessionKeeperDeps): SessionKeeper {
    */
   let revision = 0;
   let draftedRevision = 0;
+
+  /**
+   * האם מה שבמנוע נטען מהטיוטה שברשומה, או נכתב אליה מאז.
+   *
+   * בלי הדגל הזה הזוכר מניח שהטיוטה שברשומה היא תמיד של מה שעל המסך, ודורס
+   * אותה בכתיבה הבאה (`nextDraftPath` חוזר לאותה משבצת). זה נכון כמעט תמיד —
+   * חוץ מטאב שהשחזור שלו לא הביא את הטיוטה: הוא נפתח ריק (`remember: false`,
+   * או פתיחה בלי `keepDraft`), הרשומה עדיין מצביעה על העבודה, והקלדה ראשונה
+   * הייתה כותבת מסמך ריק בדיוק עליה. נצפה בשטח אחרי שדרוג ל-7.0.
+   *
+   * `false` עד שמוכח אחרת: `adopt` ופתיחה בלי `keepDraft` אינם טוענים טיוטה.
+   */
+  let draftLoaded = false;
   const savePoints = new WeakMap<KeeperSavePoint, { epoch: number; revision: number }>();
 
   function clearTimer(timer: ReturnType<typeof setTimeout> | undefined): undefined {
@@ -294,6 +319,34 @@ export function createSessionKeeper(deps: SessionKeeperDeps): SessionKeeper {
   function run(task: () => Promise<void>): Promise<void> {
     chain = chain.then(task, task);
     return chain;
+  }
+
+  /**
+   * טיוטה שלא נטענה למנוע והעברתה ל„נסגרו בלי לשמור” נכשלה. מוחזקת כאן עד
+   * שתועבר: אף כתיבה אינה נוחתת על המשבצת שלה ואף מחיקה אינה נוגעת בה, וכל
+   * כתיבה, שמירה ו„לא לשמור” מנסים להעביר אותה שוב. ברשומה היא כבר אינה —
+   * המצביע שם שייך למה שבמנוע — ולכן אחרי סגירה היא קובץ בתיקייה בלי מצביע,
+   * אבל שלם: אין ניקוי יתומים.
+   */
+  let pinned: SessionDraft | null = null;
+
+  /**
+   * מוציאה מהרשומה טיוטה שהמנוע לא נטען ממנה, ומנסה להעביר אותה (ואת זו
+   * שכבר מוחזקת) ל„נסגרו בלי לשמור”. רצה בתוך התור, לפני כל נגיעה במשבצות.
+   */
+  async function releaseUnloadedDraft(): Promise<void> {
+    const draft = activeEntry(state)?.draft ?? null;
+    if (!draftLoaded && draft) {
+      pinned = draft;
+      state = withActiveEntry(state, { draft: null });
+    }
+    draftLoaded = true;
+    if (!pinned) return;
+    const rescued = await deps.rescueDraft(pinned).catch((error: unknown) => {
+      console.warn('[otzaria-word] העברת הטיוטה שלא נטענה לגיבוי נכשלה', error);
+      return false;
+    });
+    if (rescued) pinned = null;
   }
 
   /** מוסיפה את הסבב לתור ובולעת כשל: זו רשת ביטחון, לא פעולה של המשתמש. */
@@ -401,14 +454,20 @@ export function createSessionKeeper(deps: SessionKeeperDeps): SessionKeeper {
     }
     if (disposed || mine !== epoch) return;
 
+    // טיוטה שהמנוע לא נטען ממנה אינה „הטיוטה הקודמת של המסמך הזה” אלא
+    // עבודה אחרת, והכתיבה הזאת הייתה נוחתת עליה. ראו `draftLoaded`.
+    await releaseUnloadedDraft();
+    if (disposed || mine !== epoch) return;
+
     // הנתיב נבחר **אחרי** הייצוא ולא לפניו: `noteSaved` עשוי היה להזיז
     // מצביעים בזמן שהייצוא רץ, והבחירה חייבת לראות את המצב העדכני.
     const entry = activeEntry(state);
-    const path = nextDraftPath(
-      deps.draftPaths,
-      entry?.[target] ?? null,
-      entry?.[target === 'draft' ? 'previousDraft' : 'draft'] ?? null,
-    );
+    const other = target === 'draft' ? 'previousDraft' : 'draft';
+    const rewrite = entry?.[target] ?? null;
+    // טיוטה מוחזקת גוברת על „הקודמת”: המשבצת היחידה שאסור לגעת בה היא שלה.
+    const path = pinned
+      ? nextDraftPath(deps.draftPaths, rewrite?.path === pinned.path ? null : rewrite, pinned)
+      : nextDraftPath(deps.draftPaths, rewrite, entry?.[other] ?? null);
     const written = await deps.writeDraft(exported, path);
     if (disposed || mine !== epoch) return;
 
@@ -434,7 +493,10 @@ export function createSessionKeeper(deps: SessionKeeperDeps): SessionKeeper {
 
     // מתקדם רק על הטיוטה: צ׳קפוינט של מסמך נקי אינו „העבודה עד כאן נכתבה”,
     // והזזתו הייתה גורמת לסבב הבא לדלג על עבודה אמיתית.
-    if (target === 'draft') draftedRevision = writing;
+    if (target === 'draft') {
+      draftedRevision = writing;
+      draftLoaded = true;
+    }
     state = withActiveEntry(state, {
       [target]: {
         path,
@@ -444,6 +506,10 @@ export function createSessionKeeper(deps: SessionKeeperDeps): SessionKeeper {
         sourceSize,
       },
     });
+    // ליד טיוטה מוחזקת יש משבצת אחת בלבד, והמצביע השני כבר אינו מתאר אותה.
+    if (pinned && activeEntry(state)?.[other]?.path === path) {
+      state = withActiveEntry(state, { [other]: null });
+    }
     await persistNow();
   }
 
@@ -479,6 +545,7 @@ export function createSessionKeeper(deps: SessionKeeperDeps): SessionKeeper {
 
     adopt(loaded) {
       state = loaded ?? emptySessionWithId(deps.id);
+      draftLoaded = false;
     },
 
     setDocument(document, options = {}) {
@@ -492,6 +559,7 @@ export function createSessionKeeper(deps: SessionKeeperDeps): SessionKeeper {
       draftedRevision = 0;
       sourceSize = size;
       reportedTooLarge = false;
+      draftLoaded = keepDraft;
 
       /**
        * הסמן נמחק רק כשהמסמך באמת התחלף.
@@ -568,6 +636,7 @@ export function createSessionKeeper(deps: SessionKeeperDeps): SessionKeeper {
         // הבייטים והרשומה צריכים להיכתב לפני שמותר להרדים את המנוע.
         // עריכה שהתרחשה בזמן הכתיבה עדיין זקוקה לייצוא משלה.
         draftedRevision = writing;
+        draftLoaded = true;
       }).catch((error: unknown) => {
         console.warn('[otzaria-word] שמירת הטיוטה שנפתחה נכשלה', error);
         result = 'failed';
@@ -593,11 +662,35 @@ export function createSessionKeeper(deps: SessionKeeperDeps): SessionKeeper {
       // שנכתב ורגע לפני שנרשם נקטע נשאר אחרת יתום לנצח, ואין ניקוי יתומים
       // בעלייה. נתיב מגרסה קודמת נכלל דרך הרשומה.
       const paths = recorded.length > 0 ? new Set([...recorded, ...deps.draftPaths]) : new Set<string>();
+      // „לא לשמור” נאמר על מה שבמנוע. טיוטה שלא נטענה אליו אינה חלק מזה —
+      // אבל רק כשהמנוע מלוכלך: מנוע נקי מגובה מהטיוטה עצמה לפני הקריאה הזאת
+      // (`discardedBytes`, App.vue), והצלה כאן הייתה מכפילה את אותו עותק.
+      const unloaded = !draftLoaded && deps.isDirty() ? (entry?.draft ?? null) : null;
       state = withActiveEntry(state, { draft: null, previousDraft: null });
+      // כתיבת טיוטה שכבר באוויר שייכת למסמך שנזרק. בלי הביטול היא הייתה
+      // ממשיכה אחרי האיפוס שלמעלה, בוחרת משבצת פנויה לכאורה, ודורסת את
+      // הטיוטה שעוד לא הועברה — לפני שההעברה שבתור הספיקה לקרוא אותה.
+      epoch += 1;
+      draftTimer = clearTimer(draftTimer);
+      draftDeadline = null;
       await run(async () => {
+        if (unloaded) pinned = unloaded;
+        draftLoaded = true;
+        if (pinned) {
+          const rescued = await deps.rescueDraft(pinned).catch((error: unknown) => {
+            console.warn('[otzaria-word] העברת הטיוטה שלא נטענה לגיבוי נכשלה', error);
+            return false;
+          });
+          if (rescued) pinned = null;
+          else paths.delete(pinned.path);
+        }
         for (const path of paths) await deps.removeDraft(path);
         await deps.persist(state);
       });
+    },
+
+    noteDraftNotLoaded() {
+      draftLoaded = false;
     },
 
     updateView(patch) {
@@ -635,6 +728,10 @@ export function createSessionKeeper(deps: SessionKeeperDeps): SessionKeeper {
       // גם הזזת המצביעים וגם שינוי היעד רצים בתור: טיוטה מאוחרת עשויה
       // להמתין לסיום השמירה ולהיכתב לפני שהרישום הזה מגיע לתורו.
       await run(async () => {
+        if (disposed || saved.epoch !== epoch) return;
+        // השמירה הייתה של מה שבמנוע. טיוטה שלא נטענה אליו הייתה עוברת כאן
+        // ל„קודמת” — מקום שהשמירה הבאה דורסת וסגירה מוחקת.
+        await releaseUnloadedDraft();
         if (disposed || saved.epoch !== epoch) return;
         sourceSize = options.sourceSize ?? sourceSize;
         const entry = activeEntry(state);
