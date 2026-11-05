@@ -414,8 +414,7 @@ import AboutDialog from './ui/panels/AboutDialog.vue';
 import BugReportDialog from './ui/panels/BugReportDialog.vue';
 import LinkDialog from './ui/panels/LinkDialog.vue';
 import ShortcutsDialog from './ui/panels/ShortcutsDialog.vue';
-import ShortcutManagerDialog from './ui/panels/ShortcutManagerDialog.vue';
-import OpenDocumentDialog from './ui/panels/OpenDocumentDialog.vue';
+import { lazyPanel } from './ui/panels/lazy-panel';
 import UnsavedChangesDialog from './ui/panels/UnsavedChangesDialog.vue';
 import VoiceServiceDialog from './ui/panels/VoiceServiceDialog.vue';
 import DiscardedDocumentsDialog from './ui/panels/DiscardedDocumentsDialog.vue';
@@ -561,7 +560,6 @@ import {
 import { createEditor, type EditorSession } from './engine/create-editor';
 import { ACTIVE_MACROS, installMacros, type MacrosHandle } from './engine/macros';
 import { registerShulchanTools } from './engine/shulchan/tools-registration';
-import MacrosDialog from './ui/panels/MacrosDialog.vue';
 import { installBookCompletion } from './engine/book-completion-overlay';
 import { installAtMention } from './engine/at-mention-overlay';
 import { installPasteIntercept } from './engine/paste-intercept';
@@ -783,6 +781,10 @@ import { createFocusRing } from './ui/shortcuts/focus-ring';
 import { focusDocument } from './engine/focus';
 import { createCaretKeeper } from './ui/shell/caret-keeper';
 import { watchCaretFocus, type CaretFocusHandle } from './ui/shell/caret-focus';
+
+const MacrosDialog = lazyPanel(() => import('./ui/panels/MacrosDialog.vue'));
+const OpenDocumentDialog = lazyPanel(() => import('./ui/panels/OpenDocumentDialog.vue'));
+const ShortcutManagerDialog = lazyPanel(() => import('./ui/panels/ShortcutManagerDialog.vue'));
 
 const editorStackRef = ref<HTMLElement | null>(null);
 const shellRef = ref<HTMLElement | null>(null);
@@ -5488,6 +5490,11 @@ function closeTopmostLayer(): boolean {
   // `aria-modal` — כלומר כל עוד הוא פתוח, שום שכבה מתחתיו אינה זמינה.
   if (isOpenDialogOpen.value) {
     isOpenDialogOpen.value = false;
+    return true;
+  }
+  // The manager may still be loading; its own dialog key handler is not yet mounted.
+  if (isShortcutsManagerOpen.value) {
+    isShortcutsManagerOpen.value = false;
     return true;
   }
   if (isShortcutsHelpOpen.value) {

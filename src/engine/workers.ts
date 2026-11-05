@@ -5,8 +5,8 @@
  * וכאן הוא הופך ל-blob: שנמסר ל-`config.workerUrls`. שלוש עובדות נמדדו
  * ב-Chromium וקובעות את הצורה הזאת (docs/spike.md §שער A):
  *
- * 1. ה-build הוא IIFE, ולכן ה-URL היחסי שהמנוע בונה לבד ל-worker אינו נפתר.
- *    בלי ההטמעה המנוע נכשל גם מ-origin תקין. כלומר workerUrls הוא חובה.
+ * 1. קוד ה-workers נארז כמקורות קלאסיים. workerUrls מוסר למנוע כתובות blob
+ *    שלהם, גם כשהקוד הראשי מפוצל ל-AMD; כתובת של chunk אינה מתירה module worker.
  * 2. מ-file:// (origin opaque) module worker אינו נטען — לא מ-blob ולא, בגודל
  *    הזה, מ-data. worker **קלאסי** מ-blob דווקא נטען.
  * 3. הקוד ש-Vite מפיק ל-workers הוא IIFE (`worker.format`), כלומר תואם-קלאסי:

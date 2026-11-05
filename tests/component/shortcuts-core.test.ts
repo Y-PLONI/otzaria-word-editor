@@ -30,6 +30,7 @@ const stub = vi.hoisted(() => ({
   openEditor: null as ((container: HTMLElement) => EditorSession) | null,
   adapters: new WeakMap<object, CommandDouble>(),
   pickCalls: 0,
+  panelLoadGate: null as (() => Promise<void>) | null,
   /** מצב השמירה שהקואורדינטור מדווח. בדיקה יכולה להפוך אותו למלוכלך. */
   isDirty: false,
   /** מה שנשאל בדיאלוג האישור של אוצריא, לפי הסדר. */
@@ -42,6 +43,17 @@ const stub = vi.hoisted(() => ({
   storedCustomShortcuts: null as unknown,
   persistedCustomShortcuts: [] as unknown[],
 }));
+
+// Keep the real wrapper and real panels; tests can hold only the chunk boundary.
+vi.mock('../../src/ui/panels/lazy-panel', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/ui/panels/lazy-panel')>();
+  return {
+    ...actual,
+    lazyPanel: (loader: Parameters<typeof actual.lazyPanel>[0]) => actual.lazyPanel(
+      () => stub.panelLoadGate ? stub.panelLoadGate().then(loader) : loader(),
+    ),
+  };
+});
 
 /**
  * Keep the real swap lifecycle: current is null until the first open completes,
@@ -202,6 +214,14 @@ async function mountShell() {
   return wrapper;
 }
 
+/** A requested dialog crosses import() before Vue can mount and focus it.
+ * Wait for that boundary without importing a closed panel in the fixture. */
+async function settleOpenDialog(): Promise<void> {
+  await settle();
+  await vi.dynamicImportSettled();
+  await settle(2);
+}
+
 /**
  * משטח ההקלדה של המנוע: `<textarea aria-label="Text composition input">`
  * בתוך `.editor-stack`. במודול-רמה (לא בתוך describe אחד) כי גם „הפוקוס
@@ -237,6 +257,7 @@ beforeEach(() => {
   stub.saveNowCalls.length = 0;
   stub.confirms.length = 0;
   stub.pickCalls = 0;
+  stub.panelLoadGate = null;
   stub.resets = 0;
   stub.isDirty = false;
   stub.confirmAnswer = false;
@@ -587,7 +608,7 @@ describe('פעולות המעטפת', () => {
     await mountShell();
 
     press({ code: 'KeyO', ctrlKey: true });
-    await settle();
+    await settleOpenDialog();
 
     expect(document.querySelector('.open-dialog'), 'הדיאלוג נפתח').not.toBeNull();
     expect(stub.pickCalls, 'ועדיין לא נפתח בורר קבצים').toBe(0);
@@ -609,7 +630,7 @@ describe('פעולות המעטפת', () => {
     stub.resets = 0;
 
     const event = press({ code: 'KeyN', ctrlKey: true });
-    await settle();
+    await settleOpenDialog();
 
     expect(event.defaultPrevented).toBe(true);
     expect(document.querySelector('.open-dialog'), 'הדיאלוג נפתח').not.toBeNull();
@@ -634,7 +655,7 @@ describe('פעולות המעטפת', () => {
     stub.resets = 0;
 
     press({ code: 'KeyN', ctrlKey: true });
-    await settle();
+    await settleOpenDialog();
 
     // „מסמך ריק” הוא הכרטיס שמגיע ל-`onNewDocument`, ושם יושבת ההכרעה.
     document.querySelector<HTMLButtonElement>('.tpl-card')?.click();
@@ -655,7 +676,7 @@ describe('פעולות המעטפת', () => {
     stub.isDirty = true;
 
     press({ code: 'KeyO', ctrlKey: true });
-    await settle();
+    await settleOpenDialog();
     document.querySelector<HTMLButtonElement>('.open-browse')?.click();
     await settle();
 
@@ -1327,5 +1348,138 @@ describe('קיצורים אישיים', () => {
       { id: 'font-family', payload: 'David' },
       { id: 'font-size', payload: 14 },
     ]);
+  });
+});
+
+
+describe('lazy modal interaction', () => {
+  it('keeps the first requested modal exclusive while its chunk is pending', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    stub.panelLoadGate = () => gate;
+    const wrapper = await mountShell();
+    const origin = composingSurface(wrapper);
+    origin.focus();
+
+    press({ code: 'KeyO', ctrlKey: true });
+    await settle();
+    const fallback = wrapper.get('.panel-load-state');
+    const cancel = fallback.get<HTMLButtonElement>('button');
+    expect(document.querySelectorAll('[aria-modal="true"]')).toHaveLength(1);
+    expect(wrapper.find('.open-dialog').exists()).toBe(false);
+    expect(document.activeElement).toBe(cancel.element);
+    for (const shiftKey of [false, true]) {
+      const tab = typeInDocument(cancel.element, { code: 'Tab', key: 'Tab', shiftKey });
+      expect(tab.defaultPrevented).toBe(true);
+      expect(document.activeElement).toBe(cancel.element);
+    }
+
+    press({ code: 'Slash', ctrlKey: true });
+    await settle();
+    release();
+    await settleOpenDialog();
+
+    expect(wrapper.find('.open-dialog').exists()).toBe(true);
+    expect(document.querySelectorAll('[aria-modal="true"]')).toHaveLength(1);
+    expect(wrapper.find('.shortcuts-dialog').exists()).toBe(false);
+    expect(document.activeElement).toBe(wrapper.get('.open-browse').element);
+    press({ code: 'Escape', key: 'Escape' });
+    await settle();
+    expect(document.activeElement).toBe(origin);
+  });
+
+  it.each([
+    ['macros', '.macros-dialog'],
+    ['shortcuts manager', '.shortmgr-dialog'],
+  ])('reserves the pending %s modal before its view exists', async (name, selector) => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    stub.panelLoadGate = () => gate;
+    const wrapper = await mountShell();
+    if (name === 'macros') press({ code: 'F8', altKey: true });
+    else wrapper.findComponent({ name: 'Ribbon' }).vm.$emit('shortcuts-manage');
+    await settle();
+    expect(wrapper.find('.panel-load-state').exists()).toBe(true);
+    expect(document.querySelector(selector)).toBeNull();
+
+    press({ code: 'Slash', ctrlKey: true });
+    await settle();
+    release();
+    await settleOpenDialog();
+
+    expect(document.querySelector(selector)).not.toBeNull();
+    expect(document.querySelectorAll('[aria-modal="true"]')).toHaveLength(1);
+    expect(document.querySelector('.shortcuts-dialog')).toBeNull();
+  });
+
+  it('keeps error and retry modal, then hands focus to the real dialog', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const load = vi.fn().mockRejectedValueOnce(new Error('missing chunk')).mockReturnValue(gate);
+    stub.panelLoadGate = load;
+    const wrapper = await mountShell();
+    const origin = composingSurface(wrapper);
+    origin.focus();
+    press({ code: 'KeyO', ctrlKey: true });
+    await settle();
+    expect(wrapper.get('.panel-load-state [role="alert"]').text()).toContain('לא ניתן לפתוח');
+    const [retry, cancel] = wrapper.findAll<HTMLButtonElement>('.panel-load-state button');
+    expect(document.activeElement).toBe(cancel!.element);
+    expect(typeInDocument(cancel!.element, { code: 'Tab', key: 'Tab' }).defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(retry!.element);
+    expect(typeInDocument(retry!.element, { code: 'Tab', key: 'Tab', shiftKey: true }).defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(cancel!.element);
+    press({ code: 'Slash', ctrlKey: true });
+    await settle();
+    expect(document.querySelectorAll('[aria-modal="true"]')).toHaveLength(1);
+    expect(document.querySelector('.shortcuts-dialog')).toBeNull();
+
+    retry!.element.focus();
+    await retry!.trigger('click');
+    await settle();
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(wrapper.find('.panel-load-state [role="status"]').exists()).toBe(true);
+    expect(document.activeElement).toBe(cancel!.element);
+    press({ code: 'Slash', ctrlKey: true });
+    await settle();
+    release();
+    await settleOpenDialog();
+
+    expect(document.querySelectorAll('[aria-modal="true"]')).toHaveLength(1);
+    expect(document.querySelector('.shortcuts-dialog')).toBeNull();
+    expect(document.activeElement).toBe(wrapper.get('.open-browse').element);
+    press({ code: 'Escape', key: 'Escape' });
+    await settle();
+    expect(document.activeElement).toBe(origin);
+  });
+
+  it.each(['backdrop', 'Escape'])('cancels through %s while pending and caches a late completion closed', async (route) => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const load = vi.fn(() => gate);
+    stub.panelLoadGate = load;
+    const wrapper = await mountShell();
+    const origin = composingSurface(wrapper);
+    origin.focus();
+    press({ code: 'KeyO', ctrlKey: true });
+    await settle();
+    // A click in the modal stays inside; the full backdrop receives outside clicks.
+    await wrapper.get('.panel-load-state').trigger('click');
+    expect(wrapper.find('.panel-load-state').exists()).toBe(true);
+    if (route === 'backdrop') await wrapper.get('.panel-load-backdrop').trigger('click');
+    else typeInDocument(wrapper.get<HTMLButtonElement>('.panel-load-state button').element, { code: 'Escape', key: 'Escape' });
+    await settle();
+    expect(document.querySelector('[aria-modal="true"]')).toBeNull();
+    expect(document.activeElement).toBe(origin);
+
+    release();
+    await settleOpenDialog();
+    expect(document.querySelector('[aria-modal="true"]')).toBeNull();
+    expect(document.activeElement).toBe(origin);
+    press({ code: 'KeyO', ctrlKey: true });
+    await settleOpenDialog();
+    expect(wrapper.find('.open-dialog').exists()).toBe(true);
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(wrapper.get('.open-browse').element);
   });
 });

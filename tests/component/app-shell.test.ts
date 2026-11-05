@@ -30,16 +30,17 @@
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { mount } from '@vue/test-utils';
-import { shallowRef } from 'vue';
+import { nextTick, shallowRef } from 'vue';
 import {
   autoUnmount,
   buttonByTip,
   createCommandDouble,
   createSuperdocDouble,
-  settle,
+  settle as settleShell,
   type CommandDouble,
   type SuperdocDouble,
 } from './harness';
+
 import type { SaveCoordinatorDeps, SaveSnapshot } from '../../src/sessions/save-coordinator';
 import { COMPLEX_SCRIPT_BOLD_NOTICE } from '../../src/engine/docx-preflight';
 import { NO_VBA, type DocumentVba } from '../../src/engine/vba-import';
@@ -51,6 +52,15 @@ import TitleBar from '../../src/ui/shell/TitleBar.vue';
 import Ribbon from '../../src/ui/ribbon/Ribbon.vue';
 import DocumentRuler from '../../src/ui/shell/DocumentRuler.vue';
 import VerticalRuler from '../../src/ui/shell/VerticalRuler.vue';
+
+/** A requested panel now crosses an actual import() boundary. Wait for that
+ * boundary as well as Vue's queue; a fixed number of microtasks cannot load it.
+ * Closed panels are never imported just to make the shell tests synchronous. */
+async function settle(turns?: number): Promise<void> {
+  await settleShell(turns);
+  await vi.dynamicImportSettled();
+  await settleShell(2);
+}
 
 /**
  * המצב המשותף לכפילים. `vi.hoisted` נדרש: מפעלי ה-`vi.mock` מורמים אל מעל
@@ -633,6 +643,17 @@ describe('הרכבת המעטפת', () => {
     await mountShell();
 
     expect(stub.superdoc?.ops(), 'הפתיחה ביקשה מהמנוע להחזיר את הסמן').toContain('focus');
+  });
+
+  it('Escape סוגר את מנהל הקיצורים גם לפני שהחלון נטען', async () => {
+    const wrapper = await mountShell();
+    wrapper.findComponent({ name: 'Ribbon' }).vm.$emit('shortcuts-manage');
+    await nextTick();
+    expect(wrapper.find('.panel-load-state').exists()).toBe(true);
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', key: 'Escape', bubbles: true }));
+    await settle();
+    expect(wrapper.find('.panel-load-state').exists()).toBe(false);
+    expect(wrapper.find('.shortmgr-dialog').exists()).toBe(false);
   });
 
   it('פתיחה אינה חוטפת את הפוקוס משדה שמקלידים בו', async () => {
