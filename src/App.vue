@@ -599,6 +599,7 @@ import {
   type PageBorderModel,
   type PageBordersReading,
 } from './engine/page-setup';
+import { createSectionSnapshot } from './engine/section-snapshot';
 import {
   createFormattingMarksModel,
   readFormattingMarksBlocks,
@@ -2271,9 +2272,6 @@ function createOpenEditorForSession(session: DocumentSession): OpenEditor {
         // this session, including commits made before its promise resolves.
         session.save.markDirty();
         session.metrics?.noteDocumentChanged();
-        session.textCursor?.noteDocumentChanged();
-        session.pageBorders?.noteDocumentChanged();
-        session.lineNumbers?.noteDocumentChanged();
         session.formattingMarks?.noteDocumentChanged();
         if (session === activeSession.value) navDocRevision.value += 1;
         // המילון משותף לכל הטאבים, ולכן זה מונה אחד ולא שדה של ה-session.
@@ -2284,7 +2282,14 @@ function createOpenEditorForSession(session: DocumentSession): OpenEditor {
         noteSpellcheckChanged();
         session.keeper.noteChange();
       },
-      onPaginationUpdate: (totalPages) => session.metrics?.notePaginationUpdate(totalPages),
+      onPaginationUpdate: (totalPages) => {
+        session.metrics?.notePaginationUpdate(totalPages);
+        // גובה כותרת יכול לשנות את השוליים האפקטיביים בלי לשנות w:pgMar.
+        // מרעננים את המדידה בלבד; רשימת המקטעים הגולמית נשארת משותפת.
+        session.ruler?.noteDocumentChanged();
+        session.textCursor?.noteDocumentChanged();
+        session.lineNumbers?.noteDocumentChanged();
+      },
     });
   };
 }
@@ -2817,6 +2822,8 @@ async function openDocumentInto(
   commandAdapter.value = adapter;
   const documentApi = editor.superdoc.activeEditor?.doc;
   editor.onDispose(() => forgetDocumentReads(documentApi));
+  const sessionSections = createSectionSnapshot(editor.superdoc);
+  editor.onDispose(() => sessionSections.dispose());
 
   // ה-`editor.superdoc` המקומי ולא `activeSuperdoc.value` בפירוק: אותה מלכודת
   // כמו באדפטר החיפוש — סגירת המסמך הקודם קורית אחרי שהחדש כבר נרשם.
@@ -2945,7 +2952,7 @@ async function openDocumentInto(
    * המקומי בפירוק (מסמך שנסגר אחרי שהבא נפתח אינו מפרק את הבא).
    */
   const sessionRuler = createRulerModel({
-    readPage: () => readPageMargins(editor.superdoc),
+    readPage: () => readPageMargins(editor.superdoc, sessionSections.read),
     readIndents: () => readParagraphIndents(editor.superdoc),
     onChange: (next) => {
       // מושהה (`RULER_*_DEBOUNCE_MS`) ולכן עשוי לנחות אחרי מעבר טאב — ראו
@@ -2985,7 +2992,7 @@ async function openDocumentInto(
   const sessionTextCursor = createTextCursorWatch({
     host: paintedHost(editor.ui),
     ui: editor.ui as ViewportSource,
-    readMargins: () => readPageMargins(editor.superdoc),
+    readMargins: () => readPageMargins(editor.superdoc, sessionSections.read),
   });
   if (session) session.textCursor = sessionTextCursor;
   sessionTextCursor.refreshNow();
@@ -3064,7 +3071,7 @@ async function openDocumentInto(
    * לא רק אחרי העריכה הראשונה.
    */
   const sessionPageBorders = createPageBorderModel({
-    read: () => readPageBorders(editor.superdoc),
+    read: () => readPageBorders(editor.superdoc, sessionSections.read),
     onChange: (next) => {
       // מושהה, כמו הסרגל — ומכאן אותה הגנה בדיוק. שכבת הציור היא מופע יחיד
       // מעל הפאנל הפעיל, ולכן קריאה של מסמך אחר נראית מיד על המסך.
@@ -3093,7 +3100,7 @@ async function openDocumentInto(
    * `<w:lnNumType>` כבר בתוכו (מ-Word) מיד, לא רק אחרי העריכה הראשונה.
    */
   const sessionLineNumbering = createLineNumberingModel({
-    read: () => readLineNumbering(editor.superdoc),
+    read: () => readLineNumbering(editor.superdoc, sessionSections.read),
     onChange: (next) => {
       if (session) session.ui.lineNumbering = next;
       if (!session || session === activeSession.value) lineNumbering.value = next;
@@ -3110,6 +3117,11 @@ async function openDocumentInto(
       lineNumbering.value = null;
     }
   });
+  editor.onDispose(observeDocumentReadInvalidation(documentApi, () => {
+    sessionTextCursor.noteDocumentChanged();
+    sessionPageBorders.noteDocumentChanged();
+    sessionLineNumbering.noteDocumentChanged();
+  }));
 
   /**
    * „סימני עיצוב” (¶) של ה-session: אותו רעיון כמו שני אלה שמעל, אבל המקור
