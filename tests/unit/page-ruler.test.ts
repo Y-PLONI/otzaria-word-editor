@@ -745,7 +745,8 @@ describe('measurePageGlyphs', () => {
       const node = this.startContainer;
       const element = node.nodeType === Node.TEXT_NODE ? node.parentElement : (node as Element);
       const rect = element ? element.getBoundingClientRect() : null;
-      const list = rect && rect.width > 0 && rect.height > 0 ? [rect] : [];
+      // Chrome returns a positive-height, zero-width range for the collapsed NBSP.
+      const list = rect && rect.width >= 0 && rect.height > 0 ? [rect] : [];
       return Object.assign(list, { item: (i: number) => list[i] ?? null }) as unknown as DOMRectList;
     };
     restoreRects = () => {
@@ -802,6 +803,41 @@ describe('measurePageGlyphs', () => {
     const measured = measurePageGlyphs(host, runs[2]!.firstChild, 680, 360);
     expect(measured!.rects).toHaveLength(1);
     expect(measured!.rects[0]).toMatchObject({ leftPx: 573 });
+  });
+
+  it.each([196, 447, 698])('keeps a collapsed empty table paragraph at its own caret position (%s)', (left) => {
+    const { host, page: pageEl, lines, runs } = page();
+    const cell = document.createElement('div');
+    cell.append(lines[0]!.parentElement!, lines[1]!.parentElement!);
+    pageEl.appendChild(cell);
+    runs[1]!.classList.add('superdoc-empty-run');
+    withRect(runs[1]!, left, 0, 332, 17);
+    // Double spacing must not replace the measured glyph/caret height with the line height.
+    withRect(lines[1]!, 196, 600, 332, 36.8);
+
+    const expected = [{ leftPx: left - 100 - 0.5, topPx: 132, widthPx: 1, heightPx: 17 }];
+    expect(measurePageGlyphs(host, lines[1]!, 400, 350)!.rects).toEqual(expected);
+    expect(measurePageGlyphs(host, runs[1]!.firstChild, left, 340)!.rects).toEqual(expected);
+    // Page-wide snapping/dragging must keep the empty line alongside ordinary text.
+    expect(measurePageGlyphs(host, pageEl, 400, 350)!.rects).toEqual([
+      { leftPx: 573, topPx: 151, widthPx: 25, heightPx: 17 },
+      { leftPx: 440, topPx: 114, widthPx: 158, heightPx: 17 },
+      ...expected,
+    ]);
+  });
+
+  it.each([
+    { text: '\u00a0', className: '', height: 17 },
+    { text: '\u200b', className: 'superdoc-empty-run', height: 17 },
+    { text: '\u00a0', className: 'superdoc-empty-run', height: 0 },
+  ])('does not invent targets for other zero-width/hidden text ($text, $className, $height)', ({ text, className, height }) => {
+    const { host, page: pageEl, lines, runs } = page();
+    runs[1]!.textContent = text;
+    runs[1]!.className = className;
+    withRect(runs[1]!, 698, 0, 332, height);
+
+    expect(measurePageGlyphs(host, lines[1]!, 400, 340)).toBeNull();
+    expect(measurePageGlyphs(host, pageEl, 400, 340)!.rects.map((rect) => rect.topPx)).toEqual([114, 151]);
   });
 
   it('מטרה על העמוד — כל השורות', () => {

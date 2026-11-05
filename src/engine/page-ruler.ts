@@ -1260,7 +1260,7 @@ export function measureAllPageTextSegments(
 /* גליפים של עמוד — להצמדת לחיצה (engine/pointer-snap.ts)             */
 /* ------------------------------------------------------------------ */
 
-/** מלבני הגליפים ביחס לפינת העמוד ברגע המדידה, והעמוד עצמו — עכשיו. */
+/** מלבני הגליפים ויעדי הסמן בשורות ריקות ביחס לפינת העמוד ברגע המדידה, והעמוד עצמו — עכשיו. */
 export interface PageGlyphMeasure {
   readonly rects: readonly RawTextRect[];
   /** מלבן העמוד ברגע הקריאה, בקואורדינטות חלון — גלילה מזיזה אותו. */
@@ -1315,21 +1315,36 @@ function glyphRects(node: Text, range: Range): DOMRectList | null {
   return typeof range.getClientRects === 'function' ? range.getClientRects() : null;
 }
 
+/** The engine's empty-paragraph NBSP keeps its caret height even when shell.css collapses its width. */
+function isGlyphOrEmptyRunRect(node: Text, rect: DOMRect): boolean {
+  if (!(rect.height > 0)) return false;
+  if (rect.width > 0) return true;
+  return rect.width === 0 && node.data === '\u00a0' && node.parentElement?.classList.contains('superdoc-empty-run') === true;
+}
+
 function pushGlyphRects(node: Text, out: RawTextRect[], origin: DOMRect, range: Range): boolean {
   const list = glyphRects(node, range);
   if (!list) return false;
   let found = false;
   for (let i = 0; i < list.length; i++) {
     const rect = list[i]!;
-    if (!(rect.width > 0) || !(rect.height > 0)) continue;
+    if (!isGlyphOrEmptyRunRect(node, rect)) continue;
     found = true;
-    out.push({ leftPx: rect.left - origin.left, topPx: rect.top - origin.top, widthPx: rect.width, heightPx: rect.height });
+    // A positive hit box centered on the caret lets pointer-snap keep the empty line.
+    // This changes measurement only: widening the actual span would move the caret or inflate line height.
+    const widthPx = rect.width === 0 ? 1 : rect.width;
+    out.push({
+      leftPx: rect.left - origin.left - (widthPx - rect.width) / 2,
+      topPx: rect.top - origin.top,
+      widthPx,
+      heightPx: rect.height,
+    });
   }
   return found;
 }
 
 /**
- * האם יש תחת האלמנט טקסט מצויר — כלומר זה היקף שאפשר להצמיד אליו. יוצאת
+ * האם יש תחת האלמנט טקסט מצויר או מציין שורה ריקה — היקף שאפשר להצמיד אליו. יוצאת
  * במלבן הראשון ואינה אוספת כלום: התשובה היא כן/לא.
  */
 function hasGlyphs(element: Element, range: Range): boolean {
@@ -1340,7 +1355,7 @@ function hasGlyphs(element: Element, range: Range): boolean {
     if (!list) continue;
     for (let i = 0; i < list.length; i++) {
       const rect = list[i]!;
-      if (rect.width > 0 && rect.height > 0) return true;
+      if (isGlyphOrEmptyRunRect(node as Text, rect)) return true;
     }
   }
   return false;
