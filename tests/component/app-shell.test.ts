@@ -28,7 +28,7 @@
  * `openDocument`, מטפל המקלדת, ו-`host/files`/`otzaria-client` (הם ניגשים
  * ל-`window.Otzaria` שאינו קיים ומחזירים כשל בשקט — בדיוק כמו בדפדפן).
  */
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { mount } from '@vue/test-utils';
 import {
   autoUnmount,
@@ -2635,6 +2635,344 @@ describe('הגרסה שלפני השמירה האחרונה', () => {
 
     expect(stub.openSources, 'לא נפתח דבר').toHaveLength(0);
     expect(wrapper.find('.word-statusbar').text()).toContain('לא נמצאה');
+  });
+});
+
+describe('explicit startup opening before engine restoration', () => {
+  const scope = window as unknown as Record<string, unknown>;
+  const view = { zoom: null, focusMode: false, ribbonTab: null, ribbonCollapsed: false };
+  const draft = { path: 'session-draft-doc-1.docx', savedAt: 1, documentToken: 'tok-1', sourceSize: 100 };
+
+  function previous(options: { draft?: boolean; writable?: boolean; caret?: boolean } = {}) {
+    const stored = {
+      version: 2,
+      documents: [{
+        id: 'doc-1', document: { ...FIRST_DOC, writable: options.writable !== false },
+        caret: options.caret ? { start: { blockId: 'b9', ordinal: 8, offset: 4 }, end: null } : null,
+        draft: options.draft ? draft : null,
+      }],
+      activeId: 'doc-1', view,
+    };
+    stub.storedSession = stored;
+    stub.resolvedFile = (token: string) => TAB_FILES[token] ?? null;
+    if (options.draft) stub.draftsByPath[draft.path] = new Uint8Array([80, 75, 3, 4]);
+    return stored;
+  }
+
+  function book(token = 'tok-2') {
+    return {
+      itemId: 'otzaria-word-edit-book', context: 'reader-text', bookUid: token,
+      currentBook: token === 'tok-1' ? 'ראשון' : 'שני', currentType: 'docx', currentSource: 'user',
+    };
+  }
+
+  function host(reply?: (token: string) => Promise<unknown>) {
+    const listeners = new Map<string, (event: unknown) => void>();
+    window.Otzaria = {
+      call: async (method: string, payload: { bookUid?: string }) => {
+        if (method === 'library.openBookFile') {
+          const token = payload.bookUid!;
+          return reply ? reply(token) : { success: true, data: { ...TAB_FILES[token] as object, access: 'readwrite' } };
+        }
+        return { success: true, data: {} };
+      },
+      on: (name: string, listener: (event: unknown) => void) => listeners.set(name, listener),
+      off: (name: string) => listeners.delete(name),
+    } as never;
+    return (name: string, event: unknown) => listeners.get(name)!(event);
+  }
+
+  function pendingBooks(...events: unknown[]) {
+    scope.__otzariaToolbarClicks = { queue: events, live: false };
+  }
+
+  afterEach(() => {
+    delete scope.__otzariaToolbarClicks;
+    delete scope.__otzariaContextMenuClicks;
+    delete scope.__otzariaPageOpened;
+    delete (window as Partial<Window>).Otzaria;
+  });
+
+  it('opens B first while A and its draft stay unloaded until A is selected', async () => {
+    previous({ draft: true }); host(); pendingBooks(book());
+    const wrapper = await mountShell();
+    await settle(12);
+    expect(stub.openSources).toEqual(['loopback://second']);
+    expect(wrapper.findAll('.word-doctab')).toHaveLength(2);
+    expect(wrapper.find('.word-doctab.active .word-doctab-title').text()).toBe('שני');
+    const record = stub.persistedSessions[stub.persistedSessions.length - 1] as {
+      documents: Array<{ id: string; draft: unknown }>;
+    };
+    expect(record.documents.find(item => item.id === 'doc-1')?.draft).toEqual(draft);
+    expect(stub.removedDrafts).toEqual([]);
+    await wrapper.findAll('.word-doctab')[0]!.trigger('click');
+    await settle(16);
+    expect(stub.openSources).toHaveLength(2);
+    expect(stub.openSources[1]).toBeInstanceOf(Blob);
+    expect(stub.markRestoredCalls).toBe(1);
+  });
+
+  it('keeps an unloaded read-only A instead of replacing its metadata with B', async () => {
+    previous({ writable: false }); host(); pendingBooks(book());
+    const wrapper = await mountShell(); await settle(12);
+    expect(stub.openSources).toEqual(['loopback://second']);
+    expect(wrapper.findAll('.word-doctab')).toHaveLength(2);
+    await wrapper.findAll('.word-doctab')[0]!.trigger('click'); await settle(16);
+    expect(stub.openSources).toEqual(['loopback://second', 'loopback://first']);
+  });
+
+  it.each([true, false])('deduplicates two requests for A and restores its draft (writable=%s)', async (writable) => {
+    previous({ draft: true, writable }); host(); pendingBooks(book('tok-1'), book('tok-1'));
+    const wrapper = await mountShell(); await settle(20);
+    expect(stub.openSources).toHaveLength(1);
+    expect(stub.openSources[0]).toBeInstanceOf(Blob);
+    expect(wrapper.findAll('.word-doctab')).toHaveLength(1);
+    expect(stub.markRestoredCalls).toBe(1);
+    expect(stub.removedDrafts).toEqual([]);
+  });
+
+  it('accepts an explicit request arriving while startup preferences are pending', async () => {
+    const stored = previous();
+    let release!: (value: unknown) => void;
+    stub.storedSession = new Promise(resolve => { release = resolve; });
+    const emit = host();
+    const wrapper = await mountShell();
+    try {
+      expect(stub.openSources).toEqual([]);
+      emit('reader.toolbar_item_clicked', book());
+      release(stored); await settle(20);
+      expect(stub.openSources).toEqual(['loopback://second']);
+    } finally { release(stored); await settle(4); wrapper.unmount(); }
+  });
+
+  it.each(['rejected', 'host-failed', 'engine-failed'])('restores A once after a %s request', async (failure) => {
+    previous();
+    host(failure === 'host-failed' ? async () => ({ success: false, error: { message: 'RPC failed' } }) : undefined);
+    pendingBooks(failure === 'rejected' ? { ...book(), currentType: 'txt' } : book());
+    if (failure === 'engine-failed') stub.openFailures = 1;
+    const wrapper = await mountShell(); await settle(20);
+    expect(stub.openSources.filter(source => source === 'loopback://first')).toHaveLength(1);
+    expect(stub.openSources).toHaveLength(failure === 'engine-failed' ? 2 : 1);
+    expect(wrapper.findAll('.word-doctab')).toHaveLength(1);
+    expect(wrapper.find('.word-statusbar').text()).toMatch(/אינו קובץ Word|RPC failed|לא נפתח/);
+  });
+
+  it('does not retry a failed explicit opening of the old active A', async () => {
+    previous({ draft: true }); host(); pendingBooks(book('tok-1'));
+    stub.openFailures = 1;
+    const wrapper = await mountShell(); await settle(20);
+    expect(stub.openSources).toHaveLength(2);
+    expect(stub.openSources[0]).toBeInstanceOf(Blob);
+    expect(stub.openSources[1]).toBeUndefined();
+    expect(wrapper.findAll('.word-doctab')).toHaveLength(1);
+    expect(stub.removedDrafts).toEqual([]);
+  });
+
+  it('a received file opens first and preserves both its recovery draft and old A', async () => {
+    previous({ draft: true }); host();
+    scope.__otzariaPageOpened = {
+      queue: [{ param: { name: 'מתוסף.docx', dataUrl: 'data:application/octet-stream;base64,UEsDBA==' } }], live: false,
+    };
+    const descriptor = Object.getOwnPropertyDescriptor(Blob.prototype, 'arrayBuffer');
+    Object.defineProperty(Blob.prototype, 'arrayBuffer', {
+      configurable: true,
+      value(this: Blob) {
+        return new Promise<ArrayBuffer>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as ArrayBuffer);
+          reader.onerror = () => reject(reader.error);
+          reader.readAsArrayBuffer(this);
+        });
+      },
+    });
+    let wrapper: Awaited<ReturnType<typeof mountShell>> | undefined;
+    try {
+      wrapper = await mountShell(); await settle(24);
+      expect(stub.openSources).toHaveLength(1);
+      expect(stub.openSources[0]).toBeInstanceOf(Blob);
+      expect(wrapper.findAll('.word-doctab')).toHaveLength(2);
+      expect(wrapper.find('.word-doctab.active .word-doctab-title').text()).toBe('מתוסף');
+      await vi.waitFor(() => expect(stub.workspaceWrites.some(write => write.path.startsWith('session-draft-'))).toBe(true));
+      const record = stub.persistedSessions[stub.persistedSessions.length - 1] as {
+        documents: Array<{ id: string; document: unknown; draft: unknown }>;
+      };
+      expect(record.documents.find(item => item.id === 'doc-1')?.draft).toEqual(draft);
+      expect(record.documents.find(item => item.id !== 'doc-1')).toMatchObject({ document: null, draft: expect.any(Object) });
+      expect(stub.removedDrafts).toEqual([]);
+    } finally {
+      wrapper?.unmount();
+      if (descriptor) Object.defineProperty(Blob.prototype, 'arrayBuffer', descriptor);
+      else delete (Blob.prototype as { arrayBuffer?: unknown }).arrayBuffer;
+    }
+  });
+
+  it('an earlier blank fallback is not mistaken for an already opened file', async () => {
+    previous({ writable: false }); const emit = host();
+    stub.openFailures = 1;
+    const wrapper = await mountShell(); await settle(12);
+    expect(stub.openSources).toEqual(['loopback://first', undefined]);
+    emit('reader.toolbar_item_clicked', book('tok-1')); await settle(20);
+    expect(stub.openSources).toEqual(['loopback://first', undefined, 'loopback://first']);
+    expect(wrapper.find('.word-doctab.active .word-doctab-title').text()).toBe('ראשון');
+  });
+
+  it('preserves request order and skips the old engine for the first explicit request', async () => {
+    previous(); host(); pendingBooks(book(), book('tok-1'), book());
+    const wrapper = await mountShell(); await settle(28);
+    expect(stub.openSources).toEqual(['loopback://second', 'loopback://first']);
+    expect(wrapper.findAll('.word-doctab')).toHaveLength(2);
+    expect(wrapper.find('.word-doctab.active .word-doctab-title').text()).toBe('שני');
+  });
+
+  it('sends text once to restored A after caret restoration, before processing B', async () => {
+    previous({ caret: true }); host(); pendingBooks(book());
+    scope.__otzariaContextMenuClicks = {
+      queue: [{ itemId: 'otzaria-word-send-to-document', selectedText: 'קטע לבדיקה' }], live: false,
+    };
+    const inserted: Array<{ source: unknown; caret: unknown }> = [];
+    const doc = stub.superdoc!.host.activeEditor!.doc as unknown as { insert(input: unknown): unknown };
+    doc.insert = () => {
+      inserted.push({ source: stub.openSources[stub.openSources.length - 1], caret: stub.caretApplied[0] });
+      return { success: true };
+    };
+    await mountShell(); await settle(28);
+    expect(stub.openSources).toEqual(['loopback://first', 'loopback://second']);
+    expect(inserted).toEqual([{
+      source: 'loopback://first',
+      caret: { kind: 'selection', start: { kind: 'text', blockId: 'b9', offset: 4 }, end: { kind: 'text', blockId: 'b9', offset: 4 } },
+    }]);
+  });
+
+  it('independent QA: early B with no stored session reuses the initial placeholder', async () => {
+    host(); pendingBooks(book());
+    const wrapper = await mountShell();
+    await vi.waitFor(() => expect(stub.openSources).toEqual(['loopback://second']));
+    expect(wrapper.findAll('.word-doctab')).toHaveLength(1);
+    expect(wrapper.find('.word-doctab.active .word-doctab-title').text()).toBe('שני');
+    const record = stub.persistedSessions[stub.persistedSessions.length - 1] as {
+      documents: Array<{ document: { token: string } | null }>;
+    };
+    expect(record.documents).toHaveLength(1);
+    expect(record.documents[0]?.document?.token).toBe('tok-2');
+  });
+
+  it('independent QA: two received blobs keep their order and individual recovery drafts', async () => {
+    previous({ draft: true }); host();
+    scope.__otzariaPageOpened = {
+      queue: [
+        { param: { name: 'בית.docx', dataUrl: 'data:application/octet-stream;base64,UEsDBA==' } },
+        { param: { name: 'גימל.docx', dataUrl: 'data:application/octet-stream;base64,UEsDBQ==' } },
+      ], live: false,
+    };
+    const descriptor = Object.getOwnPropertyDescriptor(Blob.prototype, 'arrayBuffer');
+    Object.defineProperty(Blob.prototype, 'arrayBuffer', {
+      configurable: true,
+      value(this: Blob) {
+        return new Promise<ArrayBuffer>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as ArrayBuffer);
+          reader.onerror = () => reject(reader.error);
+          reader.readAsArrayBuffer(this);
+        });
+      },
+    });
+    let wrapper: Awaited<ReturnType<typeof mountShell>> | undefined;
+    try {
+      wrapper = await mountShell();
+      await vi.waitFor(() => {
+        const record = stub.persistedSessions[stub.persistedSessions.length - 1] as {
+          documents: Array<{ id: string; draft: unknown }>;
+        };
+        expect(record.documents.filter(item => item.id !== 'doc-1' && item.draft)).toHaveLength(2);
+      });
+      expect(stub.openSources).toHaveLength(2);
+      expect(Array.from(new Uint8Array(await (stub.openSources[0] as Blob).arrayBuffer()))).toEqual([80, 75, 3, 4]);
+      expect(Array.from(new Uint8Array(await (stub.openSources[1] as Blob).arrayBuffer()))).toEqual([80, 75, 3, 5]);
+      const record = stub.persistedSessions[stub.persistedSessions.length - 1] as {
+        documents: Array<{ id: string; document: unknown; draft: { path: string } | null }>;
+      };
+      expect(record.documents.find(item => item.id === 'doc-1')?.draft).toEqual(draft);
+      const added = record.documents.filter(item => item.id !== 'doc-1');
+      expect(added.every(item => item.document === null)).toBe(true);
+      expect(new Set(added.map(item => item.draft!.path)).size).toBe(2);
+      expect(stub.removedDrafts).toEqual([]);
+      expect(wrapper.findAll('.word-doctab')).toHaveLength(3);
+      expect(wrapper.find('.word-doctab.active .word-doctab-title').text()).toBe('גימל');
+    } finally {
+      wrapper?.unmount();
+      if (descriptor) Object.defineProperty(Blob.prototype, 'arrayBuffer', descriptor);
+      else delete (Blob.prototype as { arrayBuffer?: unknown }).arrayBuffer;
+    }
+  });
+
+  it('independent QA: pending startup opening does not create a new session after unmount', async () => {
+    previous();
+    let release!: () => void;
+    let resolving = false;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    host(async token => { resolving = true; await gate; return { success: true, data: { ...TAB_FILES[token] as object, access: 'readwrite' } }; });
+    pendingBooks(book());
+    const wrapper = await mountShell();
+    try {
+      await vi.waitFor(() => expect(resolving).toBe(true));
+      const sessions = scope.__otzariaEditors as Map<string, unknown>;
+      expect(stub.openSources).toEqual([]);
+      const count = sessions.size;
+      wrapper.unmount();
+      release(); await settle(28);
+      expect(stub.openSources, 'no engine may be created after its owner unmounted').toEqual([]);
+      expect(sessions.size, 'no new detached DocumentSession may survive').toBe(count);
+    } finally { release(); await settle(4); wrapper.unmount(); }
+  });
+
+  it('independent QA: late send keeps an originally empty target separate from explicit B', async () => {
+    stub.storedSession = {
+      version: 2, activeId: 'doc-1', view,
+      documents: [{ id: 'doc-1', document: null, draft: null, caret: null }],
+    };
+    let release!: () => void;
+    let resolving = false;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const emit = host(async token => { resolving = true; await gate; return { success: true, data: { ...TAB_FILES[token] as object, access: 'readwrite' } }; });
+    pendingBooks(book());
+    const inserted: unknown[] = [];
+    const doc = stub.superdoc!.host.activeEditor!.doc as unknown as { insert(input: unknown): unknown };
+    doc.insert = () => { inserted.push(stub.openSources[stub.openSources.length - 1]); return { success: true }; };
+    const wrapper = await mountShell();
+    try {
+      await vi.waitFor(() => expect(resolving).toBe(true));
+      emit('contextMenu.itemClicked', { itemId: 'otzaria-word-send-to-document', selectedText: 'קטע' });
+      release(); await settle(28);
+      expect(inserted).toEqual([undefined]);
+      expect(stub.openSources).toEqual(['loopback://second', undefined]);
+    } finally { release(); await settle(4); wrapper.unmount(); }
+  });
+
+  it('independent QA: invalid empty send does not preempt a valid explicit opening', async () => {
+    previous(); host(); pendingBooks(book());
+    scope.__otzariaContextMenuClicks = {
+      queue: [{ itemId: 'otzaria-word-send-to-document', selectedText: '' }], live: false,
+    };
+    await mountShell(); await settle(28);
+    expect(stub.openSources).toEqual(['loopback://second']);
+  });
+
+  it('a send arriving during B resolution still goes to the original A', async () => {
+    previous();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const emit = host(async token => { await gate; return { success: true, data: { ...TAB_FILES[token] as object, access: 'readwrite' } }; });
+    pendingBooks(book());
+    const inserted: unknown[] = [];
+    const doc = stub.superdoc!.host.activeEditor!.doc as unknown as { insert(input: unknown): unknown };
+    doc.insert = () => { inserted.push(stub.openSources[stub.openSources.length - 1]); return { success: true }; };
+    const wrapper = await mountShell();
+    try {
+      emit('contextMenu.itemClicked', { itemId: 'otzaria-word-send-to-document', selectedText: 'קטע' });
+      release(); await settle(28);
+      expect(stub.openSources).toEqual(['loopback://second', 'loopback://first']);
+      expect(inserted).toEqual(['loopback://first']);
+    } finally { release(); await settle(4); wrapper.unmount(); }
   });
 });
 
