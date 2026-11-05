@@ -6,8 +6,10 @@
  * הקיצורים (Ctrl+Alt+R וכו') אינם נבדקים כאן: הם רשומות רג'יסטרי שמנותבות
  * ב-App.vue, ובדיקות הרג'יסטרי מכסות אותן.
  */
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SuperDoc } from 'superdoc';
+import type { EditorSession } from '../../src/engine/create-editor';
+import { createEditorInteraction } from '../../src/engine/editor-interaction';
 import {
   MACRO_STATUS,
   SCRIPTS_FLAG_KEY,
@@ -52,6 +54,36 @@ describe('installMacros', () => {
   beforeEach(() => {
     // המאקרו נשמרים ב-localStorage; בלי ניקוי בדיקה אחת מזהמת את הבאה.
     localStorage.clear();
+  });
+
+  it('an in-flight replay cannot change document-mode through the raw controller after opening starts', async () => {
+    const { session, engine } = createFakeSession();
+    engine.ui.commands.has = () => true;
+    const container = document.createElement('div');
+    let finishFirst!: () => void;
+    const first = new Promise<void>(resolve => { finishFirst = resolve; });
+    const run = vi.fn(async () => { await first; return { ok: true as const }; });
+    const interaction = createEditorInteraction({
+      superdoc: { setDocumentMode: () => {} }, container, onDispose: () => {},
+    } as unknown as EditorSession, {
+      has: () => true,
+      getState: () => ({ supported: true, enabled: true, active: false, value: 'editing' }),
+      observe: () => () => {}, run,
+    });
+    const handle = installMacros(session, container, () => {}, { commands: interaction.commands });
+    handle.toggleRecording();
+    await engine.ui.commands.executeAsync('bold');
+    await engine.ui.commands.executeAsync('document-mode', { mode: 'editing' });
+    handle.toggleRecording();
+    const replay = handle.kit.replayRecording(handle.kit.listRecordings()[0]!.id);
+    await Promise.resolve();
+    expect(run).toHaveBeenCalledOnce();
+    const release = interaction.block();
+    finishFirst();
+    expect(await replay).toMatchObject({ ok: false });
+    expect(run).toHaveBeenCalledOnce();
+    release();
+    handle.dispose();
   });
 
   it('toggleRecording מקליט הקלדה ופקודות ושומר בשם רץ', async () => {

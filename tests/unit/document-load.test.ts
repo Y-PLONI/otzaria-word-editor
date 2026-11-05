@@ -294,6 +294,7 @@ describe('„דלג”', () => {
 
     // זה מה שהמעטפת בודקת בין שלב לשלב, כדי לא לכתוב מצב של מסמך שנזנח.
     expect(attempt.cancelled).toBe(true);
+    expect(attempt.signal.aborted).toBe(true);
   });
 
   it('פתיחה שבוטלה אינה יכולה לקדם או לסגור את המחוון', () => {
@@ -328,6 +329,8 @@ describe('שתי פתיחות', () => {
 
     expect(first.cancelled).toBe(true);
     expect(second.cancelled).toBe(false);
+    expect(first.signal.aborted).toBe(true);
+    expect(second.signal.aborted).toBe(false);
     expect(load.snapshot.name).toBe('שמות.docx');
     expect(load.snapshot.percent).toBe(0);
   });
@@ -387,6 +390,14 @@ describe('דיווח', () => {
 });
 
 describe('פירוק', () => {
+  it('מפסיק עיבוד של פתיחה קיימת וגם פתיחה שנקראה אחרי פירוק', () => {
+    const { load } = setup();
+    const attempt = load.begin('בראשית.docx');
+    load.dispose();
+    expect(attempt.signal.aborted).toBe(true);
+    expect(load.begin('שמות.docx').signal.aborted).toBe(true);
+  });
+
   it('עוצר את הזחילה ואינו מדווח יותר', () => {
     const { load, timers, changes } = setup();
     const attempt = load.begin('בראשית.docx');

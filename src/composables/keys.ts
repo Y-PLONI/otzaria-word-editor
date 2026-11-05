@@ -19,6 +19,8 @@ import type { AutoCorrectOptions } from '../engine/autocorrect';
 
 /** האדפטר של ה-session הפעיל. `null` עד שיש מסמך פתוח. */
 export const COMMAND_ADAPTER: InjectionKey<Ref<CommandAdapter | null>> = Symbol('commandAdapter');
+/** Temporary UI lock; document/adapter identities stay stable across cancellation. */
+export const DOCUMENT_INTERACTION_BLOCKED: InjectionKey<Readonly<Ref<boolean>>> = Symbol('documentInteractionBlocked');
 
 /**
  * מי שיודע להציג הודעה למשתמש. ה-adapter מחזיר תוצאה עם הודעה בעברית, אבל עד
@@ -47,6 +49,9 @@ export const STATUS_NOTIFIER: InjectionKey<(text: string) => void> = Symbol('sta
  * ה-handles של ה-controller, כולל מסלולי mutation שאין להם קשר לבורר גופן.
  */
 export const FONT_OPTIONS: InjectionKey<Ref<FontOptions>> = Symbol('fontOptions');
+
+/** קידום גופנים שנבחרו או נראים בבורר לראש תור המדידה בזמן פנוי. */
+export const FONT_PROBE_PRIORITIES: InjectionKey<(families: readonly string[]) => void> = Symbol('fontProbePriorities');
 
 /**
  * גלריית הסגנונות של המסמך הפתוח (`ui.styles` דרך engine/style-gallery.ts).

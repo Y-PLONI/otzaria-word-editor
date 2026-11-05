@@ -88,7 +88,8 @@ describe('empty paragraph measurement → paragraph marks', () => {
 
     const runs = measurePageTextRuns(page, reference);
     expect(runs[1]?.rects).toEqual([{ leftPx: 678.71875, topPx: 74.59375, widthPx: 0, heightPx: 38 }]);
-    expect(buildPilcrowMarks([block('before', text), block('empty')], runs).at(-1)).toEqual({
+    const marks = buildPilcrowMarks([block('before', text), block('empty')], runs);
+    expect(marks[marks.length - 1]).toEqual({
       nodeId: 'empty', topPx: 74.59375, heightPx: 38, anchorXPx: 678.71875, direction: 'rtl', approximate: false,
     });
   });

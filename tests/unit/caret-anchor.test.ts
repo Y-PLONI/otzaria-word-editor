@@ -7,6 +7,7 @@
  * שבהם אינו רץ כשאין בו צורך.
  */
 import { describe, it, expect, vi } from 'vitest';
+import type { SelectionTarget } from 'superdoc/ui';
 import {
   applyCaretAnchor,
   applyDocumentStartCaret,
@@ -28,7 +29,8 @@ function docWithBlocks(ids: string[], pageSize = ids.length || 1) {
           list: (input) => {
             calls.push(input ?? {});
             const offset = input?.offset ?? 0;
-            const slice = ids.slice(offset, offset + pageSize);
+            const limit = Math.min(pageSize, input?.limit ?? pageSize);
+            const slice = ids.slice(offset, offset + limit);
             return {
               total: ids.length,
               blocks: slice.map((nodeId, index) => ({ nodeId, ordinal: offset + index })),
@@ -189,13 +191,18 @@ describe('readCaretAnchor', () => {
 /** כפיל של `ui.selection.apply` שמקבל רק את המזהים שהוא מכיר. */
 function uiThatAccepts(known: string[]) {
   const applied: Array<{ start: string; offset: number }> = [];
+  const selections: SelectionTarget[] = [];
   const scrolled: string[] = [];
   const ui: CaretUiSource = {
     selection: {
       apply: (target) => {
         const start = target.start as { blockId?: string; offset?: number };
-        if (!start.blockId || !known.includes(start.blockId)) return { ok: false };
+        const end = target.end as { blockId?: string };
+        if (!start.blockId || !end.blockId || !known.includes(start.blockId) || !known.includes(end.blockId)) {
+          return { ok: false };
+        }
         applied.push({ start: start.blockId, offset: start.offset ?? 0 });
+        selections.push(target);
         return { ok: true };
       },
     },
@@ -206,7 +213,7 @@ function uiThatAccepts(known: string[]) {
       },
     },
   };
-  return { ui, applied, scrolled };
+  return { ui, applied, selections, scrolled };
 }
 
 describe('applyCaretAnchor', () => {
@@ -226,10 +233,168 @@ describe('applyCaretAnchor', () => {
     // בדיוק המצב שהעוגן השני נכתב בשבילו: המסמך יוצא ונפתח מחדש, והמנוע
     // חילק מזהים חדשים.
     const { ui, applied } = uiThatAccepts(['new-1', 'new-2', 'new-3']);
-    const { doc } = docWithBlocks(['new-1', 'new-2', 'new-3']);
+    const { doc, calls } = docWithBlocks(['new-1', 'new-2', 'new-3']);
 
     await expect(applyCaretAnchor(ui, doc, anchor)).resolves.toBe(true);
     expect(applied).toEqual([{ start: 'new-3', offset: 6 }]);
+    expect(calls).toEqual([{ offset: 2, limit: 1 }]);
+  });
+
+  it('מיקום עמוק במסמך נפתר בקריאה אחת, גם מעבר לתקרת הסריקה של שמירת העוגן', async () => {
+    const ordinal = 40_003;
+    const { ui, applied, scrolled } = uiThatAccepts([`new-${ordinal}`]);
+    const list = vi.fn((input?: { offset?: number; limit?: number }) => ({
+      total: 50_000,
+      blocks: [{ nodeId: `new-${input?.offset ?? 0}`, ordinal: input?.offset ?? 0 }],
+    }));
+    const deep: CaretAnchor = { start: { blockId: 'old-deep', ordinal, offset: 7 }, end: null };
+
+    await expect(
+      applyCaretAnchor(ui, { activeEditor: { doc: { blocks: { list } } } }, deep),
+    ).resolves.toBe(true);
+
+    expect(list.mock.calls).toEqual([[{ offset: ordinal, limit: 1 }]]);
+    expect(applied).toEqual([{ start: `new-${ordinal}`, offset: 7 }]);
+    expect(scrolled).toEqual([`new-${ordinal}`]);
+  });
+
+  it.each([[0, 3], [3, 0]])('טווח %i→%i נשמר עם שני ההיסטים בשתי קריאות ממוקדות', async (start, end) => {
+    const ids = ['new-1', 'new-2', 'new-3', 'new-4'];
+    const { doc, calls } = docWithBlocks(ids, 2);
+    const { ui, selections, scrolled } = uiThatAccepts(ids);
+    const range: CaretAnchor = {
+      start: { blockId: 'old-start', ordinal: start, offset: 2 },
+      end: { blockId: 'old-end', ordinal: end, offset: 5 },
+    };
+
+    await expect(applyCaretAnchor(ui, doc, range)).resolves.toBe(true);
+
+    expect(calls).toEqual([{ offset: start, limit: 1 }, { offset: end, limit: 1 }]);
+    expect(selections).toEqual([{
+      kind: 'selection',
+      start: { kind: 'text', blockId: ids[start], offset: 2 },
+      end: { kind: 'text', blockId: ids[end], offset: 5 },
+    }]);
+    expect(scrolled).toEqual([ids[start]]);
+  });
+
+  it.each([1, null])('קצה סיום בסדר %s חולק את קריאת ההתחלה כשאין לו מיקום אחר', async (ordinal) => {
+    const { doc, calls } = docWithBlocks(['new-1', 'new-2']);
+    const { ui, selections } = uiThatAccepts(['new-2']);
+    const range: CaretAnchor = {
+      start: { blockId: 'old-start', ordinal: 1, offset: 2 },
+      end: { blockId: 'old-end', ordinal, offset: 9 },
+    };
+
+    await expect(applyCaretAnchor(ui, doc, range)).resolves.toBe(true);
+
+    expect(calls).toEqual([{ offset: 1, limit: 1 }]);
+    expect(selections).toEqual([{
+      kind: 'selection',
+      start: { kind: 'text', blockId: 'new-2', offset: 2 },
+      end: { kind: 'text', blockId: 'new-2', offset: 9 },
+    }]);
+  });
+
+  it('קצה סיום שנעלם נופל לפסקת ההתחלה בלי סריקה נוספת', async () => {
+    const { doc, calls } = docWithBlocks(['new-1', 'new-2']);
+    const { ui, selections } = uiThatAccepts(['new-2']);
+    const range: CaretAnchor = {
+      start: { blockId: 'old-start', ordinal: 1, offset: 2 },
+      end: { blockId: 'old-end', ordinal: 8, offset: 5 },
+    };
+
+    await expect(applyCaretAnchor(ui, doc, range)).resolves.toBe(true);
+
+    expect(calls).toEqual([{ offset: 1, limit: 1 }, { offset: 8, limit: 1 }]);
+    expect(selections).toEqual([{
+      kind: 'selection',
+      start: { kind: 'text', blockId: 'new-2', offset: 2 },
+      end: { kind: 'text', blockId: 'new-2', offset: 5 },
+    }]);
+  });
+
+  it('גם לאחר פתרון מזהה חדש היסט שנדחה נופל לתחילת אותה פסקה', async () => {
+    const { doc, calls } = docWithBlocks(['new-1', 'new-2', 'new-3']);
+    const { ui, selections, scrolled } = uiThatAccepts(['new-3']);
+    const apply = ui.selection!.apply!;
+    ui.selection!.apply = (target) => {
+      if ((target.start as { offset: number }).offset !== 0) return { ok: false };
+      return apply(target);
+    };
+
+    await expect(applyCaretAnchor(ui, doc, anchor)).resolves.toBe(true);
+
+    expect(calls).toEqual([{ offset: 2, limit: 1 }]);
+    expect(selections).toEqual([caretAt('new-3', 0)]);
+    expect(scrolled).toEqual(['new-3']);
+  });
+
+  it.each([-1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])('סדר לא תקין (%s) אינו נשלח למנוע', async (ordinal) => {
+    const { doc, calls } = docWithBlocks(['new-1']);
+    const { ui } = uiThatAccepts(['new-1']);
+
+    await expect(
+      applyCaretAnchor(ui, doc, { start: { ...anchor.start, ordinal }, end: null }),
+    ).resolves.toBe(false);
+    expect(calls).toEqual([]);
+  });
+
+  it.each([
+    { total: 3, blocks: [] },
+    { total: 3, blocks: [null] },
+    { total: 3, blocks: [{ ordinal: 2 }] },
+    { total: 3, blocks: [{ ordinal: 2, nodeId: '' }] },
+    { total: 3, blocks: [{ ordinal: 1, nodeId: 'wrong-position' }] },
+    { total: 2, blocks: [{ nodeId: 'clamped-position' }] },
+  ])('תוצאת התחלה חסרה או ממיקום אחר אינה משחזרת אל פסקה שגויה: %j', async (result) => {
+    const { ui, selections, scrolled } = uiThatAccepts(['wrong-position', 'clamped-position']);
+    const list = vi.fn(() => result);
+    const range: CaretAnchor = { ...anchor, end: { blockId: 'old-end', ordinal: 4, offset: 9 } };
+
+    await expect(
+      applyCaretAnchor(ui, { activeEditor: { doc: { blocks: { list } } } }, range),
+    ).resolves.toBe(false);
+    expect(list.mock.calls).toEqual([[{ offset: 2, limit: 1 }]]);
+    expect(selections).toEqual([]);
+    expect(scrolled).toEqual([]);
+  });
+
+  it('מנוע שאינו מחזיר ordinal עדיין נשען על אותו offset לא מסונן', async () => {
+    const { ui, applied } = uiThatAccepts(['new-3']);
+    const list = vi.fn(() => ({ total: 3, blocks: [{ nodeId: 'new-3' }] }));
+
+    await expect(
+      applyCaretAnchor(ui, { activeEditor: { doc: { blocks: { list } } } }, anchor),
+    ).resolves.toBe(true);
+    expect(list.mock.calls).toEqual([[{ offset: 2, limit: 1 }]]);
+    expect(applied).toEqual([{ start: 'new-3', offset: 6 }]);
+  });
+
+  it.each([2, 4])('כשל קריאה בסדר %i אינו מפיל פתיחה ושומר את גיבוי הקצה האחרון', async (failedOrdinal) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { ui, selections } = uiThatAccepts(['new-3']);
+    const list = vi.fn(async (input?: { offset?: number; limit?: number }) => {
+      if (input?.offset === failedOrdinal) throw new Error('קריאת פסקה נכשלה');
+      return { total: 5, blocks: [{ nodeId: 'new-3', ordinal: 2 }] };
+    });
+    const range: CaretAnchor = { ...anchor, end: { blockId: 'old-end', ordinal: 4, offset: 9 } };
+
+    try {
+      await expect(
+        applyCaretAnchor(ui, { activeEditor: { doc: { blocks: { list } } } }, range),
+      ).resolves.toBe(failedOrdinal !== 2);
+      expect(list.mock.calls).toEqual(failedOrdinal === 2
+        ? [[{ offset: 2, limit: 1 }]]
+        : [[{ offset: 2, limit: 1 }], [{ offset: 4, limit: 1 }]]);
+      expect(selections).toEqual(failedOrdinal === 2 ? [] : [{
+        kind: 'selection',
+        start: { kind: 'text', blockId: 'new-3', offset: 6 },
+        end: { kind: 'text', blockId: 'new-3', offset: 9 },
+      }]);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('היסט שאינו קיים יותר נופל לתחילת אותה פסקה', async () => {

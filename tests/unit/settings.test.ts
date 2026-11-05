@@ -8,6 +8,7 @@ import {
   forgetLastDocument,
   loadAutosaveEnabled,
   loadLastDocument,
+  loadDiscardBackups,
   loadSessionRecord,
   saveAutosaveEnabled,
   saveCanvasColor,
@@ -22,6 +23,24 @@ function hostReturns(data: unknown): ReturnType<typeof vi.fn> {
 
 afterEach(() => {
   delete (window as Partial<Window>).Otzaria;
+});
+
+describe('discarded history read before allocating a backup slot', () => {
+  it.each(['reply', 'throw'])('propagates a host %s failure instead of reporting empty history', async (failure) => {
+    window.Otzaria = {
+      call: async () => {
+        if (failure === 'throw') throw new Error('offline');
+        return { success: false, error: { message: 'offline' } };
+      },
+    } as never;
+    await expect(loadDiscardBackups()).rejects.toThrow('offline');
+  });
+
+  it('accepts an absent value and works outside the host', async () => {
+    await expect(loadDiscardBackups()).resolves.toBeNull();
+    hostReturns(null);
+    await expect(loadDiscardBackups()).resolves.toBeNull();
+  });
 });
 
 describe('loadLastDocument', () => {

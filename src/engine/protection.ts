@@ -41,7 +41,7 @@
  * יינעל לקריאה בלבד, 4 פעולות ייפלו, וניתן לבטל מהמתג עצמו.
  */
 import type { SuperDoc } from 'superdoc';
-import type { CommandAdapter, CommandOutcome } from './command-adapter';
+import { reasonText, type CommandAdapter, type CommandOutcome } from './command-adapter';
 import { receiptFailureText, thrownText, type DocReceipt } from './document-api';
 
 const UNAVAILABLE_TEXT = 'אינו זמין בגרסה זו';
@@ -51,6 +51,27 @@ const DOCUMENT_MODE_COMMAND = 'document-mode';
 
 /** ברירת המחדל לביטול, כשאין `previousMode` (למשל מסמך שנטען מוגן כבר). */
 const DEFAULT_MODE = 'editing';
+
+const MODE_CHANGE_UNAVAILABLE: Extract<CommandOutcome, { ok: false }> = {
+  ok: false, message: reasonText('not-ready'), reason: 'not-ready',
+};
+
+/** Reading/writing protection and applying its mode cannot straddle an open/Skip. */
+async function withModeChange<T>(
+  commands: CommandAdapter | null,
+  change: () => Promise<T>,
+  unavailable: T,
+): Promise<T> {
+  const release = commands?.beginModeChange?.();
+  if (commands?.beginModeChange && !release) {
+    return unavailable;
+  }
+  try {
+    return await change();
+  } finally {
+    release?.();
+  }
+}
 
 export interface ProtectionState {
   mode: string;
@@ -123,16 +144,21 @@ export type EnableProtectionOutcome =
  * `commands: null` מדלג על הצעד השני (רק כתיבת XML) — משמש בדיקה שבודקת
  * את מסלול ה-Document API בבידוד.
  */
-export async function enableReadOnlyProtection(
+export function enableReadOnlyProtection(
   host: ProtectionTarget,
   commands: CommandAdapter | null,
 ): Promise<EnableProtectionOutcome> {
+  return withModeChange<EnableProtectionOutcome>(commands, () => enableProtection(host, commands), MODE_CHANGE_UNAVAILABLE);
+}
+
+async function enableProtection(host: ProtectionTarget, commands: CommandAdapter | null): Promise<EnableProtectionOutcome> {
   const failedAction = 'הפעלת הגנת המסמך נכשלה';
   const set = docOf(host)?.protection?.setEditingRestriction;
   if (typeof set !== 'function') {
     return { ok: false, message: `${failedAction}: ${UNAVAILABLE_TEXT}`, reason: 'command-unsupported' };
   }
 
+  const previousMode = currentDocumentMode(commands) ?? DEFAULT_MODE;
   let receipt: DocReceipt;
   try {
     receipt = await set({ mode: 'readOnly' });
@@ -147,8 +173,6 @@ export async function enableReadOnlyProtection(
 
   // נשמר **לפני** שמעבירים ל-'viewing', כדי שהביטול ישחזר בדיוק את מה שהיה —
   // מסמך שהיה במעקב שינויים ('suggesting') לא אמור לצאת ממנו רק בגלל שהוגן.
-  const previousMode = currentDocumentMode(commands) ?? DEFAULT_MODE;
-
   if (commands && previousMode !== 'viewing') {
     const modeOutcome = await commands.run(DOCUMENT_MODE_COMMAND, { mode: 'viewing' });
     if (!modeOutcome.ok) {
@@ -176,10 +200,18 @@ export async function enableReadOnlyProtection(
  * שהמסמך יצא מ-`'viewing'` נכשלת תמיד, כלומר "בטל" לא היה מבטל כלום.
  * שחרור המצב קודם פותח את השער, ורק אז ה-XML מתעדכן.
  */
-export async function disableProtection(
+export function disableProtection(
   host: ProtectionTarget,
   commands: CommandAdapter | null,
   restoreMode: string = DEFAULT_MODE,
+): Promise<CommandOutcome> {
+  return withModeChange<CommandOutcome>(commands, () => clearProtection(host, commands, restoreMode), MODE_CHANGE_UNAVAILABLE);
+}
+
+async function clearProtection(
+  host: ProtectionTarget,
+  commands: CommandAdapter | null,
+  restoreMode: string,
 ): Promise<CommandOutcome> {
   const failedAction = 'ביטול הגנת המסמך נכשל';
   const clear = docOf(host)?.protection?.clearEditingRestriction;
@@ -216,13 +248,15 @@ export async function disableProtection(
  * בלי הסנכרון הזה מסמך כזה נפתח עם התג "נעול" דלוק ושום דבר לא חסום —
  * בדיוק הבאג הזה, רק בנקודת כניסה אחרת.
  */
-export async function syncProtectionRuntime(
+export function syncProtectionRuntime(
   host: ProtectionTarget,
   commands: CommandAdapter | null,
 ): Promise<ProtectionState | null> {
-  const state = await readProtectionState(host);
-  if (state?.enforced && commands && currentDocumentMode(commands) !== 'viewing') {
-    await commands.run(DOCUMENT_MODE_COMMAND, { mode: 'viewing' });
-  }
-  return state;
+  return withModeChange<ProtectionState | null>(commands, async () => {
+    const state = await readProtectionState(host);
+    if (state?.enforced && commands && currentDocumentMode(commands) !== 'viewing') {
+      await commands.run(DOCUMENT_MODE_COMMAND, { mode: 'viewing' });
+    }
+    return state;
+  }, null);
 }

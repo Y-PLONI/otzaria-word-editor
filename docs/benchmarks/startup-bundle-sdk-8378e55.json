@@ -1,0 +1,534 @@
+{
+  "schemaVersion": 1,
+  "recordedAtUtc": "2026-11-05T00:29:51.778095+00:00",
+  "implementationCommit": "8378e55bbaeefa68239ce16d7737335c015b3bfe",
+  "benchmark": {
+    "report": "docs/benchmarks/startup-bundle-2026-11-04.json",
+    "sha256": "2cad495dad10dd64df6c52e06188fd613d04b07fd4f072f61ce4e5405e9f88f9",
+    "implementationCommit": "64d7c9eefe78d82aa14b7b8141c1b901eca55b7e",
+    "rerun": false
+  },
+  "reason": "The official HTML reachability scanner treated the unused inline AMD require.toUrl implementation as a CSS url() reference. The unused hook was removed; final chunk output rejects toUrl helpers. The validator and fail-on-warnings policy are unchanged.",
+  "validation": {
+    "focusedTests": 24,
+    "typecheckExitCode": 0,
+    "buildExitCode": 0,
+    "checkDistExitCode": 0,
+    "contractRegressionBeforeFix": {
+      "passed": 22,
+      "failed": 2,
+      "cases": [
+        "Rollup FILE_URL with require receiver",
+        "Rollup FILE_URL with renamed receiver"
+      ]
+    },
+    "validator": {
+      "repository": "Otzaria/otzaria-plugin-validator",
+      "commit": "64ee7c7806a03fcba16c111a7b6c3185e4d92804",
+      "verifiedSourceFiles": [
+        {
+          "path": "LICENSE",
+          "sha": "0356289eb3b13913511d34ecf3612860c8ca70c7",
+          "size": 1064
+        },
+        {
+          "path": "package.json",
+          "sha": "89207db3b7fc435dee179ea875a60c93f819d0b9",
+          "size": 685
+        },
+        {
+          "path": "src/action.js",
+          "sha": "e5342d9c52f93579a2eaf45d66be7ac47c09aa01",
+          "size": 16712
+        },
+        {
+          "path": "src/apiSpec.js",
+          "sha": "356ab2be92f98d74f44116bbc003688ae0d13fb8",
+          "size": 5268
+        },
+        {
+          "path": "src/cli.js",
+          "sha": "abe4d7f1bd0991c1425170b4f51b21550fa3468a",
+          "size": 2160
+        },
+        {
+          "path": "src/discover.js",
+          "sha": "24b7ef52cda5f94fa356358b841d051cb3a1a3a6",
+          "size": 2052
+        },
+        {
+          "path": "src/extendedValidator.js",
+          "sha": "d8728488c89d482dd6c182a36da3992bf2795fa7",
+          "size": 18967
+        },
+        {
+          "path": "src/githubActions.js",
+          "sha": "5e48201e86afd36381c26beb108c5969129b586b",
+          "size": 2252
+        },
+        {
+          "path": "src/headlessValidator.js",
+          "sha": "1d3a7ec0e1c8ec2e625b9a43cdd5f1edffeaf242",
+          "size": 5139
+        },
+        {
+          "path": "src/ignore.js",
+          "sha": "2c3035f7c8838c58d3be7989d87e9ac7fd02259a",
+          "size": 4040
+        },
+        {
+          "path": "src/index.js",
+          "sha": "ce017a508dac40d6f25a276708dce710554e698b",
+          "size": 3714
+        },
+        {
+          "path": "src/knownApi.js",
+          "sha": "4277a9e9b09abfaf0b8678cf5fbcea8928aa93c3",
+          "size": 6223
+        },
+        {
+          "path": "src/manifestValidator.js",
+          "sha": "85c1179adcd6865f9bfc7a1767c7d079bec385cc",
+          "size": 12461
+        },
+        {
+          "path": "src/prComment.js",
+          "sha": "ccba427ffc5844a6112766d6b8054b636a03baf4",
+          "size": 2162
+        },
+        {
+          "path": "src/publish.js",
+          "sha": "6cd66cc25385c89c2fc82e58068337e03ac9512d",
+          "size": 12967
+        },
+        {
+          "path": "src/reachability.js",
+          "sha": "43ba761d250c11d70abf038c2df29b6e02cabde8",
+          "size": 4494
+        },
+        {
+          "path": "src/spec.json",
+          "sha": "7465e7fb9fcf848fa050b1644f7946d2709c32ed",
+          "size": 20244
+        },
+        {
+          "path": "src/validatePlugin.js",
+          "sha": "56a0cc0411a71768439320b61c55c83b528dae31",
+          "size": 7516
+        },
+        {
+          "path": "src/whenValidator.js",
+          "sha": "32fc65225e568fb7a2001c55c93c078ca1b1939f",
+          "size": 6825
+        },
+        {
+          "path": "src/zip.js",
+          "sha": "b32260c397f5b8ef239d50f0dfe9e672402abe04",
+          "size": 2634
+        },
+        {
+          "path": "src/zipWriter.js",
+          "sha": "5cc4f1c5ef7c40e223c1c03a2bd4f22f7c521b70",
+          "size": 5810
+        }
+      ],
+      "liveSdkSource": "remote",
+      "failOnWarnings": true,
+      "publish": false,
+      "cliExitCode": 0,
+      "errors": 0,
+      "warnings": 0,
+      "beforeFix": {
+        "artifactImplementationCommit": "64d7c9eefe78d82aa14b7b8141c1b901eca55b7e",
+        "cliExitCode": 1,
+        "errors": 0,
+        "warnings": 1,
+        "missing": [
+          "index.html → request, module2.uri"
+        ]
+      },
+      "missingAssetNegative": {
+        "disposableCopyOnly": true,
+        "errors": [],
+        "warnings": [
+          "1 הפניות לנכס מקומי שאינו בארכיון — יחזירו 404 בזמן ריצה. קובץ מטא-דאטה (‎*.md‎, ‎screenshots/‎) מוחזר לארכיון בשורת \"!<נתיב>\" ב-.otzignore: index.html → assets/__sdk_missing_fixture.png"
+        ],
+        "missing": [
+          "index.html → assets/__sdk_missing_fixture.png"
+        ]
+      },
+      "unreferencedFileCount": 22
+    },
+    "independentQa": {
+      "focusedTestsPassed": 24,
+      "officialValidatorPositiveAndNegativePassed": true,
+      "artifactFilesVerified": 26,
+      "functionalGateReviewed": true
+    }
+  },
+  "artifact": {
+    "sourceCommit": "8378e55bbaeefa68239ce16d7737335c015b3bfe",
+    "recordedAtUtc": "2026-11-05T00:28:02.252758+00:00",
+    "builtDirectlyToFreshOutDir": true,
+    "excluded": [],
+    "qaFilesPresent": false,
+    "staleChunksPresent": false,
+    "checkerSha256": "348497854ace3dfb83922de6a95c25b68adc1e1fd7ded9d519297e27213fcc3e",
+    "totalBytes": 26085215,
+    "files": {
+      "assets/FindReplaceSurface-B5dzB2sG.es-CD2lA0sH.js": {
+        "bytes": 9821,
+        "sha256": "6a057091bf39f88ac0d92e23d1d59e647c25d4b634aee994ca3e60497bbe8ff7"
+      },
+      "assets/MacrosDialog-CIpYbCRf.js": {
+        "bytes": 27351,
+        "sha256": "c466d9d7b1e9f0247b806d2f1b3ebe237dab545ffed819a255e0522ee1a32c3c"
+      },
+      "assets/OpenDocumentDialog-DWdgTIzn.js": {
+        "bytes": 55472,
+        "sha256": "4d49f4bfb20a9978e911b1f4b7d5fb4344ed1b0122c4b5f85d11b7970c3d2a7d"
+      },
+      "assets/PasswordPromptSurface-Ciu8aSmK.es-9F-TDGeO.js": {
+        "bytes": 2926,
+        "sha256": "125af0235ab3a1a39b3e986e5a71f9e2e2db430c0fabc88bc750d554cd9293e4"
+      },
+      "assets/PdfViewer-B8y_9or_.es-C34ApYZ9.js": {
+        "bytes": 8960,
+        "sha256": "7fd007fdcab0b3b0ad607e3e7329b23aaadee26c404f89b6b4deda56de69cc02"
+      },
+      "assets/ShortcutManagerDialog-BDjRhbSP.js": {
+        "bytes": 16486,
+        "sha256": "0fe20889744d9c49e192f3b21f172c18dbfd47942ffaea4780172f959d6e5368"
+      },
+      "assets/acronyms.js": {
+        "bytes": 710218,
+        "sha256": "ff39b459ded790055ad133272f05592e99944bfaf28d7d2d0323f66b6ebc683f"
+      },
+      "assets/app.js": {
+        "bytes": 2890198,
+        "sha256": "31b28dcdd2d1c94eed544bcceed19b3c9b55d7b7d55e1ec956a652989b6d4099"
+      },
+      "assets/docx-engine.es-CFrUeifO.js": {
+        "bytes": 11466436,
+        "sha256": "6fedc710f3b11bbdfdf5847ce497d08b4f691c894721eb04b9a5cd6589fde0d9"
+      },
+      "assets/engine-workers.js": {
+        "bytes": 7097878,
+        "sha256": "8fc611513d26aa16c265c7025826fdad920b075560d74c30688f1ed3a9c199e8"
+      },
+      "assets/pdf-3U86c3sd.js": {
+        "bytes": 439063,
+        "sha256": "6525bd26c6ced5807bc372642b37365522f11c77508e76a104e9530952d93a36"
+      },
+      "assets/pdf.worker.min-t-CYmkGJ.es-5X1AL_vx.js": {
+        "bytes": 1652284,
+        "sha256": "79a1adf0bbcae1ee0bf2dd7fe9b2103a04d0d684dd9bfffe329db87a1617bf81"
+      },
+      "assets/static-completion.js": {
+        "bytes": 31818,
+        "sha256": "8f0a6ea88aae81417f4e058b4c24e959b0b83beb360ed12b17fa7088290b834a"
+      },
+      "assets/torah-dictionary.js": {
+        "bytes": 1311102,
+        "sha256": "b811e2a23f8d1d86e36781aaff45aa6454134912f3a48c07f4fcabf710db89cc"
+      },
+      "bundle-report.json": {
+        "bytes": 64488,
+        "sha256": "25bb97ac9c2ba8b42b7e495629c7775e22012d2ba0f7b282d05c0b024f3c8fec"
+      },
+      "fonts/Assistant-Bold.ttf": {
+        "bytes": 49752,
+        "sha256": "d8e13c55ff6153e231f19c10485794f368ba113a6a3c23c471288764a48d6d7a"
+      },
+      "fonts/Assistant-Medium.ttf": {
+        "bytes": 49756,
+        "sha256": "e8dc47984065569a1eaf5922ec110c70a0e5b1e6cf049f584b8636aff11be9eb"
+      },
+      "fonts/Assistant-Regular.ttf": {
+        "bytes": 49792,
+        "sha256": "d60ad12ff68c1739adbc6ffef0890e0deba35a73b2e5844e6babaac40ad78da8"
+      },
+      "fonts/Assistant-SemiBold.ttf": {
+        "bytes": 49804,
+        "sha256": "b714f898c622b8b9e28b35a4e4df369ca6f7e37cb49c134d55ec39f32cbe0e6e"
+      },
+      "index.html": {
+        "bytes": 35366,
+        "sha256": "16369d106ac19c86fe24214f1494ff590c1ed61ca14942055531a76b50c8e8ff"
+      },
+      "manifest.json": {
+        "bytes": 1667,
+        "sha256": "1c174334cda5e804fa5e8ea40debe70b9437a62920c8ece790d402f833ddab9c"
+      },
+      "third-party/ASSISTANT-LICENSE.txt": {
+        "bytes": 4709,
+        "sha256": "8b85dca4f823b61a9a559f203ef2e7195c0f3d5bd1c27bb98ebd62e13f4274b7"
+      },
+      "third-party/DOCX-ENGINE-LICENSE.md": {
+        "bytes": 23717,
+        "sha256": "cb750acaec9e1fa7b106d326d0a7db0f3811c022048b09affc73842258419172"
+      },
+      "third-party/DOCX-ENGINE-NOTICE.md": {
+        "bytes": 1207,
+        "sha256": "06cf72094a4114548a78d37c9e14d5ebbd3594347db3b05d97878a5ca6a1139a"
+      },
+      "third-party/SUPERDOC-LICENSE.txt": {
+        "bytes": 34523,
+        "sha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef"
+      },
+      "third-party/SUPERDOC-NOTICE.txt": {
+        "bytes": 421,
+        "sha256": "fead6b351ad76dea4c5dab0cca7e4798863f8341d5b4bf1afbde94e1c53bb72a"
+      }
+    }
+  },
+  "changesFromMeasuredArtifact": {
+    "assets/app.js": {
+      "measured": {
+        "bytes": 2890194,
+        "sha256": "f32fafb3ecbb095e6d80ede1ae5778359844c42a38f4ff4f8b68fab5a7006dfe"
+      },
+      "followup": {
+        "bytes": 2890198,
+        "sha256": "31b28dcdd2d1c94eed544bcceed19b3c9b55d7b7d55e1ec956a652989b6d4099"
+      }
+    },
+    "bundle-report.json": {
+      "measured": {
+        "bytes": 64488,
+        "sha256": "0f4ce8b2c6e33f92162ff98f57a7e5dcc6464166b6decef8a7f1c044233ae830"
+      },
+      "followup": {
+        "bytes": 64488,
+        "sha256": "25bb97ac9c2ba8b42b7e495629c7775e22012d2ba0f7b282d05c0b024f3c8fec"
+      }
+    },
+    "index.html": {
+      "measured": {
+        "bytes": 35438,
+        "sha256": "d86e643de7b94339e2233a5938f7c2bc12c29a9d5436895762563e66051f7d05"
+      },
+      "followup": {
+        "bytes": 35366,
+        "sha256": "16369d106ac19c86fe24214f1494ff590c1ed61ca14942055531a76b50c8e8ff"
+      }
+    }
+  },
+  "functionalGate": {
+    "format": "classic-amd",
+    "cpuRate": 1,
+    "startup": {
+      "scripts": [
+        {
+          "file": "assets/engine-workers.js",
+          "requestedAt": 147.5,
+          "loadedAt": 1018.3999999985099,
+          "failedAt": null
+        },
+        {
+          "file": "assets/app.js",
+          "requestedAt": 147.59999999403954,
+          "loadedAt": 1307.0999999940395,
+          "failedAt": null
+        },
+        {
+          "file": "assets/docx-engine.es-CFrUeifO.js",
+          "requestedAt": 147.69999999552965,
+          "loadedAt": 1532.5,
+          "failedAt": null
+        }
+      ],
+      "shellReadyAt": 3106.89999999851,
+      "paints": [
+        {
+          "name": "first-paint",
+          "at": 156
+        },
+        {
+          "name": "first-contentful-paint",
+          "at": 156
+        }
+      ],
+      "phase": "startup",
+      "errorEvents": [],
+      "factoryMarks": [
+        {
+          "name": "otzaria:module:assets/app:ready",
+          "at": 1275.2999999970198
+        },
+        {
+          "name": "otzaria:module:assets/docx-engine.es-CFrUeifO:ready",
+          "at": 1493.1999999955297
+        }
+      ],
+      "resources": [],
+      "files": {
+        "assets/engine-workers.js": {
+          "bytes": 7097878,
+          "sha256": "8fc611513d26aa16c265c7025826fdad920b075560d74c30688f1ed3a9c199e8"
+        },
+        "assets/app.js": {
+          "bytes": 2890198,
+          "sha256": "31b28dcdd2d1c94eed544bcceed19b3c9b55d7b7d55e1ec956a652989b6d4099"
+        },
+        "assets/docx-engine.es-CFrUeifO.js": {
+          "bytes": 11466436,
+          "sha256": "6fedc710f3b11bbdfdf5847ce497d08b4f691c894721eb04b9a5cd6589fde0d9"
+        }
+      },
+      "scriptBytes": 21454512,
+      "index": {
+        "bytes": 35366,
+        "sha256": "16369d106ac19c86fe24214f1494ff590c1ed61ca14942055531a76b50c8e8ff"
+      }
+    },
+    "checks": {
+      "ordinaryDocumentDefersChunks": true,
+      "docxPreloadBeforeAppFactory": true,
+      "typingModelAndVisibleParagraph": true,
+      "openDialogFailureRetryFocusAndRepeat": true,
+      "shortcutsDismissFailureFirstAndRepeat": true,
+      "macrosFirstAndRepeat": true,
+      "emfFirstAndRepeat": true,
+      "pdfFirstAndRepeat": true
+    },
+    "browser": {
+      "id": 3,
+      "result": {
+        "protocolVersion": "1.3",
+        "product": "HeadlessChrome/157.0.8103.38",
+        "revision": "@a733b5afbb3ba618844ff8876b89ad1a774b2f18",
+        "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/157.0.8103.38 Safari/537.36",
+        "jsVersion": "15.7.112.23"
+      }
+    },
+    "testPage": "file:///workspace/scratch/27ac7824ee5b/performance-work/bundle-8378-package/dist/__qa-bundle-probe.html",
+    "offline": {
+      "enable": {
+        "id": 30,
+        "result": {}
+      },
+      "emulation": {
+        "id": 31,
+        "result": {}
+      },
+      "navigatorOnLine": false
+    },
+    "allScripts": [
+      {
+        "file": "assets/engine-workers.js",
+        "requestedAt": 147.5,
+        "loadedAt": 1018.3999999985099,
+        "failedAt": null
+      },
+      {
+        "file": "assets/app.js",
+        "requestedAt": 147.59999999403954,
+        "loadedAt": 1307.0999999940395,
+        "failedAt": null
+      },
+      {
+        "file": "assets/docx-engine.es-CFrUeifO.js",
+        "requestedAt": 147.69999999552965,
+        "loadedAt": 1532.5,
+        "failedAt": null
+      },
+      {
+        "file": "assets/OpenDocumentDialog-DWdgTIzn.js",
+        "requestedAt": 5223,
+        "loadedAt": null,
+        "failedAt": 5239.29999999702
+      },
+      {
+        "file": "assets/OpenDocumentDialog-DWdgTIzn.js",
+        "requestedAt": 5414.39999999851,
+        "loadedAt": 5450,
+        "failedAt": null
+      },
+      {
+        "file": "assets/ShortcutManagerDialog-BDjRhbSP.js",
+        "requestedAt": 6553.39999999851,
+        "loadedAt": null,
+        "failedAt": 6568.29999999702
+      },
+      {
+        "file": "assets/ShortcutManagerDialog-BDjRhbSP.js",
+        "requestedAt": 7187.89999999851,
+        "loadedAt": 7248.0999999940395,
+        "failedAt": null
+      },
+      {
+        "file": "assets/MacrosDialog-CIpYbCRf.js",
+        "requestedAt": 8732.39999999851,
+        "loadedAt": 8741.79999999702,
+        "failedAt": null
+      },
+      {
+        "file": "assets/pdf-3U86c3sd.js",
+        "requestedAt": 12318.19999999553,
+        "loadedAt": 12375.39999999851,
+        "failedAt": null
+      },
+      {
+        "file": "assets/pdf.worker.min-t-CYmkGJ.es-5X1AL_vx.js",
+        "requestedAt": 12318.29999999702,
+        "loadedAt": 12458.39999999851,
+        "failedAt": null
+      }
+    ],
+    "errorEvents": [
+      {
+        "phase": "emf-0",
+        "at": 10769.5,
+        "message": "ResizeObserver loop completed with undelivered notifications.",
+        "filename": "file:///workspace/scratch/27ac7824ee5b/performance-work/bundle-8378-package/dist/__qa-bundle-probe.html",
+        "lineno": 0,
+        "colno": 0,
+        "error": null
+      },
+      {
+        "phase": "emf-1",
+        "at": 11684.19999999553,
+        "message": "ResizeObserver loop completed with undelivered notifications.",
+        "filename": "file:///workspace/scratch/27ac7824ee5b/performance-work/bundle-8378-package/dist/__qa-bundle-probe.html",
+        "lineno": 0,
+        "colno": 0,
+        "error": null
+      }
+    ],
+    "errorQuietWindow": {
+      "durationMs": 500,
+      "beforeCount": 2,
+      "afterCount": 2
+    },
+    "unhandled": [
+      "uncaught: ResizeObserver loop completed with undelivered notifications.",
+      "uncaught: ResizeObserver loop completed with undelivered notifications."
+    ],
+    "resizeObserverWarnings": [
+      {
+        "phase": "emf-0",
+        "at": 10769.5,
+        "message": "ResizeObserver loop completed with undelivered notifications.",
+        "filename": "file:///workspace/scratch/27ac7824ee5b/performance-work/bundle-8378-package/dist/__qa-bundle-probe.html",
+        "lineno": 0,
+        "colno": 0,
+        "error": null
+      },
+      {
+        "phase": "emf-1",
+        "at": 11684.19999999553,
+        "message": "ResizeObserver loop completed with undelivered notifications.",
+        "filename": "file:///workspace/scratch/27ac7824ee5b/performance-work/bundle-8378-package/dist/__qa-bundle-probe.html",
+        "lineno": 0,
+        "colno": 0,
+        "error": null
+      }
+    ],
+    "unexpectedErrors": []
+  },
+  "collectorSha256": {
+    "scripts/bundle-probe.mjs": "70b1381b4de623e03baad890d00dd86a3e110b622012a667dad4e342fbe85a2e",
+    "scripts/qa/harness.mjs": "94da078ca23690fbb2f6803ab15752b96411f6a96a622da4b8074d814ac35024"
+  }
+}

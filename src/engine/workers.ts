@@ -5,8 +5,8 @@
  * וכאן הוא הופך ל-blob: שנמסר ל-`config.workerUrls`. שלוש עובדות נמדדו
  * ב-Chromium וקובעות את הצורה הזאת (docs/spike.md §שער A):
  *
- * 1. ה-build הוא IIFE, ולכן ה-URL היחסי שהמנוע בונה לבד ל-worker אינו נפתר.
- *    בלי ההטמעה המנוע נכשל גם מ-origin תקין. כלומר workerUrls הוא חובה.
+ * 1. קוד ה-workers נארז כמקורות קלאסיים. workerUrls מוסר למנוע כתובות blob
+ *    שלהם, גם כשהקוד הראשי מפוצל ל-AMD; כתובת של chunk אינה מתירה module worker.
  * 2. מ-file:// (origin opaque) module worker אינו נטען — לא מ-blob ולא, בגודל
  *    הזה, מ-data. worker **קלאסי** מ-blob דווקא נטען.
  * 3. הקוד ש-Vite מפיק ל-workers הוא IIFE (`worker.format`), כלומר תואם-קלאסי:
@@ -61,7 +61,6 @@ function patchWorkerConstructor(): void {
   const Native = window.Worker;
   // סביבה בלי Worker (למשל jsdom בבדיקות) — אין מה לעטוף, ואין לזרוק.
   if (typeof Native !== 'function') return;
-  patched = true;
 
   class OtzariaWorker extends Native {
     constructor(scriptUrl: string | URL, options?: WorkerOptions) {
@@ -75,6 +74,7 @@ function patchWorkerConstructor(): void {
   }
 
   window.Worker = OtzariaWorker;
+  patched = true;
 }
 
 export function engineWorkerUrls(): EngineWorkerUrls | undefined {
@@ -84,25 +84,42 @@ export function engineWorkerUrls(): EngineWorkerUrls | undefined {
   if (!sources) return undefined;
 
   const urls: EngineWorkerUrls = {};
-  for (const role of ROLES) {
-    const code = sources[role];
-    // תפקיד חסר נשאר undefined בכוונה: SuperDoc ייפול חזרה ל-URL המובנה שלו
-    // במקום לקבל blob: ריק שייכשל בטעינה.
-    if (typeof code === 'string' && code !== '') {
-      // ה-URL שהטוען כבר בנה לחימום קודם לבנייה חדשה — ראו את ההצהרה למעלה.
-      const warmUrl = role === 'document' ? window.__otzariaDocWorkerUrl : undefined;
-      const url =
-        typeof warmUrl === 'string' && warmUrl.startsWith('blob:')
-          ? warmUrl
-          : URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
-      ownUrls.add(url);
-      urls[role] = url;
+  const created: string[] = [];
+  try {
+    for (const role of ROLES) {
+      const code = sources[role];
+      // תפקיד חסר נשאר undefined בכוונה: SuperDoc ייפול חזרה ל-URL המובנה שלו
+      // במקום לקבל blob: ריק שייכשל בטעינה.
+      if (typeof code === 'string' && code !== '') {
+        // ה-URL שהטוען כבר בנה לחימום קודם לבנייה חדשה — ראו את ההצהרה למעלה.
+        const warmUrl = role === 'document' ? window.__otzariaDocWorkerUrl : undefined;
+        let url: string;
+        if (typeof warmUrl === 'string' && warmUrl.startsWith('blob:')) {
+          url = warmUrl;
+        } else {
+          url = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
+          created.push(url);
+        }
+        ownUrls.add(url);
+        urls[role] = url;
+      }
     }
+
+    if (ownUrls.size > 0) patchWorkerConstructor();
+  } catch (error) {
+    // אף עורך לא קיבל את הכתובות החדשות. החימום, לעומתן, עשוי להיות פעיל;
+    // משאירים אותו ואת המקורות לניסיון חוזר, בלי לצבור blobs יתומים.
+    for (const url of created) {
+      ownUrls.delete(url);
+      URL.revokeObjectURL(url);
+    }
+    throw error;
   }
 
-  if (ownUrls.size > 0) patchWorkerConstructor();
-
   cached = urls;
+  // ה-Blob URLs נשארים חיים לכל העורכים הבאים. רק העותק המחרוזתי המיותר
+  // משתחרר, ורק לאחר השלמת המטמון בהצלחה.
+  delete window.__SUPERDOC_WORKER_SOURCES__;
   return urls;
 }
 

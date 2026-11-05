@@ -44,6 +44,8 @@ export interface ComboOption {
   unavailable?: boolean;
   /** `unavailable` נמדד ולא הוכרז. ראו `PickerOption` ב-composables/picker-value.ts. */
   measured?: boolean;
+  /** הזמינות טרם נבדקה; אין דגימה עד שתגיע תשובה. */
+  pending?: boolean;
   /**
    * הגופן מותקן במכונה והדפדפן בכל זאת אינו מצייר אותו — ואז ההסבר על השורה
    * הוא אחר. ראו `PickerOption` ב-composables/picker-value.ts.

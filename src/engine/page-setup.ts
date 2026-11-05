@@ -147,6 +147,7 @@ import type { SuperDoc } from 'superdoc';
 import type { CommandOutcome } from './command-adapter';
 import { receiptFailureText, thrownText, type DocReceipt, type MaybePromise } from './document-api';
 import { marginsLeaveRoom } from './ruler-geometry';
+import { invalidateDocumentReads } from './document-read-state';
 
 /** 1440 twips לאינץ'. נמדד ב-`w:pgMar w:top="1440"` של המסמך הריק. ראו הערת הפתיחה. */
 export const TWIPS_PER_INCH = 1440;
@@ -265,9 +266,17 @@ interface SectionItem {
   };
 }
 
+/** התשובה הגולמית בלבד; מדידות העימוד אינן חלק ממנה. */
+export interface PageSections {
+  items?: readonly SectionItem[];
+}
+
+/** מקור משותף לתצוגה. פעולות כתיבה ממשיכות לקרוא `sections.list` בעצמן. */
+export type ReadPageSections = () => Promise<PageSections | null>;
+
 export interface PageSetupDocumentApi {
   sections?: {
-    list?: () => MaybePromise<{ items?: readonly SectionItem[] } | undefined>;
+    list?: () => MaybePromise<PageSections | undefined>;
     setPageMargins?: (input: {
       target: unknown;
       top?: number;
@@ -435,6 +444,10 @@ async function applyToSections(
       receipt = await mutate(section, section.address);
     } catch (error) {
       return { ok: false, message: thrownText(failedAction, error), reason: 'threw' };
+    } finally {
+      // גם כשל יכול לבוא אחרי כתיבה חלקית, וגם אחרי מעבר לטאב אחר. פוסלים
+      // את המסמך שנלכד לפני ה-await, לא את הטאב שבמקרה פעיל בזמן הדיווח.
+      invalidateDocumentReads(doc);
     }
 
     const code = receipt?.failure?.code;
@@ -560,6 +573,31 @@ function readEffectiveMargins(
   return { topTwips, bottomTwips };
 }
 
+/** קריאה טרייה של נתוני המקטעים בלבד; null בזמן טעינה, כשל או החלפת מסמך. */
+export async function readPageSections(host: PageSetupTarget): Promise<PageSections | null> {
+  const doc = (host as PageSetupHost | null | undefined)?.activeEditor?.doc;
+  const sections = doc?.sections;
+  if (typeof sections?.list !== 'function') return null;
+  try {
+    const result = await sections.list();
+    if ((host as PageSetupHost).activeEditor?.doc !== doc) return null;
+    return result ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function firstPageSection(
+  host: PageSetupTarget,
+  readSections: ReadPageSections = () => readPageSections(host),
+): Promise<SectionItem | undefined> {
+  try {
+    return (await readSections())?.items?.[0];
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * רוחב הדף, השוליים והכיוון של המקטע הראשון — מה שהסרגל צריך כדי לצייר.
  *
@@ -570,18 +608,15 @@ function readEffectiveMargins(
  * `null` הוא מצב רגיל ולא כשל: כך זה נראה כשהמסמך עדיין נטען. הסרגל פשוט
  * אינו מצייר — אין לו על מה להתלונן.
  */
-export async function readPageMargins(host: PageSetupTarget): Promise<PageMarginsState | null> {
-  const list = (host as PageSetupHost | null | undefined)?.activeEditor?.doc?.sections?.list;
-  if (typeof list !== 'function') return null;
+export async function readPageMargins(
+  host: PageSetupTarget,
+  readSections?: ReadPageSections,
+): Promise<PageMarginsState | null> {
+  const first = await firstPageSection(host, readSections);
+  return first ? pageMarginsFromSection(host, first) : null;
+}
 
-  let first: SectionItem | undefined;
-  try {
-    first = (await list())?.items?.[0];
-  } catch {
-    return null;
-  }
-  if (!first) return null;
-
+function pageMarginsFromSection(host: PageSetupTarget, first: SectionItem): PageMarginsState | null {
   const pageWidthTwips = inchesToTwips(first.pageSetup?.width);
   const pageHeightTwips = inchesToTwips(first.pageSetup?.height);
   const leftTwips = inchesToTwips(first.margins?.left);
@@ -988,8 +1023,8 @@ function isLineNumberRestart(value: unknown): value is LineNumberRestart {
  * ui/shell/LineNumberOverlay.vue) — לא מה שהתפריט שלנו כתב, אלא מה
  * שהמסמך מחזיק עכשיו, כולל מסמך שהגיע מ-Word.
  *
- * `page` הוא בדיוק מה ש-`readPageMargins` כבר מחזיר (אותה קריאה ל-
- * `sections.list()` שהסרגל וגבולות העמוד כבר סומכים עליה) — השכבה צריכה
+ * `page` מפוענח מאותו מקטע כמו ב-`readPageMargins`, בלי קריאה שנייה
+ * ל-`sections.list()`. מדידות העימוד עצמן נקראות מחדש — השכבה צריכה
  * אותו כדי לדעת איזה פס גובה בעמוד הוא כותרת/שוליים ואיזה גוף טקסט (ראו
  * `filterBodyLines`, engine/line-number-layer.ts), ואיזה פס רוחב הוא
  * שוליים ימין/שמאל לציור העמודה עצמה. `null` כשאין מדידה — בדיוק כמו
@@ -1002,19 +1037,14 @@ export interface LineNumberingReading {
   page: PageMarginsState;
 }
 
-export async function readLineNumbering(host: PageSetupTarget): Promise<LineNumberingReading | null> {
-  const list = (host as PageSetupHost | null | undefined)?.activeEditor?.doc?.sections?.list;
-  if (typeof list !== 'function') return null;
-
-  let first: SectionItem | undefined;
-  try {
-    first = (await list())?.items?.[0];
-  } catch {
-    return null;
-  }
+export async function readLineNumbering(
+  host: PageSetupTarget,
+  readSections?: ReadPageSections,
+): Promise<LineNumberingReading | null> {
+  const first = await firstPageSection(host, readSections);
   if (!first?.lineNumbering?.enabled) return null;
 
-  const page = await readPageMargins(host);
+  const page = pageMarginsFromSection(host, first);
   if (!page) return null;
 
   return {
@@ -1087,6 +1117,7 @@ export function createLineNumberingModel(source: LineNumberingModelSource): Line
     refreshNow: () => void read(),
     noteDocumentChanged() {
       if (disposed) return;
+      generation += 1;
       clearTimeout(timer);
       timer = setTimeout(() => void read(), LINE_NUMBERING_DEBOUNCE_MS);
     },
@@ -1258,16 +1289,11 @@ function isPageBorderDisplay(value: unknown): value is PageBorderDisplay {
  * להתיישן: שכבת הציור קוראת מכאן בכל פעם שהמסמך משתנה, כולל שינוי שבא
  * מ-Word ולא מהתפריט שלנו.
  */
-export async function readPageBorders(host: PageSetupTarget): Promise<PageBordersReading | null> {
-  const list = (host as PageSetupHost | null | undefined)?.activeEditor?.doc?.sections?.list;
-  if (typeof list !== 'function') return null;
-
-  let first: SectionItem | undefined;
-  try {
-    first = (await list())?.items?.[0];
-  } catch {
-    return null;
-  }
+export async function readPageBorders(
+  host: PageSetupTarget,
+  readSections?: ReadPageSections,
+): Promise<PageBordersReading | null> {
+  const first = await firstPageSection(host, readSections);
   if (!first) return null;
 
   const borders = first.pageBorders;
@@ -1354,6 +1380,7 @@ export function createPageBorderModel(source: PageBorderModelSource): PageBorder
     refreshNow: () => void read(),
     noteDocumentChanged() {
       if (disposed) return;
+      generation += 1;
       clearTimeout(timer);
       timer = setTimeout(() => void read(), PAGE_BORDERS_DEBOUNCE_MS);
     },

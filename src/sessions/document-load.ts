@@ -96,6 +96,8 @@ export function idleLoadSnapshot(): LoadSnapshot {
 export interface LoadAttempt {
   /** האם הפתיחה הזאת כבר אינה רלוונטית. נבדק בין שלב לשלב. */
   readonly cancelled: boolean;
+  /** מבטל קריאה ועיבוד חבילה שעדיין מתנהלים, גם כשהפתיחה הוחלפה. */
+  readonly signal: AbortSignal;
   /** מקדם את הפס לתחנה, עם טקסט מצב. נסיגה נבלעת. */
   stage(target: number, text?: string): void;
   /** הפתיחה הצליחה: 100%, ואז המחוון נעלם. */
@@ -162,6 +164,13 @@ export function createDocumentLoad(source: DocumentLoadSource): DocumentLoad {
    * שהמשתמש מחכה לה מפתיחה שהוא כבר ויתר עליה.
    */
   let generation = 0;
+  let pending: AbortController | null = null;
+
+  function abortPending(): void {
+    const controller = pending;
+    pending = null;
+    controller?.abort();
+  }
 
   function publish(): void {
     if (disposed) return;
@@ -239,6 +248,10 @@ export function createDocumentLoad(source: DocumentLoadSource): DocumentLoad {
     begin(startName, startStage = 'פותח את המסמך…') {
       // פתיחה חדשה מבטלת את הקודמת: המחוון מתאר מסמך אחד, וזה החדש.
       const mine = (generation += 1);
+      abortPending();
+      const controller = new AbortController();
+      pending = controller;
+      if (disposed) abortPending();
       stopHold();
       active = true;
       cancellable = true;
@@ -259,6 +272,7 @@ export function createDocumentLoad(source: DocumentLoadSource): DocumentLoad {
       let settled = false;
 
       return {
+        signal: controller.signal,
         get cancelled() {
           return !mineIsCurrent();
         },
@@ -276,6 +290,7 @@ export function createDocumentLoad(source: DocumentLoadSource): DocumentLoad {
         finish() {
           if (!mineIsCurrent() || settled) return;
           settled = true;
+          pending = null;
           stopCreep();
           // לפני ה-publish: מרגע שהפתיחה הצליחה אין יותר מה לבטל, וההחזקה
           // הקצרה שאחריה אינה חלון שבו „דלג” עוד תופס.
@@ -299,6 +314,7 @@ export function createDocumentLoad(source: DocumentLoadSource): DocumentLoad {
           // בלי החזקה, ובכוונה: הודעת הכשל יושבת בשורת המצב עצמה, ופס אדום
           // שנשאר לצדה רק גונב את המקום שצריך להיקרא.
           generation += 1;
+          abortPending();
           clear();
         },
       };
@@ -307,6 +323,7 @@ export function createDocumentLoad(source: DocumentLoadSource): DocumentLoad {
     cancel() {
       if (!active || !cancellable || disposed) return false;
       generation += 1;
+      abortPending();
       clear();
       return true;
     },
@@ -318,6 +335,7 @@ export function createDocumentLoad(source: DocumentLoadSource): DocumentLoad {
       disposed = true;
       cancellable = false;
       generation += 1;
+      abortPending();
     },
   };
 }

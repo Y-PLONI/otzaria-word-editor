@@ -18,7 +18,7 @@
       מהזרימה במכה אחת ולהחזיר אותם כלוח צף אחד, בלי שהמסמך יזוז. ראו
       `.shell-top` ב-`<style>`.
     -->
-    <div class="shell-top">
+    <div class="shell-top" :inert="isOpening" :aria-busy="isOpening">
       <!-- רצועת טאבים — העליונה ביותר, מעל הכותרת. אחד ל-`DocumentSession` פתוח. ראו „ריבוי מסמכים” ליד `sessions` בסקריפט. -->
       <DocumentTabsBar
         :tabs="documentTabs"
@@ -37,8 +37,8 @@
         :is-save-error="saveSnapshot.state === 'error'"
         :save-state-text="saveStateMessage"
         :autosave-enabled="autosaveEnabled"
-        :can-undo="canUndo"
-        :can-redo="canRedo"
+        :can-undo="canUndo && !isOpening"
+        :can-redo="canRedo && !isOpening"
         @save="onSave(false)"
         @undo="onUndo"
         @redo="onRedo"
@@ -62,7 +62,7 @@
         :is-exiting="isExiting"
         :book-completion-enabled="bookCompletionEnabled"
         :dictation-state="dictationState"
-        :dictation-read-only="!isDocumentEditable"
+        :dictation-read-only="!canEditDocument"
         :list-autoformat-enabled="listAutoformatEnabled"
         :navigation-pane-visible="navigationPaneVisible"
         @new-doc="openOpenDialog('new')"
@@ -107,7 +107,7 @@
           :viewport-source="rulerViewport"
           :unit="rulerUnit"
           :zoom="zoom.value"
-          :editable="isDocumentEditable"
+          :editable="canEditDocument"
           @changed="onRulerChanged"
         />
       </div>
@@ -135,7 +135,7 @@
         :viewport-source="rulerViewport"
         :unit="rulerUnit"
         :zoom="zoom.value"
-        :editable="isDocumentEditable"
+        :editable="canEditDocument"
         @changed="onRulerChanged"
       />
       <main
@@ -157,6 +157,7 @@
         :viewport-source="rulerViewport"
         :blocks="formattingMarksBlocks"
         :visible="formattingMarksVisible"
+        @scope-change="formattingMarksModel?.setBlockIds($event)"
       />
       <SpellingOverlay
         ref="spellingOverlayRef"
@@ -248,6 +249,7 @@
       :result-text="searchCounter"
       :can-replace="canShowReplace"
       :is-replacing="searchState.isReplacing"
+      :read-only="isOpening"
       @close="closeFindDialog"
       @find="onFindText"
       @query-change="onFindQueryChange"
@@ -295,8 +297,10 @@
       :intent="openDialogIntent"
       :templates="DOCUMENT_TEMPLATES"
       :recents="recentDocuments"
+      :recents-loading="recentsLoading"
       :busy="isOpening || saveSnapshot.isSaving"
       :discarded-count="discardedBackups.length"
+      :discarded-loading="discardedLoading"
       :previous-version="previousVersion"
       :notice="openDialogNotice"
       :place="openSources.place.value"
@@ -359,6 +363,8 @@
 
     <MacrosDialog
       :is-open="isMacrosOpen"
+      :busy="isOpening"
+      :is-document-blocked="isActiveEditorBlocked"
       :handle="activeMacros"
       :document-vba="documentVba"
       @close="isMacrosOpen = false"
@@ -408,32 +414,28 @@ import AboutDialog from './ui/panels/AboutDialog.vue';
 import BugReportDialog from './ui/panels/BugReportDialog.vue';
 import LinkDialog from './ui/panels/LinkDialog.vue';
 import ShortcutsDialog from './ui/panels/ShortcutsDialog.vue';
-import ShortcutManagerDialog from './ui/panels/ShortcutManagerDialog.vue';
-import OpenDocumentDialog from './ui/panels/OpenDocumentDialog.vue';
+import { lazyPanel } from './ui/panels/lazy-panel';
 import UnsavedChangesDialog from './ui/panels/UnsavedChangesDialog.vue';
 import VoiceServiceDialog from './ui/panels/VoiceServiceDialog.vue';
 import DiscardedDocumentsDialog from './ui/panels/DiscardedDocumentsDialog.vue';
 import TooltipLayer from './ui/tooltip/TooltipLayer.vue';
 import { DOCUMENT_TEMPLATES, applyTemplate, type TemplateId } from './engine/templates';
-import {
-  normalizeRecents,
-  rememberRecent,
-  forgetRecent,
-  setRecentPinned,
-  sortedRecents,
-  type RecentDocument,
-} from './sessions/recent-documents';
+import type { RecentDocument } from './sessions/recent-documents';
+import { createRecentDocumentStore } from './sessions/recent-document-store';
 import { createCommandAdapter, type CommandAdapter, type CommandOutcome } from './engine/command-adapter';
+import { createEditorInteraction, type EditorInteraction } from './engine/editor-interaction';
 import type { CommandId } from './engine/capabilities';
 import {
   COMMAND_ADAPTER,
   COMMAND_REPORTER,
+  DOCUMENT_INTERACTION_BLOCKED,
   STATUS_NOTIFIER,
   DOCUMENT_GENERATION,
   DRAFT_OPENER,
   FONT_MEMORY,
   HEAVY_ACTION_GUARD,
   FONT_OPTIONS,
+  FONT_PROBE_PRIORITIES,
   PAGE_MARKING,
   READOUT_SELECTION,
   SPELLCHECK,
@@ -463,6 +465,8 @@ import {
   registerSendToDocumentItem,
   registerEditBookItem,
   handleSendToDocument,
+  sendToDocumentText,
+  SEND_TO_DOCUMENT_ITEM_ID,
   takePendingContextMenuClicks,
   type SendToDocumentEvent,
   type ReaderResult,
@@ -489,16 +493,20 @@ import {
 } from './engine/style-gallery';
 import {
   composeFontOptions,
+  LATIN_FONT_FAMILIES,
+  OTZARIA_FONT_FAMILIES,
   fallbackFontOptions,
   observeFontSlice,
   type FontOptions,
   type FontsSliceLike,
 } from './engine/font-options';
 import { onPickerFontsChanged } from './engine/picker-fonts';
+import { createFontProbeQueue } from './engine/font-probes';
 import {
   emptyInstalledFonts,
   loadReportedFonts,
-  verifyInstalledFonts,
+  cachedInstalledFonts,
+  MEASURED_CANDIDATES,
   type InstalledFontsSnapshot,
 } from './engine/system-fonts';
 import {
@@ -552,7 +560,6 @@ import {
 import { createEditor, type EditorSession } from './engine/create-editor';
 import { ACTIVE_MACROS, installMacros, type MacrosHandle } from './engine/macros';
 import { registerShulchanTools } from './engine/shulchan/tools-registration';
-import MacrosDialog from './ui/panels/MacrosDialog.vue';
 import { installBookCompletion } from './engine/book-completion-overlay';
 import { installAtMention } from './engine/at-mention-overlay';
 import { installPasteIntercept } from './engine/paste-intercept';
@@ -570,7 +577,8 @@ import {
 } from './engine/autocorrect';
 import { installOtzariaLinkClicks } from './engine/otzaria-link-click';
 import { preflightSource } from './engine/docx-preflight';
-import { installDocumentFontAliases } from './engine/docx-fonts';
+import { forgetFamilyAvailability, installDocumentFontAliases } from './engine/docx-fonts';
+import { beginPerformanceSpan, markPerformance, type PerformanceSpan } from './diagnostics/performance';
 import {
   anchorPageIndex,
   createDocMetrics,
@@ -601,6 +609,7 @@ import {
   type PageBorderModel,
   type PageBordersReading,
 } from './engine/page-setup';
+import { createSectionSnapshot } from './engine/section-snapshot';
 import {
   createFormattingMarksModel,
   readFormattingMarksBlocks,
@@ -608,6 +617,7 @@ import {
 } from './engine/formatting-marks';
 import type { FormattingMarksBlock } from './engine/formatting-marks-layer';
 import { readParagraphIndents, toggleSelectionSpacing } from './engine/paragraph-format';
+import { forgetDocumentReads, invalidateDocumentReads, observeDocumentReadInvalidation } from './engine/document-read-state';
 import type { RulerUnit } from './engine/ruler-geometry';
 import {
   applyHebrewDocumentDefaults,
@@ -697,7 +707,7 @@ import {
   type SessionState,
   type SessionView,
 } from './sessions/session-state';
-import { createSessionKeeper, type SessionKeeper } from './sessions/session-keeper';
+import { createSessionKeeper, type KeeperSavePoint, type SessionKeeper } from './sessions/session-keeper';
 import {
   applyCaretAnchor,
   applyDocumentStartCaret,
@@ -772,31 +782,12 @@ import { focusDocument } from './engine/focus';
 import { createCaretKeeper } from './ui/shell/caret-keeper';
 import { watchCaretFocus, type CaretFocusHandle } from './ui/shell/caret-focus';
 
+const MacrosDialog = lazyPanel(() => import('./ui/panels/MacrosDialog.vue'));
+const OpenDocumentDialog = lazyPanel(() => import('./ui/panels/OpenDocumentDialog.vue'));
+const ShortcutManagerDialog = lazyPanel(() => import('./ui/panels/ShortcutManagerDialog.vue'));
+
 const editorStackRef = ref<HTMLElement | null>(null);
 const shellRef = ref<HTMLElement | null>(null);
-
-/**
- * תקרה ל-`whenIdle`. אחרי הזמן הזה העבודה רצה בין אם החוט התפנה ובין אם לא.
- *
- * „idle” בלי תקרה עלול לא להגיע לעולם במסמך שמקלידים בו בלי הפסקה, והעבודה
- * שנדחית כאן אינה קוסמטית לגמרי — היא מה שמסמן בבורר שם שהדפדפן אינו פותר.
- * שתי שניות הן זמן שבו כל פתיחת מסמך סבירה כבר הסתיימה.
- */
-const IDLE_TIMEOUT_MS = 2000;
-
-/**
- * מריצה כשהחוט פנוי — או בתקרה, המוקדם מביניהם.
- *
- * `requestIdleCallback` אינו קיים בכל דפדפן (ולא ב-jsdom), ולכן `setTimeout`
- * הוא הגיבוי: לא ה„פנוי” האמיתי, אבל כן דחייה מחוץ למסלול העלייה.
- */
-function whenIdle(work: () => void): void {
-  if (typeof requestIdleCallback === 'function') {
-    requestIdleCallback(() => work(), { timeout: IDLE_TIMEOUT_MS });
-    return;
-  }
-  setTimeout(work, IDLE_TIMEOUT_MS);
-}
 
 /**
  * לחיצה על רקע של פס מעטפת אינה לוקחת את הסמן מהמסמך — ראו
@@ -816,6 +807,7 @@ const caretIdle = ref(false);
 let caretFocus: CaretFocusHandle | null = null;
 
 const commandAdapter = shallowRef<CommandAdapter | null>(null);
+const editorInteractions = new WeakMap<EditorSession, EditorInteraction>();
 provide(COMMAND_ADAPTER, commandAdapter);
 
 /**
@@ -857,8 +849,9 @@ const installedFonts = shallowRef<InstalledFontsSnapshot>(emptyInstalledFonts())
  * שנדרש כאן הוא לומר „הרכב שוב”.
  */
 const drawableFontEpoch = shallowRef(0);
-const stopPickerFontsChanged = onPickerFontsChanged(() => {
+const stopPickerFontsChanged = onPickerFontsChanged((family) => {
   drawableFontEpoch.value += 1;
+  fontProbes.enqueue([family], true);
 });
 watchEffect(() => {
   // הקריאה היא המנוי: בלעדיה `watchEffect` אינו תלוי במונה כלל.
@@ -890,7 +883,11 @@ provide(READOUT_SELECTION, readoutSelection);
  * ה-Document API, והוא יושב על המופע ולא על ה-controller. ראו engine/document-api.ts.
  */
 const activeSuperdoc = shallowRef<SuperDoc | null>(null);
+const interactiveSuperdoc = computed(() => isOpening.value ? null : activeSuperdoc.value);
 provide(ACTIVE_SUPERDOC, activeSuperdoc);
+// גם חזרה לטאב קיים מתחילה מקריאה טרייה: פעולה אסינכרונית עשויה להסתיים
+// כשהמסמך שלו ברקע. הפסילה סינכרונית, לפני שקוראי התצוגה יראו את הטאב.
+watch(activeSuperdoc, (host) => invalidateDocumentReads(host?.activeEditor?.doc), { flush: 'sync' });
 
 /**
  * ה-container של המסמך הפתוח — installBookCompletion (engine/book-completion-
@@ -942,6 +939,7 @@ const saveExtension = shallowRef<WordExtension>('docx');
  * הכפתורים שלה ממילא מנוטרלים בלי מסמך.
  */
 function onMacroRecord(): boolean {
+  if (isActiveEditorBlocked()) return false;
   const macros = activeMacros.value;
   if (!macros) return false;
   macros.toggleRecording();
@@ -949,6 +947,7 @@ function onMacroRecord(): boolean {
 }
 
 function onMacroPlay(): boolean {
+  if (isActiveEditorBlocked()) return false;
   const macros = activeMacros.value;
   if (!macros) return false;
   macros.replayLast();
@@ -967,6 +966,35 @@ const hasDocument = computed(() => activeSuperdoc.value !== null);
 
 const title = ref('מסמך חדש');
 const isOpening = ref(false);
+// Keep document-bound UI state (notably the pre-protection mode) through a
+// temporary lock. Only replacing the document changes the injected identities.
+provide(DOCUMENT_INTERACTION_BLOCKED, isOpening);
+
+let fontFacesReady = false;
+let fontWorkDisposed = false;
+const declaredFontKeys = new Set(OTZARIA_FONT_FAMILIES.map((font) => font.value.toLowerCase()));
+const fontProbes = createFontProbeQueue({
+  isPaused: () => !fontFacesReady || isOpening.value || !activeSuperdoc.value || document.fonts?.status === 'loading',
+  skip: (family) => declaredFontKeys.has(family.toLowerCase()),
+  reportedFonts: () => installedFonts.value,
+  onMeasured: () => {
+    if (installedFonts.value.source !== 'host') installedFonts.value = cachedInstalledFonts();
+    drawableFontEpoch.value += 1;
+  },
+});
+provide(FONT_PROBE_PRIORITIES, (families) => fontProbes.enqueue(families, true));
+watch(engineFontSlice, (slice) => {
+  fontProbes.enqueue((slice?.options ?? []).map((font) => font.value), true);
+});
+const onFontCompositionStart = () => fontProbes.setComposing(true);
+const onFontCompositionEnd = () => fontProbes.setComposing(false);
+function onFontFacesLoaded(event: FontFaceSetLoadEvent): void {
+  const families = event.fontfaces.map((face) => face.family.replace(/^(['"])(.*)\1$/, '$2'));
+  for (const family of families) forgetFamilyAvailability(family);
+  fontProbes.enqueue(families, true);
+  drawableFontEpoch.value += 1;
+}
+
 /** מונע כניסה שנייה לסגירה הא-סינכרונית של כל הטאבים. */
 const isExiting = ref(false);
 /**
@@ -1287,6 +1315,14 @@ const isOpenDialogOpen = ref(false);
  */
 const openDialogIntent = ref<'new' | 'open'>('new');
 const recentDocuments = ref<RecentDocument[]>([]);
+const recentsLoading = ref(true);
+const recentStore = createRecentDocumentStore({
+  load: loadRecentDocuments,
+  save: saveRecentDocuments,
+  onChange: (list) => { recentDocuments.value = list; },
+  onLoading: (loading) => { recentsLoading.value = loading; },
+  onError: (error) => console.warn('[otzaria-word] עדכון רשימת האחרונים נכשל', error),
+});
 
 /**
  * „מסמכים שנסגרו בלי לשמור” — חמשת הגיבויים האחרונים, ומסך השחזור שלהם.
@@ -1297,6 +1333,7 @@ const recentDocuments = ref<RecentDocument[]>([]);
  * שאיש מלבדנו אינו כותב.
  */
 const discardedBackups = ref<DiscardedDocument[]>([]);
+const discardedLoading = ref(true);
 const isDiscardedOpen = ref(false);
 /** מונע שתי פתיחות של אותו עותק לפני שהקריאה מה-storage הסתיימה. */
 const isDiscardedOpening = ref(false);
@@ -1339,8 +1376,7 @@ function rememberRecentDocument(entry: {
    */
   writable: boolean;
 }): void {
-  recentDocuments.value = rememberRecent(recentDocuments.value, { ...entry, openedAt: Date.now() });
-  void saveRecentDocuments(recentDocuments.value);
+  recentStore.remember({ ...entry, openedAt: Date.now() });
 }
 
 /**
@@ -1404,6 +1440,7 @@ const rulerViewport = shallowRef<ViewportSource | null>(null);
 const rulerUnit = ref<RulerUnit>('cm');
 /** `false` במסמך שפתוח לקריאה בלבד — אז הידיות אינן נגררות. */
 const isDocumentEditable = ref(true);
+const canEditDocument = computed(() => isDocumentEditable.value && !isOpening.value);
 
 /**
  * מצב „גבולות עמוד” של המסמך הפתוח, ל-ui/shell/PageBorderOverlay.vue.
@@ -1855,7 +1892,11 @@ let editBookResolving = false;
  */
 function isOpenBusy(): boolean {
   return isOpening.value || pendingTabLoad || (openingAttempt !== null && !openingAttempt.cancelled) ||
-    tabClosePending || isExiting.value || receivedFileOpening || editBookResolving;
+    tabClosePending || isExiting.value || receivedFileOpening || editBookResolving || isDocumentModeChanging();
+}
+function isDocumentModeChanging(): boolean {
+  const editor = swap?.current;
+  return !!editor && (editorInteractions.get(editor)?.pendingModeChanges.value ?? 0) > 0;
 }
 let contextMenuListener: (() => void) | null = null;
 /** מבטל את ההאזנה לקובץ שתוסף אחר שולח. ראו `registerReceivedFiles`. */
@@ -1901,6 +1942,8 @@ function setStatus(text: string, isError = false): void {
  * שבור. כאן ההודעה נכנסת לשורת המצב, ובכשל גם ללוג של אוצריא.
  */
 function reportCommand(outcome: CommandOutcome, commandId: string): void {
+  // יש פעולות עיצוב שלא מפעילות onUpdate; כשל יכול להגיע אחרי שינוי חלקי.
+  invalidateDocumentReads(activeSuperdoc.value?.activeEditor?.doc);
   if (!outcome.ok) {
     setStatus(outcome.message, true);
     console.warn(`[otzaria-word] ${commandId} נכשלה: ${outcome.message} (${outcome.reason ?? '—'})`);
@@ -1967,16 +2010,19 @@ provide(STATUS_NOTIFIER, (text: string) => setStatus(text));
  * getter הוא סגירה, ולכן הוא רואה את ההשמה שמגיעה מיד אחרי.
  */
 function initSaveCoordinator(getSession: () => DocumentSession): SaveCoordinator {
+  // הייצואים של הקואורדינטור סדרתיים; onSaved צורך את הנקודה לפני הסבב הבא.
+  let exportedSavePoint: KeeperSavePoint;
   return createSaveCoordinator({
-    exportDocument: async () => {
+    exportDocument: async (signal) => {
       const session = getSession();
       const active = session.swap.current;
       if (!active) throw new Error('אין מסמך פתוח');
+      exportedSavePoint = session.keeper.captureSave();
       // ה-MIME הוא מה שנשלח כ-`Content-Type` בכתיבה, ו-`superdoc.export`
       // מסמן תמיד `docx`. מסמך עם מאקרו היה מוצהר לא נכון למי שקורא את
       // ההצהרה — ראו `retypeBlob`. הסיומת נקראת מהטאב הזה ולא מה-ref המוצג:
       // שמירה אוטומטית של טאב ברקע רצה כאן, על המסמך שלו.
-      return retypeBlob(await exportDocx(active.superdoc), sessionSaveExtension(session));
+      return retypeBlob(await exportDocx(active.superdoc, { signal }), sessionSaveExtension(session));
     },
     beginWrite: (size) => beginBinaryWrite(size),
     upload: uploadBytes,
@@ -2031,15 +2077,14 @@ function initSaveCoordinator(getSession: () => DocumentSession): SaveCoordinator
      */
     onSaved: (info) => {
       const session = getSession();
-      // „שמור בשם” מחליף את הקובץ שמאחורי המסמך; „שמור” רגיל אינו. רק
-      // הראשון הוא זהות חדשה, ורק אז נכון לשכוח את מקום הסמן.
+      // „שמור בשם” מחליף את הקובץ שמאחורי אותה עריכה חיה. Keeper יעדכן
+      // את היעד בתור שלו, בלי לאפס מונים של הקלדה שהתרחשה בזמן השמירה.
       if (activeEntry(session.keeper.state)?.document?.token !== info.token) {
-        session.keeper.setDocument({ token: info.token, name: info.name, writable: true });
         // „שמור בשם” הוא קובץ חדש שהמשתמש בחר בעצמו — בדיוק מה שרשימת
         // האחרונים אמורה להחזיק. שמירה רגילה אינה נכנסת לכאן (התנאי מעל),
         // ולכן היא אינה מקפיצה את המסמך לראש הרשימה בכל סבב אוטומטי.
         // „שמור בשם” כותב לקובץ שהמשתמש בחר עכשיו, ולכן הוא כתיב בהגדרה —
-        // זה גם מה ש-`setDocument` שמעליו כותב לרשומת ההפעלה.
+        // זה גם מה ש-`noteSaved` כותב לרשומת ההפעלה.
         rememberRecentDocument({
           token: info.token,
           name: info.name,
@@ -2049,7 +2094,10 @@ function initSaveCoordinator(getSession: () => DocumentSession): SaveCoordinator
       }
       // הגודל הוא של מה שנכתב עכשיו, ולכן הוא הבסיס להשוואה הבאה מול
       // הדיסק — בלעדיו „הקובץ השתנה מבחוץ” היה נשאל אחרי כל שמירה רגילה.
-      void session.keeper.noteSaved(info.size);
+      void session.keeper.noteSaved(exportedSavePoint, {
+        sourceSize: info.size,
+        document: { token: info.token, name: info.name, writable: true },
+      });
     },
   });
 }
@@ -2247,21 +2295,18 @@ function updateShellView(patch: Partial<SessionView>): void {
  * עריכה) ועשויה להיקרא בזמן שהטאב הזה ברקע.
  */
 function createOpenEditorForSession(session: DocumentSession): OpenEditor {
-  return (host, source, signal) =>
-    createEditor({
+  return (host, source, signal) => {
+    return createEditor({
       container: host,
       source,
       signal,
       onError: (err) => console.error('[otzaria-word] שגיאת מנוע:', err),
       onStatus: (message, isError) => setStatus(message, isError),
       onUpdate: () => {
+        // createEditor invalidates the originating document before notifying
+        // this session, including commits made before its promise resolves.
         session.save.markDirty();
         session.metrics?.noteDocumentChanged();
-        session.ruler?.noteDocumentChanged();
-        session.textCursor?.noteDocumentChanged();
-        session.pageBorders?.noteDocumentChanged();
-        session.lineNumbers?.noteDocumentChanged();
-        session.formattingMarks?.noteDocumentChanged();
         if (session === activeSession.value) navDocRevision.value += 1;
         // המילון משותף לכל הטאבים, ולכן זה מונה אחד ולא שדה של ה-session.
         // המחיר: עריכה בטאב **ברקע** מריצה מדידה על המסמך שעל המסך. היא לא
@@ -2271,8 +2316,16 @@ function createOpenEditorForSession(session: DocumentSession): OpenEditor {
         noteSpellcheckChanged();
         session.keeper.noteChange();
       },
-      onPaginationUpdate: (totalPages) => session.metrics?.notePaginationUpdate(totalPages),
+      onPaginationUpdate: (totalPages) => {
+        session.metrics?.notePaginationUpdate(totalPages);
+        // גובה כותרת יכול לשנות את השוליים האפקטיביים בלי לשנות w:pgMar.
+        // מרעננים את המדידה בלבד; רשימת המקטעים הגולמית נשארת משותפת.
+        session.ruler?.noteDocumentChanged();
+        session.textCursor?.noteDocumentChanged();
+        session.lineNumbers?.noteDocumentChanged();
+      },
     });
+  };
 }
 
 /**
@@ -2642,7 +2695,8 @@ async function trimLiveDocuments(): Promise<void> {
  * ולא נראה”.
  */
 async function applyNewDocumentDirection(superdoc: SuperDoc): Promise<void> {
-  const report = await applyHebrewDocumentDefaults(superdoc);
+  const doc = superdoc.activeEditor?.doc;
+  const report = await applyHebrewDocumentDefaults(superdoc).finally(() => invalidateDocumentReads(doc));
 
   if (report.failures.length === 0) {
     document.documentElement.dataset.documentDirection = 'rtl';
@@ -2714,21 +2768,57 @@ interface OpenOptions {
  * באותה שורה של 24 פיקסלים, ואין טעם שיאמרו את אותו דבר פעמיים.
  */
 async function openDocument(file?: UserFile, options: OpenOptions = {}): Promise<boolean> {
-  if (!swap || (activeSession.value && styleEditsInFlight.has(activeSession.value))) return false;
+  if (!swap || isDocumentModeChanging() || (activeSession.value && styleEditsInFlight.has(activeSession.value))) return false;
   const attempt = documentLoad.begin(
     file?.name ?? options.name ?? 'מסמך חדש',
     file || options.draft ? 'קורא את הקובץ…' : 'מכין מסמך ריק…',
   );
   openingAttempt = attempt;
+  const timing = beginPerformanceSpan('document.open', {
+    kind: options.draft ? 'draft' : file ? 'file' : 'new',
+    restored: Boolean(options.restore && (file || options.draft)),
+    restoredView: Boolean(options.restore?.caret || options.restore?.zoom != null),
+  });
+  let measuredOutcome = 'failed';
+  isOpening.value = true;
+  // Freeze the old engine as well as its DOM: Ribbon, nonmodal panels, and
+  // delayed Document API callers live outside that container. The candidate
+  // keeps its own editable mode and can initialize/focus outside this lease.
+  const previous = swap.current;
+  let releaseInteraction: (() => void) | undefined;
+  const restorePreviousInteraction = (): void => {
+    attempt.signal.removeEventListener('abort', restorePreviousInteraction);
+    const release = releaseInteraction;
+    releaseInteraction = undefined;
+    release?.();
+  };
   try {
-    return await openDocumentInto(attempt, file, options);
+    if (previous && !attempt.signal.aborted) {
+      try {
+        const interaction = editorInteractions.get(previous);
+        if (!interaction) throw new Error('לא ניתן לנעול את המסמך בזמן הפתיחה');
+        releaseInteraction = interaction.block();
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : 'לא ניתן לנעול את המסמך בזמן הפתיחה', true);
+        return false;
+      }
+      attempt.signal.addEventListener('abort', restorePreviousInteraction, { once: true });
+    }
+    if (attempt.signal.aborted) return false;
+    const opened = await openDocumentInto(attempt, file, options, timing);
+    measuredOutcome = opened ? 'opened' : attempt.cancelled ? 'cancelled' : 'not-opened';
+    return opened;
   } finally {
+    // ביטול משחרר מיד; finally מאוחר של אותו ניסיון אינו משחרר נעילה חדשה.
+    restorePreviousInteraction();
     if (openingAttempt === attempt) openingAttempt = null;
     attempt.fail();
     // וגם המצב שמשתק את הרצועה: פתיחה שזרקה השאירה אותה מנוטרלת לתמיד. הערך
     // נקרא מה-swap ולא נקבע ל-false, כדי שפתיחה חדשה יותר שכבר בדרך לא
     // תיראה כמי שהסתיימה.
     isOpening.value = (openingAttempt !== null && !openingAttempt.cancelled) || (swap?.isOpening ?? false);
+    if (previous && swap?.current === previous && !isOpening.value) returnOrphanedFocus();
+    timing?.end(measuredOutcome);
     // מנוע חי נוסף נולד כאן — הנקודה השנייה שבה התקרה יכולה להישבר (הראשונה
     // היא מעבר טאב). ראו `MAX_LIVE_DOCUMENTS`.
     void trimLiveDocuments();
@@ -2739,6 +2829,7 @@ async function openDocumentInto(
   attempt: LoadAttempt,
   file?: UserFile,
   options: OpenOptions = {},
+  timing?: PerformanceSpan,
 ): Promise<boolean> {
   if (!swap) return false;
   // ראו „ריבוי מסמכים” ליד `sessions`: פתיחה תמיד מתרחשת לתוך הטאב הפעיל —
@@ -2754,7 +2845,11 @@ async function openDocumentInto(
   // החוט הראשי, ומשם אין חזרה — גם `OPEN_TIMEOUT_MS` אינו יכול לירות. ראו
   // engine/docx-preflight.ts. השלב הזה אינו יכול להיכשל: הוא מחזיר את המקור
   // כמות שהוא בכל מקרה שאינו „מצאתי בדיוק את הערך הזה”.
-  const { source, fontTable, vba, notice: preflightNotice } = await preflightSource(options.draft ?? file?.url);
+  timing?.mark('preflight.start');
+  const { source, fontTable, vba, notice: preflightNotice } = await preflightSource(options.draft ?? file?.url, {
+    signal: attempt.signal,
+  });
+  timing?.mark('preflight.end');
   // „דלג” בזמן שהבייטים נקראו. הבדיקה כאן ולא רק לפני המנוע: שאר הפונקציה
   // כותבת למצב של המעטפת — כותרת, יעד שמירה, רשומת ההפעלה — ופתיחה שהמשתמש
   // נטש אינה אמורה לכתוב שם דבר.
@@ -2764,7 +2859,9 @@ async function openDocumentInto(
   // לפני שהמנוע מודד, ולא אחרי: `lineRule="auto"` גוזר את גובה השורה ממדדי
   // הגופן שנבחר בפועל, ולכן גופן חסר משנה את פריסת כל המסמך — לא רק את מראהו.
   // ראו engine/docx-fonts.ts. אינו יכול להיכשל, ואינו מעכב כשאין מה להחליף.
+  timing?.mark('document-fonts.start');
   await installDocumentFontAliases(fontTable);
+  timing?.mark('document-fonts.end');
   if (attempt.cancelled) return false;
   attempt.stage(LOAD_STAGES.engine, 'בונה את המסמך…');
 
@@ -2773,11 +2870,15 @@ async function openDocumentInto(
   // שהמשתמש קבע (composables/new-document-defaults.ts). `undefined` בבדיקות,
   // ואז המנוע פותח את שלו.
   let newDocumentDefaultsNotice: string | null = null;
+  timing?.mark('blank-source.start');
   const blank = !file && !options.draft
     ? await newDocumentSource(message => { newDocumentDefaultsNotice = message; })
     : undefined;
+  timing?.mark('blank-source.end');
   if (attempt.cancelled) return false;
+  timing?.mark('engine.start');
   const outcome = await swap.open(source ?? blank);
+  timing?.mark('engine.end');
 
   // ה-swap מדווח `superseded` גם על פתיחה שבוטלה — הביטול מקדם שם את הדור
   // לפני שהוא מרים את האיתות (ראו EditorSwap.cancel). המחוון כבר סולק
@@ -2794,8 +2895,20 @@ async function openDocumentInto(
   attempt.stage(LOAD_STAGES.arranging, 'מסדר את התצוגה…');
 
   const editor = outcome.session;
-  const adapter = createCommandAdapter(editor.ui);
+  timing?.bind(editor);
+  timing?.mark('arrange.start');
+  if (session) {
+    if (file) openedFileTokens.set(session, file.token);
+    else openedFileTokens.delete(session);
+  }
+  const interaction = createEditorInteraction(editor, createCommandAdapter(editor.ui));
+  editorInteractions.set(editor, interaction);
+  const adapter = interaction.commands;
   commandAdapter.value = adapter;
+  const documentApi = editor.superdoc.activeEditor?.doc;
+  editor.onDispose(() => forgetDocumentReads(documentApi));
+  const sessionSections = createSectionSnapshot(editor.superdoc);
+  editor.onDispose(() => sessionSections.dispose());
 
   // ה-`editor.superdoc` המקומי ולא `activeSuperdoc.value` בפירוק: אותה מלכודת
   // כמו באדפטר החיפוש — סגירת המסמך הקודם קורית אחרי שהחדש כבר נרשם.
@@ -2866,6 +2979,7 @@ async function openDocumentInto(
   if (editorStackRef.value) {
     try {
       const macros = installMacros(editor, editorStackRef.value, setStatus, {
+        commands: adapter,
         // אישור שמירה של הקלטה לא-שלמה — פעולה שאינה ניתנת להקלטה (למשל
         // הכנסת תמונה). הדיאלוג של אוצריא; מחוץ לאוצריא הוא מחזיר false,
         // וההקלטה מבוטלת — שמירה חלקית לא קורית בלי הסכמה.
@@ -2924,7 +3038,7 @@ async function openDocumentInto(
    * המקומי בפירוק (מסמך שנסגר אחרי שהבא נפתח אינו מפרק את הבא).
    */
   const sessionRuler = createRulerModel({
-    readPage: () => readPageMargins(editor.superdoc),
+    readPage: () => readPageMargins(editor.superdoc, sessionSections.read),
     readIndents: () => readParagraphIndents(editor.superdoc),
     onChange: (next) => {
       // מושהה (`RULER_*_DEBOUNCE_MS`) ולכן עשוי לנחות אחרי מעבר טאב — ראו
@@ -2934,6 +3048,7 @@ async function openDocumentInto(
       if (!session || session === activeSession.value) rulerReading.value = next;
     },
   });
+  editor.onDispose(observeDocumentReadInvalidation(documentApi, () => sessionRuler.noteDocumentChanged()));
   ruler = sessionRuler;
   if (session) session.ruler = sessionRuler;
   rulerHost.value = paintedHost(editor.ui);
@@ -2963,7 +3078,7 @@ async function openDocumentInto(
   const sessionTextCursor = createTextCursorWatch({
     host: paintedHost(editor.ui),
     ui: editor.ui as ViewportSource,
-    readMargins: () => readPageMargins(editor.superdoc),
+    readMargins: () => readPageMargins(editor.superdoc, sessionSections.read),
   });
   if (session) session.textCursor = sessionTextCursor;
   sessionTextCursor.refreshNow();
@@ -3042,7 +3157,7 @@ async function openDocumentInto(
    * לא רק אחרי העריכה הראשונה.
    */
   const sessionPageBorders = createPageBorderModel({
-    read: () => readPageBorders(editor.superdoc),
+    read: () => readPageBorders(editor.superdoc, sessionSections.read),
     onChange: (next) => {
       // מושהה, כמו הסרגל — ומכאן אותה הגנה בדיוק. שכבת הציור היא מופע יחיד
       // מעל הפאנל הפעיל, ולכן קריאה של מסמך אחר נראית מיד על המסך.
@@ -3071,7 +3186,7 @@ async function openDocumentInto(
    * `<w:lnNumType>` כבר בתוכו (מ-Word) מיד, לא רק אחרי העריכה הראשונה.
    */
   const sessionLineNumbering = createLineNumberingModel({
-    read: () => readLineNumbering(editor.superdoc),
+    read: () => readLineNumbering(editor.superdoc, sessionSections.read),
     onChange: (next) => {
       if (session) session.ui.lineNumbering = next;
       if (!session || session === activeSession.value) lineNumbering.value = next;
@@ -3088,6 +3203,11 @@ async function openDocumentInto(
       lineNumbering.value = null;
     }
   });
+  editor.onDispose(observeDocumentReadInvalidation(documentApi, () => {
+    sessionTextCursor.noteDocumentChanged();
+    sessionPageBorders.noteDocumentChanged();
+    sessionLineNumbering.noteDocumentChanged();
+  }));
 
   /**
    * „סימני עיצוב” (¶) של ה-session: אותו רעיון כמו שני אלה שמעל, אבל המקור
@@ -3097,7 +3217,7 @@ async function openDocumentInto(
    * העיצוב כבויים (ברירת המחדל של הפקד).
    */
   const sessionFormattingMarks = createFormattingMarksModel({
-    read: () => readFormattingMarksBlocks(editor.superdoc),
+    read: (nodeIds, isCurrent) => readFormattingMarksBlocks(editor.superdoc, nodeIds, isCurrent),
     onChange: (next) => {
       if (session) session.ui.formattingMarksBlocks = next;
       if (!session || session === activeSession.value) formattingMarksBlocks.value = next;
@@ -3105,6 +3225,11 @@ async function openDocumentInto(
   });
   formattingMarksModel = sessionFormattingMarks;
   if (session) session.formattingMarks = sessionFormattingMarks;
+  // Style commands and Undo/Redo can invalidate reads without moving the
+  // viewport or changing its block IDs. Observe the document revision itself.
+  editor.onDispose(observeDocumentReadInvalidation(
+    editor.superdoc.activeEditor?.doc, sessionFormattingMarks.noteDocumentChanged,
+  ));
   editor.onDispose(() => {
     sessionFormattingMarks.dispose();
     if (session && session.formattingMarks === sessionFormattingMarks) session.formattingMarks = null;
@@ -3281,12 +3406,6 @@ async function openDocumentInto(
   // (קורה) יישמר כ-`.docm`, אחרת Word יתלונן עליו.
   documentVba.value = vba;
   saveExtension.value = resolveSaveExtension(file?.name ?? options.name, vba.hasMacroPart);
-  // זמן הטעינה הוא מדידת פיתוח ולא הודעה למשתמש: „נטען ב-473 מילישניות” תפס
-  // את שורת המצב עד ההודעה הבאה. הוא נשמר — הוא מה שמסביר פתיחה איטית —
-  // בלוג של אוצריא, במקום שבו מסתכלים על מדידות.
-  console.info(
-    `[otzaria-word] ${title.value} נטען ב-${Math.round(performance.now() - startedAt)} מילישניות`
-  );
   setStatus('');
 
   /* שורת המצב מציגה הודעה אחת, ולכן יש סדר עדיפות בין אלה שיכולות להיאמר
@@ -3380,7 +3499,10 @@ async function openDocumentInto(
   // ואחריו המקום שהמשתמש היה בו. **אחרי** המיקוד ולא לפניו: `focus` עם
   // `restoreSelection` מציב סמן משלו, ומי שרץ אחרון הוא זה שקובע איפה הוא
   // יושב.
+  timing?.mark('arrange.end');
+  timing?.mark('view-restore.start');
   const caretRestored = await restoreDocumentView(editor, adapter, options.restore);
+  timing?.mark('view-restore.end');
   if (attempt.cancelled) return false;
 
   /*
@@ -3396,9 +3518,13 @@ async function openDocumentInto(
    * מסמך של המנוע — ובמסמך ארוך זו המתנה ארוכה, שבה המסמך כבר על המסך אך
    * הפתיחה „עוד לא נגמרה” והרצועה מנוטרלת. ראו `applyDocumentStartCaret`.
    */
+  const focusedAtOpen = document.activeElement;
   if (
     !caretRestored &&
-    !isOutsideDocumentEditing(document.activeElement) &&
+    // Candidate setup is allowed while the opening UI is blocked; only an
+    // actual competing dialog/input may keep its caret from being initialized.
+    !isModalDialogOpen() &&
+    (!isTextEntryTarget(focusedAtOpen) || isDocumentSurface(focusedAtOpen)) &&
     !hasTextCaret(editor.ui)
   ) {
     void applyDocumentStartCaret(editor.ui, editor.superdoc, editor.container);
@@ -3407,6 +3533,11 @@ async function openDocumentInto(
   // אחרון, ולא ליד `outcome.status === 'opened'`: מרגע ש-100% על המסך „דלג”
   // נעלם, ואילו שחזור התצוגה הוא עוד המתנה שהמשתמש רואה.
   attempt.finish();
+  // Includes view restoration. This is opening work, not proof that an edit
+  // has reached the document and appeared; the opt-in performance probe tests that.
+  console.info(
+    `[otzaria-word] ${title.value} נטען ב-${Math.round(performance.now() - startedAt)} מילישניות`
+  );
   return true;
 }
 
@@ -3433,6 +3564,7 @@ async function onSkipLoad(): Promise<void> {
 
   if (hasDocument.value) {
     setStatus(`פתיחת ${name} הופסקה — ${title.value} נשאר פתוח`);
+    returnOrphanedFocus();
     return;
   }
 
@@ -3517,6 +3649,12 @@ async function onSave(forceSaveAs = false): Promise<void> {
  * הוא עדיין מסמך אמיתי של המשתמש, ופתיחה נוספת לא אמורה לדרוס אותו במקום.
  */
 function isActiveTabReplaceable(): boolean {
+  const current = activeSession.value;
+  // A late startup citation must still find the previous blank tab. A fresh
+  // placeholder with no stored session can continue to be reused normally.
+  if (collectingStartupRequests && current === startupOriginalTarget) return false;
+  const remembered = current ? activeEntry(current.keeper.state) : null;
+  if (remembered?.document || remembered?.draft) return false;
   return !saveSnapshot.value.isDirty && saveSnapshot.value.targetToken === null;
 }
 
@@ -3782,8 +3920,7 @@ async function onOpenDialogRecent(token: string): Promise<void> {
 }
 
 function onOpenDialogTogglePin(token: string, pinned: boolean): void {
-  recentDocuments.value = setRecentPinned(recentDocuments.value, token, pinned);
-  void saveRecentDocuments(recentDocuments.value);
+  recentStore.setPinned(token, pinned);
 }
 
 /**
@@ -3914,6 +4051,9 @@ async function onOpenDiscarded(slot: number): Promise<void> {
         ? `${entry.name} נפתח מהעותק שנשמר בסגירה (${age}) — טרם נשמר לקובץ`
         : `${entry.name} נפתח מהעותק שנשמר בסגירה — טרם נשמר לקובץ`,
     );
+  } catch (error) {
+    console.warn('[otzaria-word] פתיחת עותק לשחזור נכשלה', error);
+    setStatus(`העותק של ${entry.name} לא נפתח — הפעולה נכשלה, ואפשר לנסות שוב`, true);
   } finally {
     isDiscardedOpening.value = false;
   }
@@ -3926,12 +4066,16 @@ async function onOpenDiscarded(slot: number): Promise<void> {
  */
 async function onForgetDiscarded(slot: number): Promise<void> {
   if (isDiscardedOpening.value) return;
-  await forgetDiscarded(slot);
+  try {
+    await forgetDiscarded(slot);
+  } catch (error) {
+    console.warn('[otzaria-word] הסרת עותק לשחזור נכשלה', error);
+    setStatus('הסרת העותק לשחזור נכשלה — אפשר לנסות שוב', true);
+  }
 }
 
 function onOpenDialogForget(token: string): void {
-  recentDocuments.value = forgetRecent(recentDocuments.value, token);
-  void saveRecentDocuments(recentDocuments.value);
+  recentStore.forget(token);
 }
 
 /**
@@ -4276,10 +4420,12 @@ async function onExportOtzaria(): Promise<void> {
  * בפס הכותרת לא הייתה מנקה/משחזרת את המעקב אף פעם (רגרסיה שנחשפה תוך כדי
  * הוספת `watchUndoRedoKeys`: היא החליפה את הניקוי שישב קודם ב-
  * `runShortcutCommand`, ומעולם לא כיסתה את הכפתורים — הם אינם אירוע מקלדת).
- * בלי `isBlocked`: לחיצה מפורשת על כפתור תמיד עוסקת במסמך, לא במקום שהפוקוס
+ * בלי חסימת שדות קלט: לחיצה מפורשת על כפתור תמיד עוסקת במסמך, לא במקום שהפוקוס
  * היה בו קודם. ראו ההסבר המלא ב-engine/page-break.ts, „QA עצמאי” → „Undo/Redo”.
  */
 function onUndo(): void {
+  if (isActiveEditorBlocked()) return;
+  invalidateDocumentReads(activeSuperdoc.value?.activeEditor?.doc);
   pageBreakTracker.forgetAllKeepingSnapshot();
   // מיד אחרי זיהוי רשימה — הביטול שלה הוא צעד אחד, כמו ב-Ctrl+Z.
   if (listAutoformat?.undo()) return;
@@ -4287,12 +4433,15 @@ function onUndo(): void {
 }
 
 function onRedo(): void {
+  if (isActiveEditorBlocked()) return;
+  invalidateDocumentReads(activeSuperdoc.value?.activeEditor?.doc);
   if (!pageBreakTracker.restoreSnapshot()) pageBreakTracker.forgetAll();
   if (listAutoformat?.redo()) return;
   void runShortcutCommand('redo');
 }
 
 function onTitleUpdate(newTitle: string): void {
+  if (isActiveEditorBlocked()) return;
   if (newTitle.trim()) {
     title.value = newTitle.trim();
     save?.markDirty();
@@ -4362,8 +4511,12 @@ function onDocumentTabSelect(id: DocumentSessionId): void {
  * ולכן זו אותה פונקציה בדיוק שפותחת את הטאב הפעיל בעלייה — כולל שחזור
  * הטיוטה, הסמן והזום, וכולל המסלול של קובץ שאינו נגיש יותר.
  */
-async function openPendingTab(session: DocumentSession): Promise<void> {
+async function openPendingTab(
+  session: DocumentSession,
+  options: { allowBlankFallback?: boolean } = {},
+): Promise<boolean> {
   session.pendingRestore = false;
+  if (collectingStartupRequests) startupAttemptedSessions.add(session.id);
   /**
    * הנעילה מורמת **לפני** ה-`await` הראשון, ולא נשענת על `isOpening` של
    * `openDocument`.
@@ -4376,13 +4529,15 @@ async function openPendingTab(session: DocumentSession): Promise<void> {
    * בקובץ שבו פתיחה מתחילה בלי שדבר מגן עליה.
    */
   pendingTabLoad = true;
+  let opened = false;
   try {
     // `slept` ולא „ממתין”: טאב ששוחזר מהפעלה קודמת ונטען כאן לראשונה מקבל את
     // הנוסח על ההפעלה הקודמת, וטאב שנרדם באותה הפעלה — את זה שמדבר על עכשיו.
-    await reopenPreviousSession(session.keeper.state, session.slept);
-    session.slept = false;
+    opened = await reopenPreviousSession(session.keeper.state, session.slept, options);
+    if (opened) session.slept = false;
   } finally {
     pendingTabLoad = false;
+    if (!opened && options.allowBlankFallback === false) session.pendingRestore = true;
   }
 
   // והמיקום השמור, עכשיו. `activateTab` כבר קרא ל-`restorePaneScroll` — אבל
@@ -4393,6 +4548,7 @@ async function openPendingTab(session: DocumentSession): Promise<void> {
   // עטופה בבדיקת „עוד הפעיל”: הפתיחה אורכת שניות, והמשתמש עשוי להיות בטאב
   // אחר מזמן — ואז זו הייתה כתיבה לתוך המסמך הלא נכון.
   if (activeSession.value === session) restorePaneScroll(session, session.ui.scroll);
+  return opened;
 }
 
 /**
@@ -4725,7 +4881,7 @@ const voiceDictation = createVoiceDictation({
   onState: (state) => {
     dictationState.value = state;
   },
-  canWrite: () => isDocumentEditable.value,
+  canWrite: () => canEditDocument.value,
   onServiceMissing: () => {
     isVoiceServiceDialogOpen.value = true;
   },
@@ -4747,7 +4903,7 @@ async function onDownloadVoiceService(): Promise<void> {
 watch(documentGeneration, () => voiceDictation.cancel());
 watch(activeSuperdoc, () => voiceDictation.cancel());
 // וכך גם מסמך שננעל לקריאה בלבד באמצע הקלטה: הכתיבה הבאה הייתה נכשלת.
-watch(isDocumentEditable, (editable) => {
+watch(canEditDocument, (editable) => {
   if (!editable) voiceDictation.cancel();
 });
 
@@ -4955,6 +5111,7 @@ function openFindDialog(mode: 'find' | 'replace', initialQuery = ''): void {
 }
 
 async function onRunCommandFromTellMe(id: string, payload?: unknown): Promise<void> {
+  if (isActiveEditorBlocked()) return;
   if (!commandAdapter.value) {
     setStatus('אין מסמך פתוח לביצוע הפעולה', true);
     return;
@@ -4975,11 +5132,13 @@ async function onRunCommandFromTellMe(id: string, payload?: unknown): Promise<vo
 }
 
 function onRunActionFromTellMe(action: ShellAction): void {
+  if (isActiveEditorBlocked()) return;
   runShellAction(action);
 }
 
 /** פעולות Tell Me שאינן פקודת מנוע או פעולת מעטפת רגילה. */
 function onCustomActionFromTellMe(action: TellMeCustomAction): void {
+  if (isActiveEditorBlocked()) return;
   switch (action) {
     case 'export-pdf':
       void onExportPdf();
@@ -5100,10 +5259,12 @@ function reportReplace(outcome: SearchOutcome | undefined, success: string): voi
 }
 
 async function onReplaceText(replacement: string): Promise<void> {
+  if (isActiveEditorBlocked()) return;
   reportReplace(await searchAdapter?.replace(replacement), 'המופע הוחלף');
 }
 
 async function onReplaceAllText(replacement: string): Promise<void> {
+  if (isActiveEditorBlocked()) return;
   // נקרא לפני הפעולה: אחריה קבוצת ההתאמות כבר התרוקנה.
   const matches = searchAdapter?.getState().total ?? 0;
   const adapter = searchAdapter;
@@ -5153,6 +5314,7 @@ function onZoomChange(level: number): void {
  * שהמשתמש עזב אותו.
  */
 function onRulerChanged(): void {
+  invalidateDocumentReads(activeSuperdoc.value?.activeEditor?.doc);
   ruler?.refreshNow();
 }
 
@@ -5241,14 +5403,15 @@ async function onOpenLibrary(): Promise<void> {
  * בזמן ריצה, וכל סדר אחר היה מחייב לפצל אחת מהן לשני מקומות.
  */
 const contextMenu = useContextMenu({
-  superdoc: activeSuperdoc,
+  superdoc: interactiveSuperdoc,
   isDocumentSurface,
-  isModalOpen: isModalDialogOpen,
-  runAction: (action) => runShellAction(action),
+  isModalOpen: () => isActiveEditorBlocked() || isModalDialogOpen(),
+  runAction: (action) => !isActiveEditorBlocked() && runShellAction(action),
   report: reportCommand,
   misspelledWordAt: (at) => spellingOverlayRef.value?.wordAt(at.x, at.y) ?? null,
   addToDictionary: addWordToDictionary,
 });
+watch(isOpening, (opening) => { if (opening) contextMenu.close(); }, { flush: 'sync' });
 
 /**
  * סגירת התפריט **והחזרת המיקוד למסמך**.
@@ -5270,14 +5433,15 @@ function closeContextMenu(): void {
  * בעצמו אינו נגרר לכאן.
  */
 function returnOrphanedFocus(): void {
+  const opened = activeSuperdoc.value;
   // אחרי שה-DOM התעדכן, ולא באותה שורה: ברגע שהדגל כובה השדה עדיין בעץ ועדיין
   // מחזיק את הפוקוס, ו-`activeElement` היה מראה אותו במקום את ה-`<body>` —
   // כלומר הבדיקה הייתה תמיד יוצאת מוקדם.
   void nextTick(() => {
+    if (!opened || activeSuperdoc.value !== opened || isActiveEditorBlocked()) return;
     const active = document.activeElement;
     if (active !== null && active !== document.body) return;
-    const opened = activeSuperdoc.value;
-    if (opened) focusOpenedDocument(opened);
+    focusOpenedDocument(opened);
   });
 }
 
@@ -5326,6 +5490,11 @@ function closeTopmostLayer(): boolean {
   // `aria-modal` — כלומר כל עוד הוא פתוח, שום שכבה מתחתיו אינה זמינה.
   if (isOpenDialogOpen.value) {
     isOpenDialogOpen.value = false;
+    return true;
+  }
+  // The manager may still be loading; its own dialog key handler is not yet mounted.
+  if (isShortcutsManagerOpen.value) {
+    isShortcutsManagerOpen.value = false;
     return true;
   }
   if (isShortcutsHelpOpen.value) {
@@ -5581,6 +5750,11 @@ function isDocumentSurface(target: EventTarget | null): boolean {
   return host !== null && target instanceof Node && host.contains(target);
 }
 
+/** הנעילה של המופע הפעיל בלבד — המועמד החדש אינו יורש אותה מהישן. */
+function isActiveEditorBlocked(): boolean {
+  return isOpening.value || activeEditorContainer.value?.inert === true;
+}
+
 /**
  * דיאלוג שמכריז `aria-modal`. מה שמאחוריו אינו זמין — גם לא לקיצור.
  *
@@ -5603,7 +5777,8 @@ function isModalDialogOpen(): boolean {
  * הזאת בחינם ממנו.
  */
 function isOutsideDocumentEditing(target: EventTarget | null): boolean {
-  return isModalDialogOpen() || (isTextEntryTarget(target) && !isDocumentSurface(target));
+  return isActiveEditorBlocked() || isModalDialogOpen() ||
+    (isTextEntryTarget(target) && !isDocumentSurface(target));
 }
 
 /**
@@ -5663,7 +5838,7 @@ function shellRegion(selector: string): HTMLElement | null {
  * לשורת המצב שמחוץ למסך.
  */
 function revealedBarAvailable(zone: Exclude<RevealZone, null>): () => boolean {
-  return () => !isFocusMode.value || revealed.value === zone;
+  return () => (zone !== 'top' || !isOpening.value) && (!isFocusMode.value || revealed.value === zone);
 }
 
 const focusRing = createFocusRing({
@@ -5691,6 +5866,7 @@ const focusRing = createFocusRing({
     {
       id: 'document',
       element: () => editorStackRef.value,
+      isAvailable: () => !isActiveEditorBlocked(),
       focus: () => focusDocument(activeSuperdoc.value),
     },
     {
@@ -5725,17 +5901,23 @@ let directionShortcut: { dispose: () => void } | null = null;
 let undoRedoWatcher: UndoRedoWatcher | null = null;
 
 /** לחיצה אחת על „שלח למסמך” — מה-latch או מהמאזין החי, אותו מסלול בדיוק. */
-function runSendToDocument(event: SendToDocumentEvent): void {
-  void handleSendToDocument(event, {
-    host: activeSuperdoc.value,
-    resolveHost: () => activeSuperdoc.value,
-  }).then((outcome) => {
-    if (outcome.ok) {
-      setStatus(outcome.value === 'at-cursor' ? 'הקטע נוסף במקום הסמן' : 'הקטע נוסף בסוף המסמך');
-    } else if (outcome.message) {
-      setStatus(outcome.message);
-    }
+async function runSendToDocument(event: SendToDocumentEvent, target?: DocumentSession): Promise<void> {
+  const resolveHost = () => target ? target.swap.current?.superdoc : activeSuperdoc.value;
+  const outcome = await handleSendToDocument(event, {
+    host: resolveHost(),
+    resolveHost,
   });
+  if (outcome.ok) {
+    setStatus(outcome.value === 'at-cursor' ? 'הקטע נוסף במקום הסמן' : 'הקטע נוסף בסוף המסמך');
+  } else if (outcome.message) {
+    setStatus(outcome.message);
+  }
+}
+
+function queueSendToDocument(event: SendToDocumentEvent): void {
+  if (event?.itemId !== undefined && event.itemId !== SEND_TO_DOCUMENT_ITEM_ID) return;
+  if (collectingStartupRequests && sendToDocumentText(event)) startupSendEvents.push(event);
+  else void runSendToDocument(event);
 }
 
 /**
@@ -5747,7 +5929,8 @@ function runSendToDocument(event: SendToDocumentEvent): void {
  * אחריו `takePendingContextMenuClicks`, שמעביר את ה-latch למצב חי. שניהם
  * באותה משימה סינכרונית, ואין חלון שבו אירוע נופל בין השניים.
  *
- * ההמתנה למסמך היא בצד השני, ב-`handleSendToDocument`: כאן עוד אין מסמך.
+ * בזמן האתחול התור ממתין לשחזור המסמך המקורי והסמן שלו. לאחר מכן
+ * `handleSendToDocument` מטפל בהמתנה הרגילה למסמך זמין.
  *
  * עטופה ב-try: `on` פונה ל-SDK דרך `bridge()`, שזורק כשאין `window.Otzaria`.
  * פריט בתפריט ההקשר אינו תנאי לעליית העורך, ולכן כשל כאן נרשם וזהו —
@@ -5763,18 +5946,16 @@ function registerSendToDocument(): void {
       if (!outcome.ok) console.warn('[otzaria-word]', outcome.message);
     });
 
-    contextMenuListener = on('contextMenu.itemClicked', (event) => runSendToDocument(event));
-    for (const pending of takePendingContextMenuClicks()) runSendToDocument(pending);
+    contextMenuListener = on('contextMenu.itemClicked', (event) => queueSendToDocument(event));
+    for (const pending of takePendingContextMenuClicks()) queueSendToDocument(pending);
   } catch (error) {
     console.warn('[otzaria-word] רישום „שלח למסמך” נכשל', error);
   }
 }
 
 /**
- * נפתרת כשהעלייה סיימה לפתוח את המסמך של ההפעלה הקודמת — בהצלחה או בכשל.
- *
- * קובץ שהגיע מתוסף אחר ממתין לה: `reopenPreviousSession` פותחת לתוך הטאב
- * הפעיל, ופתיחה שנייה שהייתה רצה במקביל הייתה נכתבת לאותו טאב.
+ * אחרי פתיחת המסמך הראשון ושחזור יעד „שלח למסמך”, אפשר לשחרר את יתר
+ * הבקשות לתור הרגיל. בקשת פתיחה מוקדמת יכולה להיות המסמך הראשון בעצמה.
  */
 let startupSettled: () => void = () => {};
 const startupDone = new Promise<void>((resolve) => {
@@ -5786,6 +5967,85 @@ const startupDone = new Promise<void>((resolve) => {
  * שהראשונה נפתחה אינה אמורה להתחרות בה על הטאב הפעיל.
  */
 let receivedFiles: Promise<void> = startupDone;
+let collectingStartupRequests = true;
+let startupOriginalTarget: DocumentSession | null = null;
+const startupOpenRequests: Array<() => Promise<boolean>> = [];
+const startupSendEvents: SendToDocumentEvent[] = [];
+const startupAttemptedSessions = new Set<DocumentSessionId>();
+
+function queueOpenRequest(request: () => Promise<boolean>): void {
+  if (collectingStartupRequests) startupOpenRequests.push(request);
+  else receivedFiles = receivedFiles.then(async () => { await request(); });
+}
+
+/** Records are already restored; instantiate only the first requested document. */
+async function openStartupDocument(restored: DocumentSession): Promise<void> {
+  let opened = false;
+  let failureMessage = '';
+  const restoredSessions = new Set(sessions.values());
+  // Send-to-document needs the old active document and its restored caret.
+  while (!startupSendEvents.length && startupOpenRequests.length && !opened) {
+    // Include source resolution before openDocument; a later fallback is not
+    // success for this selected request. Diagnostics never choose the target.
+    const intent = beginPerformanceSpan('document.intent');
+    try {
+      opened = await startupOpenRequests.shift()!();
+    } finally {
+      intent?.end(opened ? 'opened' : 'failed');
+    }
+    if (!opened && isStatusError.value) failureMessage = statusText.value;
+  }
+  async function restoreOriginalTarget(): Promise<void> {
+    activateTab(restored);
+    if (restored.pendingRestore) {
+      const intent = beginPerformanceSpan('document.intent');
+      let intendedOpened = false;
+      try {
+        if (startupAttemptedSessions.has(restored.id)) {
+          // A failed explicit request for this very tab must not retry it twice.
+          restored.pendingRestore = false;
+          await openDocument(undefined, { remember: false });
+        } else intendedOpened = await openPendingTab(restored);
+      } finally {
+        intent?.end(intendedOpened ? 'opened' : 'failed');
+      }
+    }
+  }
+  if (!opened) await restoreOriginalTarget();
+
+  // A failed new opening may leave an empty placeholder. Keep all restored
+  // records and anything with document data, and remove only unused new tabs.
+  let removed = false;
+  for (const session of sessions.values()) {
+    const entry = activeEntry(session.keeper.state);
+    if (restoredSessions.has(session) || session === activeSession.value ||
+      session.swap.current || entry?.document || entry?.draft) continue;
+    sessions.delete(session.id);
+    const index = recentTabs.indexOf(session.id);
+    if (index >= 0) recentTabs.splice(index, 1);
+    await session.destroy();
+    removed = true;
+  }
+  const active = activeSession.value;
+  if (removed && active) {
+    await persistCombinedSession(active, active.keeper.state).catch((error: unknown) => {
+      console.warn('[otzaria-word] שמירת רשומת הטאבים נכשלה', error);
+    });
+  }
+  if (!opened && failureMessage) setStatus(failureMessage, true);
+  // This is the last awaited work: sends arriving during opening or cleanup
+  // still target the original tab, after its caret has been restored.
+  if (startupSendEvents.length) await restoreOriginalTarget();
+  while (startupSendEvents.length) await runSendToDocument(startupSendEvents.shift()!, restored);
+}
+
+function finishStartupRequests(): void {
+  collectingStartupRequests = false;
+  startupOriginalTarget = null;
+  for (const request of startupOpenRequests.splice(0)) queueOpenRequest(request);
+  startupAttemptedSessions.clear();
+  startupSettled();
+}
 
 /** החלפת הטאב ממתינה גם להכרעה על עבודה לא שמורה ולכתיבה שרצה. */
 async function untilOpenIdle(): Promise<void> {
@@ -5804,16 +6064,17 @@ async function untilOpenIdle(): Promise<void> {
  * פותח „שמור בשם”. הסימון הוא גם מה שמחזיר אותו אחרי סגירת אוצריא: מסמך
  * בלי token ובלי טיוטה היה חוזר בהפעלה הבאה כמסמך ריק.
  */
-async function openReceivedFile(received: Exclude<ReceivedFile, { kind: 'ignore' }>): Promise<void> {
+async function openReceivedFile(received: Exclude<ReceivedFile, { kind: 'ignore' }>): Promise<boolean> {
   if (received.kind === 'rejected') {
     setStatus(received.message, true);
-    return;
+    return false;
   }
 
   await untilOpenIdle();
   try {
     ensureOpenTargetTab();
     const opened = await openDocument(undefined, { draft: received.blob, name: received.name });
+    if (opened && activeSession.value) activeSession.value.pendingRestore = false;
     if (opened && keeper) {
       receivedFileOpening = true;
       // כאן אין יעד כתיבה ואין autosave לקובץ המקורי. זו קבלה חדשה, לא
@@ -5825,7 +6086,7 @@ async function openReceivedFile(received: Exclude<ReceivedFile, { kind: 'ignore'
       });
       if (written !== 'written') {
         setStatus(`${received.name} נפתח, אך לא נוצר עותק לשחזור — יש לשמור לקובץ כדי למנוע אובדן`, true);
-        return;
+        return true;
       }
     }
     setStatus(
@@ -5834,6 +6095,7 @@ async function openReceivedFile(received: Exclude<ReceivedFile, { kind: 'ignore'
         : `${received.name} לא נפתח`,
       !opened,
     );
+    return opened;
   } finally {
     receivedFileOpening = false;
   }
@@ -5842,19 +6104,21 @@ async function openReceivedFile(received: Exclude<ReceivedFile, { kind: 'ignore'
 function queueReceivedFile(event: PageOpenedEvent): void {
   const received = readReceivedFile(event);
   if (received.kind === 'ignore') return;
-  receivedFiles = receivedFiles
-    .then(() => openReceivedFile(received))
-    .catch((error: unknown) => {
+  queueOpenRequest(async () => {
+    try { return await openReceivedFile(received); }
+    catch (error: unknown) {
       console.warn('[otzaria-word] פתיחת קובץ מתוסף אחר נכשלה', error);
       setStatus(`${received.kind === 'file' ? received.name : 'הקובץ'} לא נפתח`, true);
-    });
+      return false;
+    }
+  });
 }
 
 /**
  * קובץ Word שתוסף אחר שולח (`plugin.page_opened`) — ראו host/received-file.ts.
  *
  * אותו סדר בדיוק כמו `registerSendToDocument`: המאזין החי קודם, ורק אחריו
- * ריקון ה-latch, באותה משימה סינכרונית. הפתיחה עצמה ממתינה ל-`startupDone`.
+ * ריקון ה-latch, באותה משימה סינכרונית. בקשה מוקדמת מועמדת לפתיחה הראשונה.
  */
 function registerReceivedFiles(): void {
   if (!isAvailable()) return;
@@ -5872,13 +6136,17 @@ function registerReceivedFiles(): void {
  * מחזיר אותו token לאותו קובץ; מפתח הספר לבדו אינו מזהה טאבים ממסלולים אחרים.
  * טאב רדום/שטרם נטען מחזיק את היעד בזוכר, עד שקואורדינטור השמירה ייטען.
  */
-function findWritableFileTab(token: string): DocumentSessionId | null {
+const openedFileTokens = new WeakMap<DocumentSession, string>();
+
+function findFileTab(token: string): DocumentSessionId | null {
   for (const session of sessions.values()) {
     if (session.save.snapshot.targetToken === token) return session.id;
-    if (session.pendingRestore) {
-      const file = activeEntry(session.keeper.state)?.document;
-      if (file?.writable && file.token === token) return session.id;
-    }
+    const file = activeEntry(session.keeper.state)?.document;
+    if (session.pendingRestore && file?.token === token) return session.id;
+    // A read-only file has no write target. Its remembered record alone is
+    // insufficient: a failed restoration may have opened a blank fallback.
+    if (session.swap.current && session.save.snapshot.targetToken === null &&
+      openedFileTokens.get(session) === token) return session.id;
   }
   return null;
 }
@@ -5887,14 +6155,14 @@ function findWritableFileTab(token: string): DocumentSessionId | null {
  * פותחת את ספר ה-Word שהיה מוצג בקורא. ראו host/edit-book.ts.
  *
  * אותו מסלול כמו ענף „הספרייה” של „פתח מסמך” (`openLibraryBook`), ומחוץ
- * לדיאלוג: ממתינה לסוף שחזור ההפעלה ולשקט, כמו קובץ מתוסף אחר.
+ * לדיאלוג: מועמדת לפתיחה הראשונה, ואחריה עוברת בתור כמו קובץ מתוסף אחר.
  */
-async function openEditBook(event: EditBookEvent): Promise<void> {
+async function openEditBook(event: EditBookEvent): Promise<boolean> {
   const request = readEditBookClick(event);
-  if (request.kind === 'ignore') return;
+  if (request.kind === 'ignore') return false;
   if (request.kind === 'rejected') {
     setStatus(request.message, true);
-    return;
+    return false;
   }
 
   const { book } = request;
@@ -5910,15 +6178,19 @@ async function openEditBook(event: EditBookEvent): Promise<void> {
   }
   if (!result.ok) {
     setStatus(result.message, true);
-    return;
+    return false;
   }
 
   // רק אחרי שה-host פתר את זהות הקובץ: גם טאב שנפתח מ„אחרונים”, מבורר
   // הקבצים או בהפעלה קודמת יכול כבר להחזיק את העבודה העדכנית על אותו קובץ.
-  const existing = findWritableFileTab(result.value.token);
+  const existing = findFileTab(result.value.token);
   if (existing) {
-    onDocumentTabSelect(existing);
-    return;
+    const target = sessions.get(existing)!;
+    activateTab(target);
+    if (target.pendingRestore) {
+      return openPendingTab(target, { allowBlankFallback: !collectingStartupRequests });
+    }
+    return target.swap.current !== null;
   }
 
   ensureOpenTargetTab();
@@ -5928,17 +6200,21 @@ async function openEditBook(event: EditBookEvent): Promise<void> {
       ? `„${book.title}” נפתח לעריכה — „שמור” כותב לקובץ עצמו`
       : `„${book.title}” הוא ספר של הספרייה — „שמור” ישמור עותק במקום אחר`,
   });
+  if (opened && activeSession.value) activeSession.value.pendingRestore = false;
   if (!opened) setStatus(`„${book.title}” לא נפתח`, true);
+  return opened;
 }
 
 function queueEditBook(event: EditBookEvent): void {
   if (event?.itemId !== EDIT_BOOK_ITEM_ID) return;
-  receivedFiles = receivedFiles
-    .then(() => openEditBook(event))
-    .catch((error: unknown) => {
+  queueOpenRequest(async () => {
+    try { return await openEditBook(event); }
+    catch (error: unknown) {
       console.warn('[otzaria-word] „ערוך בוורד לאוצריא” נכשל', error);
       setStatus('הספר לא נפתח', true);
-    });
+      return false;
+    }
+  });
 }
 
 /**
@@ -5960,29 +6236,21 @@ function registerEditBook(): void {
 }
 
 onMounted(async () => {
-  /**
-   * המנייה של גופני המכונה — ראשונה, ובלי `await`, ובשני שלבים.
-   *
-   * בלי `await` מפני שהיא אינה תנאי לשום דבר: עד שהיא נוחתת הבורר מציג את
-   * הרשימה הקבועה, וברגע שהיא נוחתת `watchEffect` מרכיב מחדש והבורר מתמלא.
-   * פתיחת המסמך הראשון אינה אמורה להמתין למנייה של מאות משפחות.
-   *
-   * **ובשני שלבים, וזה תוקן אחרי מדידה:** „בלי `await`” אינו „בחינם”.
-   * המדידה של שלב ב' נמדדה 6.46 שניות ל-287 משפחות, ומקטע של עד 68ms גם
-   * אחרי הוויתור על החוט — כלומר היא מתחרה עם ההקלדה על ה-main thread בדיוק
-   * בשניות הראשונות שאחרי פתיחת המסמך. שלב א' (`loadReportedFonts`) הוא
-   * קריאת RPC אחת, והוא מה שממלא את הבורר; האימות נדחה ל-`whenIdle`.
-   *
-   * מה שחסר בין השניים הוא הסימון של שמות שהדפדפן אינו פותר — שורה שתיראה
-   * זמינה עד שהמדידה תנחת, לא שורה חסרה. ראו engine/system-fonts.ts.
-   */
+  // המנייה ממלאת שמות בלבד; כל מדידות הבורר עוברות דרך אותו תור מושהה.
+  document.addEventListener('keydown', fontProbes.noteActivity, true);
+  document.addEventListener('beforeinput', fontProbes.noteActivity, true);
+  document.addEventListener('input', fontProbes.noteActivity, true);
+  document.addEventListener('compositionstart', onFontCompositionStart, true);
+  document.addEventListener('compositionend', onFontCompositionEnd, true);
+  document.fonts?.addEventListener('loadingdone', onFontFacesLoaded);
+  void Promise.resolve(document.fonts?.ready).then(() => { fontFacesReady = true; });
+  fontProbes.enqueue(LATIN_FONT_FAMILIES.map((font) => font.value));
   void loadReportedFonts().then((reported) => {
+    if (fontWorkDisposed) return;
     installedFonts.value = reported;
-    whenIdle(() => {
-      void verifyInstalledFonts(reported).then((verified) => {
-        installedFonts.value = verified;
-      });
-    });
+    fontProbes.enqueue(reported.source === 'host'
+      ? reported.families.map((font) => font.value)
+      : MEASURED_CANDIDATES.map((font) => font.name));
   });
 
   /*
@@ -6024,6 +6292,7 @@ onMounted(async () => {
     // מודאלי = `aria-modal`, וזה מה שקובע. „אודות” ודיאלוג הקישור מכריזים
     // כך; דיאלוג החיפוש אינו מודאלי בכוונה, ומעליו עדיין מותר לערוך ולשמור.
     isModalOpen: () => isModalDialogOpen(),
+    isDocumentBlocked: isActiveEditorBlocked,
     isDocumentSurface,
     // הרשימה האישית, ואחריה בלבד: המנתב מגיע אליה רק כשלא נמצאה רשומה
     // מובנית, וזו כל ההבטחה של המערכת הזאת — היא נוספת ואינה דורסת.
@@ -6043,8 +6312,12 @@ onMounted(async () => {
   // בדיקה בדיוק שלמעלה — QA מדד ש-Ctrl+Z בתוך שדה טקסט של הממשק (חיפוש,
   // למשל) ניקה את המעקב בלי שום קשר למסמך לפני שהיא נוספה.
   undoRedoWatcher = watchUndoRedoKeys({
-    onUndo: () => pageBreakTracker.forgetAllKeepingSnapshot(),
+    onUndo: () => {
+      invalidateDocumentReads(activeSuperdoc.value?.activeEditor?.doc);
+      pageBreakTracker.forgetAllKeepingSnapshot();
+    },
     onRedo: () => {
+      invalidateDocumentReads(activeSuperdoc.value?.activeEditor?.doc);
       if (!pageBreakTracker.restoreSnapshot()) pageBreakTracker.forgetAll();
     },
     isBlocked: isOutsideDocumentEditing,
@@ -6064,6 +6337,16 @@ onMounted(async () => {
     // הפקד הזה הדיווח הראשון היה הולך לאיבוד.
     zoomCenter = createZoomCenter(editorStackRef.value);
 
+    // מתחילים באותו גל IPC, אך רשימות היסטוריה אינן תנאי לפתיחת מסמך.
+    // כתיבות מוקדמות לאחרונים ממוזגות אחרי הטעינה; טעינת הגיבויים יושבת
+    // בתחילת תור האחסון שלהם ולכן אינה יכולה לדרוס עדכון חדש.
+    void recentStore.load();
+    void loadDiscardedHistory().catch((error) => {
+      console.warn('[otzaria-word] טעינת העותקים לשחזור נכשלה', error);
+    });
+    // רק newDocumentSource ממתינה להגדרות האלה, לפני יצירת מסמך חדש.
+    void loadNewDocumentDefaults();
+
     // הבחירה נטענת לפני שנפתח מסמך: העריכה הראשונה עלולה להתחיל סבב autosave,
     // ואם ההעדפה עוד לא הגיעה הוא היה רץ לפי ברירת המחדל ולא לפי מה שהמשתמש
     // בחר בהפעלה הקודמת. ההעדפה של הסרגל — מאותו טעם: היא חלה על המסמך שנפתח
@@ -6072,12 +6355,11 @@ onMounted(async () => {
     // כל הקריאות במקביל ולא בזו אחר זו: כל אחת היא סבב IPC מלא מול אוצריא,
     // הן קוראות מפתחות שונים ואינן תלויות זו בזו — והן עומדות בין המשתמש לבין
     // פתיחת המסמך הראשון.
+    const preferencesTiming = beginPerformanceSpan('preferences');
     const [
       storedAutosave,
       storedRuler,
       stored,
-      storedRecents,
-      storedDiscarded,
       storedSpellcheck,
       storedCanvasColor,
       storedListAutoformat,
@@ -6089,8 +6371,6 @@ onMounted(async () => {
         loadAutosaveEnabled(),
         loadRulerVisible(),
         loadPreviousSession(),
-        loadRecentDocuments(),
-        loadDiscardBackups(),
         loadSpellcheckEnabled(),
         loadCanvasColor(),
         loadListAutoformatEnabled(),
@@ -6102,28 +6382,25 @@ onMounted(async () => {
         // ההודעה נדחית לסיום הפתיחה: בזמן טעינת המסמך שורת המצב מוחלפת,
         // ואזהרה שנכתבה כבר כאן הייתה נעלמת לפני שהמשתמש יכול לקרוא אותה.
         loadCustomShortcutList({ announce: false }),
-      ]);
+      ]).then((values) => {
+        preferencesTiming?.end('loaded');
+        return values;
+      }, (error: unknown) => {
+        preferencesTiming?.end('failed');
+        throw error;
+      });
     autosaveEnabled.value = storedAutosave;
     listAutoformatEnabled.value = storedListAutoformat;
     navigationPaneVisible.value = storedNavigationPane;
     // ערך חסר או פגום הוא ברירות המחדל, ושדה פגום נופל לברירת המחדל שלו.
     autoCorrectOptions.value = normalizeAutoCorrect(storedAutoCorrect);
     rulerPreference = storedRuler;
-    // ממוינת כבר כאן ולא רק בתצוגה: זו הרשימה שכל שאר הקוד רואה, ורשימה
-    // שמגיעה מ-storage אין לה הבטחת סדר.
-    recentDocuments.value = sortedRecents(normalizeRecents(storedRecents));
-    // אותה הכרעה בדיוק כמו של „אחרונים”: מה שמגיע מ-storage אין לו הבטחת
-    // סדר, והמיון הוא של הרשימה שכל שאר הקוד רואה — לא של התצוגה בלבד.
-    discardedBackups.value = normalizeBackups(storedDiscarded);
     // העץ של „פתח מסמך” מהמטמון — עכשיו, ולא בפתיחה הראשונה של הדיאלוג, כדי
     // שהוא ייפתח מלא. אינו חוסם את העלייה: אין לו חלק בפתיחת המסמך.
     void openSources.init();
     // ברירת המחדל של Ctrl+V. לא חוסמת: עד שהיא נקראת Ctrl+V הוא של המנוע,
     // וזו בדיוק ברירת המחדל.
     void loadPasteDefault();
-    // ברירות המחדל של מסמך חדש. לא חוסמת: מסמך חדש שנפתח לפני שהן נקראו
-    // מחכה להן בעצמו (`newDocumentSource`).
-    void loadNewDocumentDefaults();
     // צבע הבד מוחל כאן ולא בלשונית „תצוגה”: הפקד שמשנה אותו יושב בלשונית
     // שמורכבת רק כשהיא הפעילה (`v-else-if` ב-Ribbon.vue), והבד נראה מהרגע
     // הראשון. `applyCanvasColor` ולא `setCanvasColor` — זו קריאה, ואין טעם
@@ -6146,6 +6423,7 @@ onMounted(async () => {
     // כל טאב שלא שוחזר, ומהרגע שכל הטאבים חוזרים אין טאב כזה — הלולאה הזאת
     // הייתה מוחקת בדיוק את העבודה שלא נשמרה, של כל טאב שאינו הפעיל.
     const restored = restoreTabs(stored);
+    startupOriginalTarget = stored?.documents.some((entry) => entry.id === restored.id) ? restored : null;
     applyShellPreferences(stored);
 
     // ההאזנה למעבר לרקע נרשמת כאן, אחרי שיש למי לדווח. שלושת המקורות
@@ -6172,27 +6450,38 @@ onMounted(async () => {
       if (typeof requestAnimationFrame === 'function') requestAnimationFrame(repair);
     });
 
-    // טעינת מסמך אחרון או פתיחת מסמך ריק. תחנת „פותח את המסמך” מדווחת
+    // בקשת פתיחה מפורשת קודמת לטעינת המסמך האחרון; „שלח למסמך” שומרת
+    // את יעד ההפעלה הקודמת. תחנת „פותח את המסמך” מדווחת
     // מ-createEditor ולא מכאן: כאן היא הייתה מוקדמת בשנייה ויותר — הפתיחה
     // ממתינה קודם לחבילת המנוע, ומסך טעינה שאומר „פותח” בזמן שהוא מוריד
     // 9MB מתאר את השלב הלא נכון.
     try {
-      await reopenPreviousSession(restored.keeper.state);
+      await openStartupDocument(restored);
     } finally {
       // גם פתיחה שנכשלה מסירה את מסך הטעינה, ולא רק כדי „לא להיתקע”: הודעת
       // הכשל יושבת בשורת המצב שמתחת, ומסך טעינה שנשאר פרוש מסתיר בדיוק את
       // מה שצריך להיקרא.
       splashDone();
+      markPerformance('startup.settled');
       if (customShortcutsNotice !== '') setStatus(customShortcutsNotice);
-      startupSettled();
+      finishStartupRequests();
     }
   } else {
     splashDone();
-    startupSettled();
+    markPerformance('startup.settled');
+    finishStartupRequests();
   }
 });
 
 onUnmounted(() => {
+  fontWorkDisposed = true;
+  fontProbes.dispose();
+  document.removeEventListener('keydown', fontProbes.noteActivity, true);
+  document.removeEventListener('beforeinput', fontProbes.noteActivity, true);
+  document.removeEventListener('input', fontProbes.noteActivity, true);
+  document.removeEventListener('compositionstart', onFontCompositionStart, true);
+  document.removeEventListener('compositionend', onFontCompositionEnd, true);
+  document.fonts?.removeEventListener('loadingdone', onFontFacesLoaded);
   stopPickerFontsChanged();
   // מי שממתין לתשובה מקבל „ביטול” ואינו נשאר תלוי — ראו use-unsaved-prompt.ts.
   unsavedPrompt.dispose();
@@ -6289,8 +6578,8 @@ async function loadPreviousSession(): Promise<SessionState | null> {
  *
  * עד כאן שוחזר טאב אחד בלבד — הפעיל — ושאר הטאבים שהמשתמש הותיר פתוחים פשוט
  * נעלמו, וטיוטותיהם נמחקו. עכשיו **כל** רשומה שבאוסף מקבלת טאב, בסדר שהיה,
- * עם השם שלה ועם הנקודה של „לא נשמר”; מה שנטען לתוך מנוע מיד הוא המסמך הפעיל
- * בלבד, וכל טאב אחר נטען ברגע שעוברים אליו (`openPendingTab`).
+ * עם השם שלה ועם הנקודה של „לא נשמר”. ברגיל נטען תחילה המסמך הפעיל;
+ * בקשת פתיחה מפורשת יכולה להקדים אותו. היתר נטענים בבחירה בהם (`openPendingTab`).
  *
  * ההחלטה הזאת אינה קיצור דרך אלא מה שנכון גם לכשעצמו. כל מסמך פתוח הוא מופע
  * SuperDoc מלא עם ה-workers שלו; פתיחת חמישה מסמכים בעלייה הייתה מכפילה פי
@@ -6323,8 +6612,7 @@ function restoreTabs(stored: SessionState | null): DocumentSession {
   // ה-`!` בטוח: `activeId` נבחר מתוך `entries`, וכל רשומה שבו יצרה טאב.
   const activeTab = active!;
   activateTab(activeTab);
-  // הטאב הפעיל נפתח מיד (`reopenPreviousSession` ב-onMounted) ולכן אינו ממתין.
-  activeTab.pendingRestore = false;
+  // גם הפעיל נשאר ממתין עד ההכרעה: בקשת פתיחה מפורשת עשויה לפתוח טאב אחר.
 
   // אין כאן ניקוי טיוטות יתומות, ובכוונה: כל רשומה שהגיעה לכאן קיבלה טאב.
   // רשומה שנשמטה בקריאה (מזהה כפול, ראו `readDocuments`) כבר אינה ב-`stored`
@@ -6371,7 +6659,8 @@ function applyShellPreferences(session: SessionState | null): void {
 async function reopenPreviousSession(
   session: SessionState | null,
   fromThisRun = false,
-): Promise<void> {
+  options: { allowBlankFallback?: boolean } = {},
+): Promise<boolean> {
   const entry = activeEntry(session);
   const remembered = entry?.document ?? null;
   const file = remembered ? await resolveRememberedFile(remembered) : null;
@@ -6385,14 +6674,18 @@ async function reopenPreviousSession(
       ? await readDraftBytes(entry.draft.path)
       : null;
 
-    await openDocument(undefined, { draft: orphan ?? undefined });
+    if (!orphan && options.allowBlankFallback === false) {
+      setStatus(`${remembered.name} לא נמצא`, true);
+      return false;
+    }
+    const opened = await openDocument(undefined, { draft: orphan ?? undefined });
     setStatus(
       orphan
         ? `${remembered.name} לא נמצא — השינויים שלא נשמרו נפתחו כמסמך חדש`
         : `${remembered.name} לא נמצא — נפתח מסמך חדש`,
       !orphan,
     );
-    return;
+    return opened && orphan !== null;
   }
 
   const draft = await recoverDraft(session, file);
@@ -6402,15 +6695,17 @@ async function reopenPreviousSession(
     draft: draft ?? undefined, restore, name: entry?.draft?.name,
   })) {
     if (draft) setStatus(restoredDraftMessage(session, fromThisRun));
-    return;
+    return true;
   }
 
   // הפתיחה נכשלה. מסמך חדש עדיף על מסך ריק — אבל הרשומה **אינה** מתעדכנת
   // אליו: הכשל עשוי להיות זמני (worker שלא עלה, קובץ נעול), ואילו רישום
   // המסמך הריק היה מוחק את המסמך האחרון מהרשומה ומנתק אותה מהטיוטה שמחזיקה
   // את העבודה. בהפעלה הבאה מנסים שוב, בדיוק מאותה נקודה.
+  if (options.allowBlankFallback === false) return false;
   await openDocument(undefined, { remember: false });
   setStatus('המסמך האחרון לא נפתח — נפתח מסמך חדש', true);
+  return false;
 }
 
 /**
@@ -6492,6 +6787,9 @@ async function recoverDraft(
 /** בייטי הטיוטה כ-Blob שאפשר למסור למנוע, או `null` כשאין. */
 async function readDraftBytes(path: string): Promise<Blob | null> {
   const bytes = await readWorkspaceBytes(path);
+  // Only called after choosing a draft to restore. Choosing the disk file
+  // returns earlier; losing the chosen draft must not validate that fallback.
+  if (!bytes) markPerformance('document.intent.source-unavailable');
   return bytes ? new Blob([bytes], { type: DOCX_MIME }) : null;
 }
 
@@ -6519,6 +6817,18 @@ async function discardWithBackup(session: DocumentSession | null): Promise<void>
  * ידרוס כתיבה שזה עתה הושלמה את מחיקתו.
  */
 let discardedStorageChain: Promise<void> = Promise.resolve();
+let discardedHydration: Promise<void> | null = null;
+
+function loadDiscardedHistory(): Promise<void> {
+  discardedHydration ??= enqueueDiscardedStorageOperation(async () => {
+    try {
+      discardedBackups.value = normalizeBackups(await loadDiscardBackups());
+    } finally {
+      discardedLoading.value = false;
+    }
+  });
+  return discardedHydration;
+}
 
 function enqueueDiscardedStorageOperation(operation: () => Promise<void>): Promise<void> {
   const task = discardedStorageChain.then(operation);

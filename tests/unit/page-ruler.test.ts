@@ -314,10 +314,10 @@ describe('createRulerModel', () => {
       onChange: (next: RulerReading | null) => readings.push(next),
       ...overrides,
     };
-    return { adapter: createRulerModel(source), readings, source, readPage };
+    return { adapter: createRulerModel(source), readings, source, readPage, readIndents };
   }
 
-  it('סרגל מוסתר אינו קורא כלום — `doc.get` סורק את המסמך כולו', async () => {
+  it('סרגל מוסתר אינו קורא כלום', async () => {
     const { adapter, source } = model();
     adapter.noteSelectionChanged();
     await vi.advanceTimersByTimeAsync(1000);
@@ -436,6 +436,97 @@ describe('createRulerModel', () => {
 
     expect(readings).toEqual([]);
   });
+  it('coalesces document and selection events into one trailing read', async () => {
+    const { adapter, readPage, readIndents } = model();
+    adapter.setEnabled(true);
+    await vi.advanceTimersByTimeAsync(0);
+    readPage.mockClear();
+    readIndents.mockClear();
+    adapter.noteDocumentChanged();
+    adapter.noteSelectionChanged();
+    adapter.noteDocumentChanged();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(readPage).toHaveBeenCalledTimes(1);
+    expect(readIndents).toHaveBeenCalledTimes(1);
+    adapter.dispose();
+  });
+
+  it('refreshNow cancels the pending debounced read', async () => {
+    const { adapter, readPage } = model();
+    adapter.setEnabled(true);
+    await vi.advanceTimersByTimeAsync(0);
+    readPage.mockClear();
+    adapter.noteDocumentChanged();
+    adapter.noteSelectionChanged();
+    adapter.refreshNow();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(readPage).toHaveBeenCalledTimes(1);
+    adapter.dispose();
+  });
+
+  it('rejects an old response immediately after a new event, before its debounce expires', async () => {
+    let resolve!: (value: ParagraphIndentReading) => void;
+    const { adapter, readings } = model({
+      readIndents: vi.fn(() => new Promise<ParagraphIndentReading>((done) => { resolve = done; })),
+    });
+    adapter.setEnabled(true);
+    await vi.advanceTimersByTimeAsync(0);
+    adapter.noteSelectionChanged();
+    resolve(PARAGRAPH);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readings).toEqual([]);
+    adapter.dispose();
+  });
+
+  it('serializes refreshes while an old read is pending and reads the latest state once', async () => {
+    let resolve!: (value: PageMarginsState) => void;
+    const readPage = vi.fn(async () => PAGE).mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    const { adapter, readings } = model({ readPage });
+    adapter.setEnabled(true);
+    adapter.noteDocumentChanged();
+    adapter.noteSelectionChanged();
+    await vi.advanceTimersByTimeAsync(1000);
+    adapter.refreshNow();
+    adapter.refreshNow();
+    expect(readPage).toHaveBeenCalledTimes(1);
+    resolve(PAGE);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readPage).toHaveBeenCalledTimes(2);
+    expect(readings).toHaveLength(1);
+    adapter.dispose();
+  });
+
+  it('publishes a changed write target even when the story has an identical paragraph ID and indents', async () => {
+    let paragraph = PARAGRAPH;
+    const { adapter, readings } = model({ readIndents: vi.fn(async () => paragraph) });
+    adapter.setEnabled(true);
+    await vi.advanceTimersByTimeAsync(0);
+    paragraph = { ...PARAGRAPH, target: { ...PARAGRAPH.target, story: { kind: 'story', storyType: 'headerFooterPart', refId: 'header1' } } };
+    adapter.refreshNow();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readings).toHaveLength(2);
+    expect(adapter.getState()?.target).toEqual(paragraph.target);
+    paragraph = { ...paragraph, target: { ...paragraph.target, nodeType: 'heading' } };
+    adapter.refreshNow();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readings).toHaveLength(3);
+    adapter.dispose();
+  });
+
+  it('does not dispatch a queued refresh after disabling the ruler', async () => {
+    let resolve!: (value: PageMarginsState) => void;
+    const readPage = vi.fn(() => new Promise<PageMarginsState>((done) => { resolve = done; }));
+    const { adapter, readings } = model({ readPage });
+    adapter.setEnabled(true);
+    adapter.refreshNow();
+    adapter.setEnabled(false);
+    resolve(PAGE);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(readPage).toHaveBeenCalledTimes(1);
+    expect(readings).toEqual([]);
+    adapter.dispose();
+  });
+
 });
 
 /* ------------------------------------------------------------------ */

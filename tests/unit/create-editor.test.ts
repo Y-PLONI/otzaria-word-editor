@@ -5,6 +5,8 @@
  * controllers שאינם מסונכרנים.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { SuperDocExtension, SuperDocExtensionContext, SuperDocMutationEvent } from 'superdoc';
+import { getDocumentReadRevision } from '../../src/engine/document-read-state';
 
 interface FakeConfig {
   selector: HTMLElement;
@@ -14,7 +16,8 @@ interface FakeConfig {
   measurementUnit?: string;
   workerUrls?: unknown;
   modules?: unknown;
-  onEditorUpdate?: () => void;
+  extensions: SuperDocExtension[];
+  onEditorUpdate?: (params: { editor?: { doc: object }; sourceEditor?: { doc: object } }) => void;
   onPaginationUpdate?: (params: { totalPages: number; superdoc: FakeSuperDoc }) => void;
   onReady: (params: { superdoc: FakeSuperDoc }) => void;
   onException: (payload: unknown) => void;
@@ -24,6 +27,7 @@ class FakeSuperDoc {
   static instances: FakeSuperDoc[] = [];
   readonly config: FakeConfig;
   readonly ui = { destroy: vi.fn(), commands: { has: () => true } };
+  activeEditor: { doc: object } | null = null;
   readonly destroy = vi.fn();
 
   constructor(config: FakeConfig) {
@@ -92,16 +96,59 @@ describe('createEditor', () => {
     expect(instance.config.telemetry).toEqual({ enabled: false });
   });
 
-  it('מחבר את onEditorUpdate כשנמסר, ולא כשלא', () => {
-    // זה מה שמסמן את המסמך כלא-שמור. בלי החיבור הזה „שמור” לא ידע שיש מה לשמור.
-    const onUpdate = vi.fn();
-    createEditor({ container: document.createElement('div'), onUpdate });
+  it('invalidates the native payload document before createEditor resolves, then notifies the session', async () => {
+    const doc = {};
+    const revision = getDocumentReadRevision(doc);
+    const onUpdate = vi.fn(() => expect(getDocumentReadRevision(doc)).not.toBe(revision));
+    const pending = createEditor({ container: document.createElement('div'), onUpdate });
     const withHook = lastInstance()!;
-    withHook.config.onEditorUpdate?.();
+    withHook.activeEditor = { doc };
+    withHook.config.onEditorUpdate?.({ editor: { doc } });
     expect(onUpdate).toHaveBeenCalledTimes(1);
+    withHook.config.onReady({ superdoc: withHook });
+    (await pending).destroy();
+  });
 
-    createEditor({ container: document.createElement('div') });
-    expect(lastInstance()!.config.onEditorUpdate).toBeUndefined();
+  it('invalidates native updates even without a session callback', async () => {
+    const doc = {};
+    const revision = getDocumentReadRevision(doc);
+    const { instance, session } = mount();
+    instance.activeEditor = { doc };
+    instance.config.onReady({ superdoc: instance });
+    const editor = await session;
+    instance.config.onEditorUpdate?.({ editor: { doc } });
+    expect(getDocumentReadRevision(doc)).not.toBe(revision);
+    editor.destroy();
+  });
+
+  it('wires extension commits to the captured document and session callback until disposal', async () => {
+    const doc = {};
+    const otherDoc = {};
+    const onUpdate = vi.fn();
+    const pending = createEditor({ container: document.createElement('div'), onUpdate });
+    const instance = lastInstance()!;
+    instance.activeEditor = { doc };
+    const extension = instance.config.extensions.find((item) => item.id === 'otzaria.document-updates')!;
+    let notify!: (event: SuperDocMutationEvent) => void;
+    const unsubscribe = vi.fn();
+    extension.activate({
+      onMutation: (_filter: unknown, handler: typeof notify) => { notify = handler; return unsubscribe; },
+    } as unknown as SuperDocExtensionContext);
+    instance.config.onReady({ superdoc: instance });
+    const editor = await pending;
+    const revision = getDocumentReadRevision(doc);
+    const otherRevision = getDocumentReadRevision(otherDoc);
+    instance.activeEditor = { doc: otherDoc };
+    const mutation: SuperDocMutationEvent = { id: 'write', origin: 'extension', affects: new Set(['block']), stories: [] };
+    notify(mutation);
+    expect(getDocumentReadRevision(doc)).not.toBe(revision);
+    expect(getDocumentReadRevision(otherDoc)).toBe(otherRevision);
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+    editor.destroy();
+    notify(mutation);
+    instance.config.onEditorUpdate?.({ editor: { doc } });
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
 
   it('מחבר את onPaginationUpdate ומעביר את מספר העמודים בלבד', () => {

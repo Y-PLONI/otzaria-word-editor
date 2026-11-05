@@ -6,7 +6,7 @@
  * מריץ את ה-payload דרך הוולידטורים האמיתיים של superdoc, ולכן פקודה שהמנוע
  * היה דוחה נופלת כאן ולא אצל המשתמש.
  */
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { nextTick } from 'vue';
 import ContextMenu from '../../src/ui/menu/ContextMenu.vue';
 import {
@@ -18,6 +18,7 @@ import HomeTab from '../../src/ui/ribbon/tabs/HomeTab.vue';
 import { createFontMemory } from '../../src/composables/use-font-controls';
 import RibbonCombo from '../../src/ui/ribbon/common/RibbonCombo.vue';
 import type { PickerOption } from '../../src/composables/picker-value';
+import * as fontAvailability from '../../src/engine/docx-fonts';
 import {
   autoUnmount,
   createCommandDouble,
@@ -384,16 +385,30 @@ describe('שורת הגופן בתפריט ההקשר', () => {
     expect(values[values.indexOf('13') + 1]).toBe('14');
   });
 
-  /** ובבורר הגופן `preview` כן שם — שם שאינו ברשימה מוצג בגופן של עצמו. */
-  it('גופן שאינו ברשימה נוסף בראשה, ומוצג בגופן עצמו', async () => {
-    const adapter = createCommandDouble();
-    adapter.setState('font-family', { value: 'Guttman Yad' });
+  it.each([
+    { name: 'טרם נבדק', available: undefined, pending: true, unavailable: false },
+    { name: 'זמין', available: true, pending: false, unavailable: false },
+    { name: 'חסר', available: false, pending: false, unavailable: true },
+  ])('גופן נוכחי שאינו ברשימה נוסף בראשה לפי מצב המטמון: $name', async ({ available, pending, unavailable }) => {
+    const cached = vi.spyOn(fontAvailability, 'cachedFamilyAvailability').mockReturnValue(available);
+    const measure = vi.spyOn(fontAvailability, 'isFamilyAvailable');
+    try {
+      const adapter = createCommandDouble();
+      adapter.setState('font-family', { value: 'Guttman Yad' });
+      const menu = open(sections(), { adapter });
+      await settle();
 
-    const menu = open(sections(), { adapter });
-    await settle();
-
-    const options = optionsOf(menu, 'גופן');
-    expect(options[0]).toMatchObject({ value: 'Guttman Yad', preview: 'Guttman Yad' });
+      const current = optionsOf(menu, 'גופן')[0];
+      expect(current?.value).toBe('Guttman Yad');
+      expect(current?.preview).toBe(available === true ? 'Guttman Yad' : undefined);
+      expect(current?.pending === true).toBe(pending);
+      expect(current?.unavailable === true).toBe(unavailable);
+      expect(current?.measured).toBe(available !== undefined);
+      expect(measure).not.toHaveBeenCalled();
+    } finally {
+      measure.mockRestore();
+      cached.mockRestore();
+    }
   });
 
   it('גופן שהוחל מהתפריט מופיע ברצועה מיד', async () => {

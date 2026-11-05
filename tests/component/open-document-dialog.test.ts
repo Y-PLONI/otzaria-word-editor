@@ -55,6 +55,18 @@ function open(props: Record<string, unknown> = {}) {
 }
 
 describe('OpenDocumentDialog — מעטפת', () => {
+  it('היסטוריה שעדיין נטענת אינה מוצגת כריקה ואינה חוסמת עיון בקבצים', async () => {
+    const { wrapper } = open({ recents: [], recentsLoading: true, discardedLoading: true });
+    expect(wrapper.find('.rec-section').attributes('aria-busy')).toBe('true');
+    expect(wrapper.text()).toContain('טוען מסמכים אחרונים');
+    expect(wrapper.text()).not.toContain('עדיין אין מסמכים אחרונים');
+    expect(wrapper.find('.open-discarded').attributes('disabled')).toBeDefined();
+    expect(wrapper.find('.open-browse').attributes('disabled')).toBeUndefined();
+    await wrapper.setProps({ recentsLoading: false, discardedLoading: false });
+    expect(wrapper.text()).toContain('עדיין אין מסמכים אחרונים');
+    expect(wrapper.find('.open-discarded').exists()).toBe(false);
+  });
+
   it('סגור אינו מרונדר בכלל', () => {
     const { wrapper } = mountUi(OpenDocumentDialog, { props: { isOpen: false } });
     expect(wrapper.find('.open-dialog').exists()).toBe(false);

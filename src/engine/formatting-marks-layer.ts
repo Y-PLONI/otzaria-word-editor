@@ -15,7 +15,15 @@
  * הרשימות הוא פשוט לא מנסה למקם (ראו "היקף" למטה) — בלי לגעת בבעיה שאין לה
  * פתרון.
  *
- * ## הטכניקה: התאמת-רצף בין TreeWalker ל-blocks.list()
+ * ## המסלול הממוקד
+ *
+ * formatting-marks-viewport מודד רק סופי פסקאות בעמודים הנראים וסביבתם.
+ * painted-lines מאמת זהות של פסקת גוף וסיום fragment; הטקסט מגיע מבקשת
+ * blocks.list מסוננת. buildMappedPilcrowMarks מתאים כל סוף למזהה שלו,
+ * ובפסקה חוצה עמוד מאמת את סיומת הטקסט. אין תלות ברצף שמחוץ לחלון.
+ * כשמיפוי הזהות חסר, שני הרצפים המלאים נשארים במסלול הישן להלן.
+ *
+ * ## ה-fallback: התאמת-רצף בין TreeWalker ל-blocks.list()
  *
  * שני רצפים, שניהם בסדר מסמך: רשימת ה-`FormattingMarksRun` (כל Text node
  * גלוי, `measureAllPageTextRuns`) ורשימת ה-`FormattingMarksBlock` (הטקסט
@@ -74,6 +82,13 @@ export interface FormattingMarksRun {
   text: string;
   rects: readonly RawTextRect[];
   direction: 'ltr' | 'rtl';
+}
+
+/** A final painted fragment, validated against the matching Document API ID. */
+export interface FormattingMarksEnd {
+  nodeId: string;
+  continuesFromPrevious: boolean;
+  runs: readonly FormattingMarksRun[];
 }
 
 /** מיקום ¶ אחד לציור. */
@@ -210,5 +225,31 @@ export function buildPilcrowMarks(
     }
   }
 
+  return marks;
+}
+
+/** Match each paragraph to its own ending; identical text cannot shift identity. */
+export function buildMappedPilcrowMarks(
+  blocks: readonly FormattingMarksBlock[],
+  endings: readonly FormattingMarksEnd[],
+): PilcrowMark[] {
+  const byId = new Map(blocks.map((block) => [block.nodeId, block]));
+  const counts = new Map<string, number>();
+  for (const end of endings) counts.set(end.nodeId, (counts.get(end.nodeId) ?? 0) + 1);
+  const marks: PilcrowMark[] = [];
+  for (const end of endings) {
+    const block = byId.get(end.nodeId);
+    if (!block || block.nodeType !== ELIGIBLE_NODE_TYPE || counts.get(end.nodeId) !== 1) continue;
+    const target = canonicalTarget(block.text);
+    const painted = end.runs.map((run) => run.text).join('');
+    if (target.length === 0) {
+      if (!isWhitespaceOnly(painted)) continue;
+    } else if (!painted || (end.continuesFromPrevious ? !target.endsWith(painted) : target !== painted)) {
+      continue;
+    }
+    const last = end.runs[end.runs.length - 1];
+    const anchor = last ? anchorFromRun(last, false) : null;
+    if (anchor) marks.push({ nodeId: block.nodeId, ...anchor });
+  }
   return marks;
 }

@@ -12,6 +12,7 @@ import type {
   OtzariaGlobal,
   ThemePayload,
 } from '../types/otzaria_plugin';
+import { beginPerformanceApi } from '../diagnostics/performance';
 
 /** ב-WebView של אוצריא ה-SDK תמיד קיים; בדפדפן רגיל הוא עשוי לא להיות. */
 function bridge(): OtzariaGlobal {
@@ -65,7 +66,15 @@ export function isPermissionDenied(error: unknown): boolean {
 
 /** קריאה ל-Host API. זורקת שגיאה עם ההודעה שהגיעה מאוצריא. */
 export async function call<T>(method: string, payload?: Record<string, unknown>): Promise<T> {
-  const res = await bridge().call<T>(method, payload);
+  const measured = beginPerformanceApi('host', method, payload);
+  let res;
+  try {
+    res = await bridge().call<T>(method, payload);
+  } catch (error) {
+    measured?.(undefined, 'error');
+    throw error;
+  }
+  measured?.(res, res.success ? 'ok' : 'error');
   if (!res.success) {
     throw new HostCallError(
       res.error?.message ?? `הקריאה ל-${method} נכשלה`,

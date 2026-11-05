@@ -600,6 +600,13 @@ export interface SendToDocumentEvent {
   currentRef?: string | null;
 }
 
+/** Shared validation for the startup target decision and the eventual insertion. */
+export function sendToDocumentText(event: SendToDocumentEvent | null | undefined): string {
+  return event?.selection
+    ? buildCitationText(event.selection)
+    : withRef(event?.selectedText ?? '', event?.currentRef ?? '');
+}
+
 /**
  * רושמת את הפריט מ-JS — מסלול הגיבוי שמתואר ב-`SEND_TO_DOCUMENT_ITEM`.
  *
@@ -680,9 +687,7 @@ export async function handleSendToDocument(
 
   // `selection` הוא המסלול הרגיל; השדות השטוחים הם מה שמארח ישן מוסר, ושניהם
   // מגיעים לאותו `withRef` כדי שלא ייווצר ניסוח שני לאותו ציטוט.
-  const text = event?.selection
-    ? buildCitationText(event.selection)
-    : withRef(event?.selectedText ?? '', event?.currentRef ?? '');
+  const text = sendToDocumentText(event);
   if (!text) {
     return { ok: false, reason: 'empty-text', message: 'שליחת הקטע נכשלה: לא נמצא טקסט מסומן' };
   }

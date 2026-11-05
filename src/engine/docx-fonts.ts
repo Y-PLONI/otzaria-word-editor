@@ -245,23 +245,7 @@ export function isFamilyAvailable(name: string): boolean {
   return available;
 }
 
-/**
- * זיכרון תשובות הזמינות, באותה מכניקה של `hebrewCoverage` ומאותם שני טעמים.
- *
- * **הרישיות** — `keepAvailable` שואל על כל שם שהמכונה מדווחת (נמדד: 287
- * משפחות), ובורר הגופן שואל על גופני המסמך בכל מיזוג מחדש; בלי מיתות היו כאן
- * שלוש רשומות ל-`Arial`/`ARIAL`/`arial`.
- *
- * **והדור** — וזה מה שהופך את המטמון לנכון ולא רק למהיר.
- * `installDocumentFontAliases` דורס את ה-`@font-face` בכל מסמך, כלומר שם
- * שאינו נפתר במסמך א' **כן** נפתר במסמך ב'. `familyProbeKey` נושא את הדור,
- * ו-`advanceAliasGeneration` מנקה — ולכן תשובה אינה שורדת את ההזרקה שהפכה
- * אותה לשגויה.
- *
- * זו הייתה הסיבה היחידה שהמיזוג לא מדד את גופני המסמך. היא נפלה: ההזרקה
- * מתרחשת ב-`await` **לפני** `swap.open` (App.vue), ולכן כשמגיע דיווח הגופנים
- * של מסמך האליאסים שלו כבר במקום.
- */
+/** תשובות נשמרות לפי משפחה; הזרקה שוכחת רק את השמות שהיא משנה. */
 const familyAvailability = new Map<string, boolean>();
 
 /** מחרוזת המדידה לכיסוי עברית בלבד. ראו `coversHebrew`. */
@@ -286,59 +270,22 @@ const HEBREW_PROBE_TEXT = 'אבגדהוזחטיכלמנסעפצקרשת';
  */
 const HEBREW_PROBE_BASES: readonly string[] = ['monospace', 'serif', 'sans-serif'];
 
-/**
- * זיכרון התשובות. `coversHebrew` נשאלת על כל שם ברשימה בכל מיזוג מחדש — מאות
- * שמות, וכל מיזוג הוא דיווח של המנוע.
- *
- * המפתח ממותת (`familyProbeKey`) ונושא את **דור** האליאסים, ושני אלה הם
- * תיקונים של תשובות שנמדדו שגויות:
- *
- * 1. **רישיות.** `Arial`, `ARIAL` ו-`arial` נמדדו כשלוש רשומות ושלוש מדידות,
- *    בזמן ש-`familyKey` ב-font-options.ts ממותת ומאחד אותן לאפשרות אחת.
- * 2. **דור.** `installDocumentFontAliases` דורס את `@font-face` בכל מסמך,
- *    כלומר התשובה **כן** משתנה תוך ההפעלה, ולשני הכיוונים: גופן שנפתר רק
- *    דרך האליאס נמדד `false` לפני ההזרקה ונשאר מסווג „בלי עברית” לתמיד
- *    (נמדד: `FrankRuhlCLM=false`), ו-`true` שנמדד בזכות מסמך א' נשאר אחרי
- *    שמסמך ב' דרס את הסגנון — ואז הדגימה נצבעת ב-fallback, בדיוק מה שהדגל
- *    קיים כדי למנוע.
- */
 const hebrewCoverage = new Map<string, boolean>();
 
-/**
- * הדור הנוכחי של `@font-face` המוזרק. מתקדם בכל `installDocumentFontAliases`.
- */
-let aliasGeneration = 0;
-
-/** המפתח שתשובת הכיסוי נשמרת תחתיו. ראו `hebrewCoverage`. */
 function familyProbeKey(name: string): string {
-  return `${aliasGeneration} ${name.trim().toLowerCase()}`;
+  return name.trim().toLowerCase();
 }
 
-/**
- * מודיעה שהאליאסים הוזרקו מחדש, ולכן כל תשובת כיסוי שנמדדה קודם אינה תקפה.
- *
- * הדור במפתח הוא מה שמפריד; הניקוי הוא כדי שהמפה לא תגדל בכל מסמך שנפתח.
- */
-function advanceAliasGeneration(): void {
-  aliasGeneration += 1;
-  hebrewCoverage.clear();
-  // ניקוי זיכרון, ולא נכונות — וההבחנה חשובה כדי שלא ייכתב כאן שומר מיותר:
-  // המפתח נושא את הדור, ולכן דור חדש **מחטיא** בלאו הכי וקורא מדידה טרייה.
-  // בלי הניקוי המפה הייתה גדלה בכל מסמך שנפתח, וזה כל ההבדל.
-  familyAvailability.clear();
+/** קריאה ללא מדידה; undefined פירושו שעדיין אין תשובה. */
+export function cachedFamilyAvailability(name: string): boolean | undefined {
+  return familyAvailability.get(familyProbeKey(name));
 }
 
-/**
- * שוכחת את תשובת הזמינות של **משפחה אחת**, אחרי שהוזרק לה `@font-face` חדש.
- *
- * למה לא `advanceAliasGeneration` — היא הפטיש של פתיחת מסמך, ומחיקה של
- * `hebrewCoverage` כולו פירושה מאות מדידות כיסוי מחדש במיזוג הבא. הזרקה של
- * משפחה בודדת (engine/picker-fonts.ts) משנה תשובה **אחת**, ורק אותה יש לשכוח.
- *
- * ומדוע `hebrewCoverage` אינו נוגע בזה בכלל: הכיסוי של המשפחה אכן משתנה עם
- * ההזרקה — גופן שלא היה נפתר לא כיסה כלום — ולכן גם הוא נשכח כאן. שתי המפות
- * חולקות את `familyProbeKey`, ולכן זו שורה אחת לכל אחת.
- */
+export function cachedHebrewCoverage(name: string): boolean | undefined {
+  return hebrewCoverage.get(familyProbeKey(name));
+}
+
+/** הזרקת משפחה משנה גם את זמינותה וגם את כיסוי העברית שלה. */
 export function forgetFamilyAvailability(name: string): void {
   const key = familyProbeKey(name);
   familyAvailability.delete(key);
@@ -419,6 +366,8 @@ function measurementContext(): CanvasRenderingContext2D | null {
 export interface AliasPlan {
   /** כללי `local()` — למשפחות שיש להן תחליף מותקן. */
   css: string;
+  /** כלל מקומי לפי משפחה, לצורך ביטול מטמון נקודתי. */
+  aliases: ReadonlyMap<string, string>;
   /**
    * משפחות שאין להן אף תחליף מותקן. **רק** להן צריך בייטים מאוצריא: גופן
    * ב-base64 שוקל מאות קילובייטים, ואין סיבה לשלוח אותו כשיש מקומי שעונה.
@@ -438,14 +387,15 @@ export function planFontAliases(
   fonts: DeclaredFont[],
   available: (name: string) => boolean = isFamilyAvailable,
 ): AliasPlan {
-  const rules: string[] = [];
+  const aliases = new Map<string, string>();
   const needBytes: DeclaredFont[] = [];
   const missing: DeclaredFont[] = [];
   const seen = new Set<string>();
 
   for (const font of fonts) {
-    if (!font.hebrew || seen.has(font.name)) continue;
-    seen.add(font.name);
+    const key = familyProbeKey(font.name);
+    if (!font.hebrew || seen.has(key)) continue;
+    seen.add(key);
     if (available(font.name)) continue;
     missing.push(font);
 
@@ -455,9 +405,9 @@ export function planFontAliases(
       continue;
     }
     const src = chain.map((candidate) => `local(${JSON.stringify(candidate)})`).join(',');
-    rules.push(`@font-face{font-family:${JSON.stringify(font.name)};src:${src};}`);
+    aliases.set(key, `@font-face{font-family:${JSON.stringify(font.name)};src:${src};}`);
   }
-  return { css: rules.join('\n'), needBytes, missing };
+  return { css: [...aliases.values()].join('\n'), aliases, needBytes, missing };
 }
 
 /** התחליפים שיישלחו לאוצריא עבור משפחה — אותה שרשרת, בלי סינון זמינות. */
@@ -465,38 +415,68 @@ export function substitutesFor(font: DeclaredFont): string[] {
   return [...SUBSTITUTES[shapeOf(font)]];
 }
 
+let documentAliases = new Map<string, string>();
+let documentAliasStyle: HTMLStyleElement | null = null;
+let lastHostedAliases: { key: string; result: ResolveFontFamiliesResult } | null = null;
+/** טעינה שייכת לכללים ול-FontFaceSet שבהם התחילה, לא רק לתשובת המארח. */
+let hostedAliasLoads: {
+  style: HTMLStyleElement;
+  css: string;
+  fontSet: FontFaceSet;
+  families: Map<string, Promise<void>>;
+} | null = null;
+
 /**
- * מתקינה את הכללים למסמך שנפתח. בטוחה לקריאה חוזרת — הסגנון נדרס.
- *
- * מחזירה את שמות המשפחות שלא נפתרו, לדיווח ולבדיקה. רשימה ריקה פירושה שהכול
- * נמצא במכונה ואין מה להחליף.
- *
- * ומקדמת את דור הכיסוי: הסגנון שנדרס כאן הוא בדיוק מה ש-`coversHebrew` מודדת
- * מולו, ותשובה שנמדדה מול הסגנון הקודם אינה תקפה יותר. ראו `hebrewCoverage`.
+ * מכינה גופנים לפני יצירת המנוע. CSS זהה אינו נכתב שוב; פתיחה חוזרת
+ * מצטרפת לטעינה ממתינה או משתמשת בטעינה מוצלחת שכבר הושלמה.
  */
 export async function installDocumentFontAliases(fontTableXml: string | null): Promise<string[]> {
   const style = aliasStyleElement();
   if (!style) return [];
+  if (style !== documentAliasStyle) {
+    for (const name of documentAliases.keys()) forgetFamilyAvailability(name);
+    documentAliases = new Map();
+    documentAliasStyle = style;
+    hostedAliasLoads = null;
+  }
 
-  const plan = planFontAliases(fontTableXml ? parseFontTable(fontTableXml) : []);
-
-  // הבייטים אחרונים ובכוונה: שני כללים לאותה משפחה — האחרון קובע. מה שמגיע
-  // מאוצריא הוא המסלול שעובד גם במכונה שאין בה כלום, ולכן הוא זה שינצח.
-  const hosted = await hostFontFaceCss(plan.needBytes);
-
-  style.textContent = [plan.css, hosted].filter((part) => part !== '').join('\n');
-  // `@font-face` שמגיע כ-`url(data:...)` אינו בהכרח מוכן ברגע שה-CSS נכתב.
-  // דווקא כאן הפער חשוב: `swap.open` מחזיר את אפשרויות הגופנים מיד אחרינו,
-  // והן קוראות `isFamilyAvailable`. תשובת `false` באותו חלון נכנסת למטמון של
-  // הדור החדש ונשארת שם עד המסמך הבא — כלומר גופן שקיים דרך האליאס מוצג כאילו
-  // אינו מותקן. מבקשים רק את המשפחות שהמארח החזיר (לא `document.fonts.ready`,
-  // שעלול להמתין גם לגופנים זרים בדף), ורק אז פותחים את הדור למדידה.
-  if (hosted !== '') await loadHostedAliases(plan.needBytes);
-  // אחרי הכתיבה ולא לפניה, ו-`hostFontFaceCss` שבאמצע הוא הסיבה: מדידה
-  // שנעשית בזמן ה-await נמדדת מול הסגנון הקודם, ואם הדור כבר התקדם היא
-  // נשמרת תחת הדור החדש ונשארת שם שגויה. כאן היא נשמרת תחת הדור הישן,
-  // כלומר נזרקת בשורה הבאה.
-  advanceAliasGeneration();
+  // אליאס מהמסמך הקודם אינו גופן מותקן: אחרת פתיחה חוזרת הייתה רואה אותו
+  // כזמין, מסירה את הכלל שמאפשר אותו, ושוברת את פריסת המסמך.
+  const plan = planFontAliases(fontTableXml ? parseFontTable(fontTableXml) : [],
+    (name) => !documentAliases.has(familyProbeKey(name)) && isFamilyAvailable(name));
+  const hostedKey = JSON.stringify(plan.needBytes.map((font) => ({
+    name: font.name, substitutes: substitutesFor(font),
+  })));
+  const hosted = lastHostedAliases?.key === hostedKey
+    ? lastHostedAliases.result : await hostFontFaces(plan.needBytes);
+  const resolved = new Set(hosted.resolved.map(familyProbeKey));
+  const hostedFonts = plan.needBytes.filter((font) => resolved.has(familyProbeKey(font.name)));
+  // רק תשובה מלאה ניתנת לשימוש חוזר. תשובה חלקית חייבת לאפשר ניסיון נוסף
+  // לשמות שלא קיבלו בייטים, גם אם ה-CSS שהגיע אינו ריק.
+  if (hosted.css !== '' && hostedFonts.length === plan.needBytes.length) {
+    lastHostedAliases = { key: hostedKey, result: hosted };
+  }
+  const aliases = new Map(plan.aliases);
+  for (const font of hostedFonts) {
+    aliases.set(familyProbeKey(font.name), hosted.css);
+  }
+  const css = [plan.css, hosted.css].filter((part) => part !== '').join('\n');
+  const changed = new Set([...documentAliases.keys(), ...aliases.keys()].filter(
+    (name) => documentAliases.get(name) !== aliases.get(name),
+  ));
+  if (style.textContent !== css) {
+    style.textContent = css;
+    hostedAliasLoads = null;
+  }
+  // הכללים כבר מותקנים גם בזמן ההמתנה. סיום ישן אינו מחזיר בעלות על
+  // אליאסים שהוסרו בינתיים, ופתיחה נוספת אינה טועה לחשוב שהם גופני מערכת.
+  documentAliases = aliases;
+  // CSS זהה יכול עדיין להיטען אחרי „דלג”: כל פתיחה מצטרפת להמתנה הקיימת.
+  await loadHostedAliases(hostedFonts, style);
+  // אחרי ההמתנה: מדידה בחלון הטעינה אינה יכולה להשאיר תשובה מיושנת.
+  if (style === documentAliasStyle && style.textContent === css) {
+    for (const name of changed) forgetFamilyAvailability(name);
+  }
   return plan.missing.map((font) => font.name);
 }
 
@@ -507,35 +487,60 @@ export async function installDocumentFontAliases(fontTableXml: string | null): P
  * שימש בטקסט של המנוע מתחיל להיטען. `ready` לבדו אינו מספיק: הוא יכול להיפתר
  * לפני שמשפחה שלא צוירה עדיין בכלל נכנסה למצב `loading`.
  */
-async function loadHostedAliases(fonts: readonly DeclaredFont[]): Promise<void> {
+async function loadHostedAliases(fonts: readonly DeclaredFont[], style: HTMLStyleElement): Promise<void> {
   const fontSet = typeof document === 'undefined' ? undefined : document.fonts;
   if (!fontSet || typeof fontSet.load !== 'function' || fonts.length === 0) return;
 
-  await Promise.all(
-    fonts.map(async (font) => {
-      try {
-        await fontSet.load(`72px ${JSON.stringify(font.name)}`, PROBE_TEXT);
-      } catch {
-        // האליאס הוא שיפור פריסה; אם הדפדפן דוחה אותו נשארים במסלול ה-fallback.
-      }
-    }),
-  );
+  const css = style.textContent ?? '';
+  if (hostedAliasLoads?.style !== style || hostedAliasLoads.css !== css || hostedAliasLoads.fontSet !== fontSet) {
+    hostedAliasLoads = { style, css, fontSet, families: new Map() };
+  }
+  const loads = hostedAliasLoads;
+  await Promise.all(fonts.map((font) => {
+    const key = familyProbeKey(font.name);
+    const existing = loads.families.get(key);
+    if (existing) return existing;
+
+    // ה-Promise נרשם לפני בקשת הדפדפן, גם אם load זורקת סינכרונית.
+    const loading = Promise.resolve().then(() => fontSet.load(`72px ${JSON.stringify(font.name)}`, PROBE_TEXT))
+      .then((faces) => {
+        if (faces.length === 0) {
+          // לא נמצאה פאה מתאימה; fallback אינו הוכחה שהמשפחה נטענה.
+          loads.families.delete(key);
+          return;
+        }
+        // גם ניסיון חוזר באותו CSS מרענן תשובת fallback שנמדדה אחרי כשל.
+        if (hostedAliasLoads === loads && style.textContent === css) forgetFamilyAvailability(font.name);
+      }, () => {
+        // כשל אינו מפיל פתיחה ואינו נשמר כ„מוכן”: פתיחה מאוחרת תנסה שוב.
+        loads.families.delete(key);
+      });
+    loads.families.set(key, loading);
+    return loading;
+  }));
 }
 
 /**
- * `@font-face` עם בייטים אמיתיים מאוצריא, או מחרוזת ריקה.
+ * כללי `@font-face` והשמות שקיבלו אותם. תשובה חלקית היא תשובה חוקית.
  *
  * `tryCall` ולא `call`: מארח ישן אינו מכיר את המתודה, וזה אינו כשל — פשוט
  * נשארים עם מה שיש. אין כאן שום דבר שמצדיק להפיל פתיחת מסמך.
  */
-async function hostFontFaceCss(fonts: DeclaredFont[]): Promise<string> {
-  if (fonts.length === 0) return '';
+async function hostFontFaces(fonts: DeclaredFont[]): Promise<ResolveFontFamiliesResult> {
+  if (fonts.length === 0) return { css: '', resolved: [] };
   const families = fonts.map((font) => ({
     name: font.name,
     substitutes: substitutesFor(font),
   }));
   const res = await tryCall<ResolveFontFamiliesResult>('fonts.resolveFamilies', { families });
-  return typeof res?.css === 'string' ? res.css : '';
+  const requested = new Set(fonts.map((font) => familyProbeKey(font.name)));
+  const resolved = Array.isArray(res?.resolved)
+    ? res.resolved.filter((name) => typeof name === 'string' && requested.has(familyProbeKey(name)))
+    : [];
+  // אין דרך לנהל כללים שהמארח לא מזהה: תשובה פגומה אינה מזריקה CSS לא מנוהל
+  // ואינה הופכת להצלחה שמורה. הפתיחה הבאה רשאית לנסות שוב.
+  return typeof res?.css === 'string' && res.css !== '' && resolved.length > 0
+    ? { css: res.css, resolved } : { css: '', resolved: [] };
 }
 
 /** הסגנון שמחזיק את הכללים, נוצר בפעם הראשונה. `null` בלי DOM. */

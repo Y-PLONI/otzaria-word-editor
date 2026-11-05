@@ -11,6 +11,7 @@
  *   - יש לו היסטוריה, ויצירת רשימה בסגנון היא בה שני צעדים.
  */
 import { afterEach, describe, expect, it } from 'vitest';
+import { getDocumentReadRevision } from '../../src/engine/document-read-state';
 import { installListAutoformat } from '../../src/engine/list-autoformat-install';
 
 const ALEF = 'א';
@@ -1157,6 +1158,42 @@ describe('installListAutoformat — Ctrl+Z מיד אחרי ההמרה', () => {
     handles.push(handle);
     return handle;
   }
+
+  it('invalidates the paragraph read after automatic list conversion without onUpdate', async () => {
+    const app = await install();
+    const doc = app.host.activeEditor.doc;
+    const before = getDocumentReadRevision(doc);
+    await type(app.textarea, `${ALEF}) `);
+    await settle();
+    expect(app.blocks()[0]).toMatchObject({ text: '', list: true });
+    expect(getDocumentReadRevision(doc)).not.toBe(before);
+  });
+
+  it.each(['undo', 'redo'] as const)('invalidates only after slow grouped %s settles, including rejected steps', async (kind) => {
+    const app = await converted();
+    if (kind === 'redo') {
+      app.handle.undo();
+      await settle();
+    }
+    const doc = app.host.activeEditor.doc;
+    const history = doc.history;
+    const step = history[kind];
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    history[kind] = async () => {
+      await pending;
+      await step();
+      throw new Error('failure after a partial history change');
+    };
+    const before = getDocumentReadRevision(doc);
+    expect(app.handle[kind]()).toBe(true);
+    await settle(200); // Longer than Home's debounce, but the mutation is still pending.
+    expect(getDocumentReadRevision(doc)).toBe(before);
+    release();
+    await settle();
+    expect(getDocumentReadRevision(doc)).not.toBe(before);
+    expect(app.blocks()[0].list).toBe(kind === 'redo');
+  });
 
   it('מעבר לטאב אחר וחזרה שומר את קבוצת הביטול של המסמך', async () => {
     const app = await converted();

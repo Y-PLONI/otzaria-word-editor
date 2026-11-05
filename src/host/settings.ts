@@ -5,7 +5,7 @@
  * ו-tokens אטומים — לא bytes ולא Blob של מסמך. ה-token הוא מה ששורד: ה-URL
  * שאוצריא מחזירה תקף לריצה אחת בלבד, כי הפורט של שרת ה-loopback מתחלף.
  */
-import { call, tryCall } from './otzaria-client';
+import { call, isAvailable, tryCall } from './otzaria-client';
 import type { RecentDocument } from '../sessions/recent-documents';
 import type { DiscardedDocument } from '../sessions/discard-backup';
 import type { DocFolder, LibraryCache } from '../sessions/open-sources';
@@ -294,7 +294,10 @@ const RECENT_DOCUMENTS_KEY = 'recent-documents';
  * ל-`normalizeSession` שמעל, ומאותו טעם: ההחלטות נבדקות בלי לזייף את הגשר.
  */
 export async function loadRecentDocuments(): Promise<unknown> {
-  return tryCall<unknown>('storage.get', { key: RECENT_DOCUMENTS_KEY });
+  // כשל אינו רשימה ריקה: שינויים שנצברו בזמן הפתיחה חייבים להמתין
+  // לקריאה מוצלחת לפני שימוזגו וייכתבו מעל ההיסטוריה השמורה.
+  if (!isAvailable()) return null;
+  return call<unknown>('storage.get', { key: RECENT_DOCUMENTS_KEY });
 }
 
 /**
@@ -320,7 +323,9 @@ const DISCARD_BACKUPS_KEY = 'discard-backups';
  * ב-sessions/discard-backup.ts (`normalizeBackups`), כמו כל שאר ההפרדות כאן.
  */
 export async function loadDiscardBackups(): Promise<unknown> {
-  return tryCall<unknown>('storage.get', { key: DISCARD_BACKUPS_KEY });
+  // אחרי כשל קריאה אי אפשר לדעת איזו משבצת פנויה; אין לדרוס גיבוי קיים.
+  if (!isAvailable()) return null;
+  return call<unknown>('storage.get', { key: DISCARD_BACKUPS_KEY });
 }
 
 /**

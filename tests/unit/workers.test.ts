@@ -95,4 +95,66 @@ describe('engineWorkerUrls', () => {
     expect(engineWorkerUrls()).toBe(first);
     expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
   });
+
+  it('משחרר את מקורות ה-workers ושומר את הכתובות לעורכים נוספים', () => {
+    window.__SUPERDOC_WORKER_SOURCES__ = { document: 'a', reviewIndex: 'bb' };
+
+    const first = engineWorkerUrls();
+
+    expect(window.__SUPERDOC_WORKER_SOURCES__).toBeUndefined();
+    expect(engineWorkerUrls()).toBe(first);
+    expect(engineWorkerUrls()).toEqual({ document: 'blob:mock/1', reviewIndex: 'blob:mock/2' });
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(2);
+    expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+  });
+
+  it('מאמץ את כתובת החימום בלי לבנות או לבטל אותה', () => {
+    window.__SUPERDOC_WORKER_SOURCES__ = { document: 'a', reviewIndex: 'bb' };
+    window.__otzariaDocWorkerUrl = 'blob:warm/document';
+
+    const first = engineWorkerUrls();
+
+    expect(first).toEqual({ document: 'blob:warm/document', reviewIndex: 'blob:mock/2' });
+    expect(engineWorkerUrls()).toBe(first);
+    expect(window.__SUPERDOC_WORKER_SOURCES__).toBeUndefined();
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
+    expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+  });
+
+  it('משאיר מקורות לניסיון חוזר ומבטל רק כתובות חדשות אחרי כשל חלקי', () => {
+    const sources = { document: 'a', reviewIndex: 'bb' };
+    window.__SUPERDOC_WORKER_SOURCES__ = sources;
+    vi.mocked(URL.createObjectURL)
+      .mockReturnValueOnce('blob:first/document')
+      .mockImplementationOnce(() => { throw new Error('blob creation failed'); })
+      .mockReturnValueOnce('blob:retry/document')
+      .mockReturnValueOnce('blob:retry/review');
+
+    expect(() => engineWorkerUrls()).toThrow('blob creation failed');
+    expect(window.__SUPERDOC_WORKER_SOURCES__).toBe(sources);
+    expect(URL.revokeObjectURL).toHaveBeenCalledExactlyOnceWith('blob:first/document');
+
+    expect(engineWorkerUrls()).toEqual({ document: 'blob:retry/document', reviewIndex: 'blob:retry/review' });
+    expect(window.__SUPERDOC_WORKER_SOURCES__).toBeUndefined();
+    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1);
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(4);
+  });
+
+  it('אינו מבטל את כתובת החימום כאשר יצירת כתובת הביקורת נכשלת', () => {
+    const sources = { document: 'a', reviewIndex: 'bb' };
+    window.__SUPERDOC_WORKER_SOURCES__ = sources;
+    window.__otzariaDocWorkerUrl = 'blob:warm/document';
+    vi.mocked(URL.createObjectURL)
+      .mockImplementationOnce(() => { throw new Error('review failed'); })
+      .mockReturnValueOnce('blob:retry/review');
+
+    expect(() => engineWorkerUrls()).toThrow('review failed');
+    expect(window.__SUPERDOC_WORKER_SOURCES__).toBe(sources);
+    expect(window.__otzariaDocWorkerUrl).toBe('blob:warm/document');
+    expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+
+    expect(engineWorkerUrls()).toEqual({ document: 'blob:warm/document', reviewIndex: 'blob:retry/review' });
+    expect(window.__SUPERDOC_WORKER_SOURCES__).toBeUndefined();
+    expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+  });
 });

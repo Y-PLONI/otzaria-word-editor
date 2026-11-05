@@ -2133,13 +2133,29 @@ describe('createPageBorderModel', () => {
 
     expect(readings).toEqual([]);
   });
+
+  it('שינוי מסמך מבטל מיד תשובה ממתינה, עוד לפני שההשהיה הסתיימה', async () => {
+    let resolve!: (value: PageBordersReading) => void;
+    const read = vi.fn<() => Promise<PageBordersReading | null>>()
+      .mockImplementationOnce(() => new Promise((done) => { resolve = done; }))
+      .mockResolvedValue(READING);
+    const { adapter, readings } = model({ read });
+    adapter.refreshNow();
+    adapter.noteDocumentChanged();
+    resolve({ ...READING, top: { ...SIDE, color: '#FF0000' } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readings).toEqual([]);
+    await vi.advanceTimersByTimeAsync(PAGE_BORDERS_DEBOUNCE_MS);
+    expect(readings).toEqual([READING]);
+    adapter.dispose();
+  });
 });
 
 /**
  * `readLineNumbering` — מה ששכבת „מספרי שורות” (engine/line-number-layer.ts,
  * ui/shell/LineNumberOverlay.vue) קוראת. שני מקורות באותו קול: `lineNumbering`
  * מ-`sections.list()` ישירות (כמו `readPageBorders`), ו-`page` שהוא בדיוק מה
- * ש-`readPageMargins` כבר מחזיר — לא שכפול לוגיקה, קריאה לאותה פונקציה.
+ * ש-`readPageMargins` מחזיר — אותו מפענח, בלי לבקש רשימת מקטעים נוספת.
  */
 describe('readLineNumbering', () => {
   it('אין `lineNumbering` על המקטע — `null`, לא „הכול ברירת מחדל”', async () => {
@@ -2347,6 +2363,22 @@ describe('createLineNumberingModel', () => {
     await vi.advanceTimersByTimeAsync(10);
 
     expect(readings).toEqual([]);
+  });
+
+  it('שינוי מסמך מבטל מיד תשובה ממתינה, עוד לפני שההשהיה הסתיימה', async () => {
+    let resolve!: (value: LineNumberingReading) => void;
+    const read = vi.fn<() => Promise<LineNumberingReading | null>>()
+      .mockImplementationOnce(() => new Promise((done) => { resolve = done; }))
+      .mockResolvedValue(READING);
+    const { adapter, readings } = model({ read });
+    adapter.refreshNow();
+    adapter.noteDocumentChanged();
+    resolve({ ...READING, countBy: 10 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readings).toEqual([]);
+    await vi.advanceTimersByTimeAsync(LINE_NUMBERING_DEBOUNCE_MS);
+    expect(readings).toEqual([READING]);
+    adapter.dispose();
   });
 });
 

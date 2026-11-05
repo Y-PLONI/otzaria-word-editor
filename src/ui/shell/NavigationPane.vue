@@ -95,6 +95,7 @@ import type { SuperDoc } from 'superdoc';
 import SvgIcon from '../icons/SvgIcon.vue';
 import {
   goToNavHeading,
+  invalidateNavOutline,
   navHasChildren,
   navHidden,
   navParents,
@@ -161,7 +162,8 @@ async function readCaret(): Promise<void> {
 
 watch(
   () => [props.host, props.generation] as const,
-  () => {
+  (_, previous) => {
+    if (previous) invalidateNavOutline(props.host);
     clearTimeout(docTimer);
     clearTimeout(caretTimer);
     caretToken += 1;
@@ -178,6 +180,7 @@ watch(
 watch(
   () => props.docRevision,
   () => {
+    invalidateNavOutline(props.host);
     generationToken += 1;
     caretToken += 1;
     clearTimeout(docTimer);
