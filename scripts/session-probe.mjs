@@ -48,6 +48,12 @@ const PAGE_TWO = join(DIST, '__session-probe-2.html');
 /** כמה להמתין למסמך לפני שמוותרים. נדיב: המנוע פורס 16MB בדרך. */
 const OPEN_MS = 60_000;
 
+/**
+ * מתי ה-boot מגיע, מתחילת הדף. באוצריא נמדד ~1.2 שניות, אחרי שהמעטפת כבר
+ * עלתה; כאן מעט יותר, כדי שגם מכונה מהירה תגיע לקריאות לפני ה-boot.
+ */
+const BOOT_DELAY_MS = 2_000;
+
 /** הטקסט שנכתב בהפעלה הראשונה. עברית בכוונה — היא מה שעובר את השרשרת. */
 const TYPED = 'שחזור';
 
@@ -102,7 +108,7 @@ function instrument(seed) {
     return Promise.resolve({ success: false, data: null, error: { code: code, message: code } });
   }
 
-  window.Otzaria = {
+  var REAL = {
     call: function (method, payload) {
       payload = payload || {};
       P.calls.push(method);
@@ -137,7 +143,27 @@ function instrument(seed) {
     },
     on: function () {}, off: function () {}
   };
-  window.dispatchEvent(new CustomEvent('plugin.boot', { detail: BOOT }));
+
+  /*
+   * כמו אוצריא (plugin_sdk_scripts.dart): עד _boot ה-SDK הוא stub שדוחה כל
+   * קריאה ב-„not ready yet”, וה-boot מגיע אחרי שהבאנדל כבר רץ. כפיל שמאתחל
+   * מיד עבר ירוק על 7.0, שקרא את הרשומה לפני ה-boot ודרס אותה ברשומה ריקה.
+   */
+  var booted = false;
+  window.Otzaria = {
+    call: function (method, payload) {
+      if (booted) return REAL.call(method, payload);
+      P.calls.push('not-ready:' + method);
+      return Promise.reject(new Error('Otzaria SDK not ready yet'));
+    },
+    on: REAL.on, off: REAL.off,
+    _boot: function () {
+      booted = true;
+      window.Otzaria._booted = true;
+      window.dispatchEvent(new CustomEvent('plugin.boot', { detail: BOOT }));
+    }
+  };
+  setTimeout(function () { window.Otzaria._boot(); }, ${BOOT_DELAY_MS});
 
   /**
    * מה שהתוסף הצליח לשחזר, כפי שנראה מבחוץ.

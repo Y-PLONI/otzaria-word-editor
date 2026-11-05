@@ -315,3 +315,90 @@ describe('resolveBoot', () => {
     await assertion;
   });
 });
+
+/**
+ * ה-stub שאוצריא מזריקה ב-AT_DOCUMENT_START (plugin_sdk_scripts.dart): דוחה כל
+ * קריאה ב-„not ready yet” עד ש-`_boot` מחבר את ה-SDK האמיתי ויורה plugin.boot.
+ * ב-7.0 המעטפת קראה דרכו את רשומת ההפעלה לפני ה-boot, קיבלה „אין רשומה”,
+ * ודרסה את הטאבים והטיוטות של המשתמש ברשומה ריקה.
+ */
+function otzariaStub({ bootedFlag = true } = {}) {
+  let real: { call: (method: string) => Promise<unknown> } | null = null;
+  const stub = {
+    _booted: undefined as boolean | undefined,
+    call(method: string) {
+      if (real) return real.call(method);
+      return Promise.reject(new Error('Otzaria SDK not ready yet'));
+    },
+    on() {},
+    off() {},
+    _boot(payload: BootPayload) {
+      real = { call: async (method: string) => ({ success: true, data: `real:${method}`, error: null }) };
+      if (bootedFlag) stub._booted = true;
+      window.dispatchEvent(new CustomEvent('plugin.boot', { detail: payload }));
+    },
+  };
+  return stub;
+}
+
+describe('call לפני האתחול', () => {
+  afterEach(() => {
+    delete (window as unknown as Record<string, unknown>).__otzariaBoot;
+  });
+
+  it('ממתינה ל-boot במקום להיכשל ב-„not ready yet”', async () => {
+    const client = await freshClient();
+    const stub = otzariaStub();
+    (window as Partial<Window>).Otzaria = stub as never;
+
+    const pending = client.call<string>('storage.get', { key: 'session' });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    stub._boot(BOOT);
+
+    await expect(pending).resolves.toBe('real:storage.get');
+  });
+
+  it('גם באוצריא ישנה, בלי הדגל `_booted` — לפי האירוע', async () => {
+    const client = await freshClient();
+    const stub = otzariaStub({ bootedFlag: false });
+    (window as Partial<Window>).Otzaria = stub as never;
+
+    const pending = client.call<string>('storage.get', { key: 'session' });
+    stub._boot(BOOT);
+
+    await expect(pending).resolves.toBe('real:storage.get');
+    // ואחרי האירוע — בלי שום המתנה.
+    await expect(client.call<string>('storage.get')).resolves.toBe('real:storage.get');
+  });
+
+  it('אחרי שחזור ב-RPC קריאות אחרות אינן ממתינות לאירוע שאבד', async () => {
+    vi.useFakeTimers();
+    const client = await freshClient();
+    // `_boot` רץ אבל האירוע לא נתפס, ובאוצריא ישנה אין `_booted`.
+    const stub = otzariaStub({ bootedFlag: false });
+    (window as Partial<Window>).Otzaria = {
+      ...stub,
+      _boot: stub._boot,
+      call: async (method: string) => ({ success: true, data: method === 'app.getInfo' ? BOOT.app : BOOT.theme, error: null }),
+    } as never;
+
+    const boot = client.resolveBoot({ graceMs: 50, pollMs: 10, timeoutMs: 1000 });
+    await vi.advanceTimersByTimeAsync(60);
+    await expect(boot).resolves.toMatchObject({ source: 'recovered' });
+
+    const after = client.call('storage.get');
+    await vi.advanceTimersByTimeAsync(0);
+    await expect(after).resolves.toBe(BOOT.theme);
+  });
+
+  it('בלי boot בכלל — יוצאת אחרי התקרה ונכשלת כמו קודם, ולא נתלית', async () => {
+    vi.useFakeTimers();
+    const client = await freshClient();
+    (window as Partial<Window>).Otzaria = otzariaStub() as never;
+
+    const pending = client.call('storage.get');
+    const outcome = expect(pending).rejects.toThrow('not ready yet');
+    await vi.advanceTimersByTimeAsync(client.BOOT_TIMEOUT_MS);
+    await outcome;
+  });
+});

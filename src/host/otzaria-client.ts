@@ -64,8 +64,18 @@ export function isPermissionDenied(error: unknown): boolean {
   return error instanceof Error && error.message.includes('permission_denied');
 }
 
-/** קריאה ל-Host API. זורקת שגיאה עם ההודעה שהגיעה מאוצריא. */
+/**
+ * קריאה ל-Host API. זורקת שגיאה עם ההודעה שהגיעה מאוצריא.
+ *
+ * ממתינה לאתחול כשה-SDK עדיין אינו מוכן — ראו `untilHostReady`.
+ */
 export async function call<T>(method: string, payload?: Record<string, unknown>): Promise<T> {
+  if (isUnbootedStub(bridge())) await untilHostReady();
+  return callNow<T>(method, payload);
+}
+
+/** `call` בלי ההמתנה לאתחול. ל-`recoverBoot` בלבד: הוא זה שמגלה שהאתחול כבר קרה. */
+async function callNow<T>(method: string, payload?: Record<string, unknown>): Promise<T> {
   const measured = beginPerformanceApi('host', method, payload);
   let res;
   try {
@@ -149,6 +159,58 @@ const bootPayload = new Promise<BootPayload>((resolve) => {
   );
 });
 
+/**
+ * האם אוצריא כבר אתחלה את ה-SDK בדף הזה.
+ *
+ * ## למה `call` צריך לדעת את זה
+ *
+ * אוצריא מזריקה ב-AT_DOCUMENT_START stub שדוחה **כל** קריאה ב-„Otzaria SDK
+ * not ready yet”, עד ש-`_boot` מחליף אותו ב-SDK האמיתי (plugin_sdk_scripts.dart).
+ * עד 6.9 העלייה הגיעה לקריאה הראשונה אחרי ה-boot במקרה — החבילה הייתה כבדה
+ * מספיק. מאז שהעלייה הואצה ב-7.0, המעטפת קראה את ההעדפות ואת רשומת ההפעלה
+ * כ-150ms **לפני** ה-boot (נמדד באוצריא: הקריאות ב-1042ms, plugin.boot
+ * ב-1192ms). `tryCall` הפך את הדחייה ל„אין רשומה”, נפתח מסמך ריק, והרשומה
+ * הריקה נכתבה מעל זו שהחזיקה את הטאבים והטיוטות.
+ *
+ * הגידור כאן ולא אצל כל קורא: התיעוד של `waitForBoot` כבר קבע ש„כל קריאה
+ * ל-Host API חייבת לרוץ אחריה”, ושישים קוראים שכל אחד זוכר את זה בעצמו הם
+ * בדיוק מה שנשבר.
+ */
+let hostReady = false;
+let markHostReady: () => void = () => undefined;
+const hostReadyPromise = new Promise<void>((resolve) => {
+  markHostReady = () => {
+    hostReady = true;
+    resolve();
+  };
+});
+void bootPayload.then(() => markHostReady());
+
+/**
+ * ה-stub של אוצריא שעוד לא אותחל. מזוהה לפי `_boot`, שקיים רק עליו — ה-SDK
+ * בבדיקות, ב-dev-stub ובשערי ה-CDP אינו נושא אותו, ולכן אינו ממתין לכלום.
+ * `_booted` הוא הדגל של אוצריא חדשה; בישנה ממתינים לאירוע עצמו.
+ */
+function isUnbootedStub(sdk: OtzariaGlobal): boolean {
+  if (hostReady) return false;
+  const stub = sdk as OtzariaGlobal & { _boot?: unknown; _booted?: unknown };
+  return typeof stub._boot === 'function' && stub._booted !== true;
+}
+
+/**
+ * עד האתחול, או עד `BOOT_TIMEOUT_MS`. אחרי התקרה הקריאה יוצאת בכל זאת ונכשלת
+ * כמו קודם — המתנה אינסופית הייתה מחליפה כשל גלוי במסך תלוי.
+ */
+function untilHostReady(): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([
+    hostReadyPromise,
+    new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, BOOT_TIMEOUT_MS);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
 /** ברירת מחדל לשעון-שומר של ה-boot. ה-Host מקומי; המתנה ארוכה היא כשל. */
 export const BOOT_TIMEOUT_MS = 15_000;
 
@@ -200,10 +262,13 @@ export interface BootInfo {
  */
 export async function recoverBoot(): Promise<BootInfo> {
   const [app, theme] = await Promise.all([
-    call<BootPayload['app']>('app.getInfo'),
-    call<ThemePayload>('app.getTheme'),
+    callNow<BootPayload['app']>('app.getInfo'),
+    callNow<ThemePayload>('app.getTheme'),
   ]);
   if (!app || !theme) throw new Error('אוצריא החזירה מידע אתחול חסר');
+  // הצלחה כאן היא ההוכחה שהאתחול קרה גם כשהאירוע אבד — ובלי השורה הזאת כל
+  // קריאה אחרת הייתה ממתינה לאירוע שלא יגיע, עד התקרה.
+  markHostReady();
   return { app, theme, source: 'recovered' };
 }
 
