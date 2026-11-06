@@ -6,6 +6,7 @@
  */
 import type { SelectionTarget } from 'superdoc/ui';
 import type { PasteRunMarks } from './paste-formatting';
+import { restoreComplexScriptStyles } from './docx-cs-display';
 
 const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 export interface DestinationCapture {
@@ -35,7 +36,9 @@ function inheritedFonts(capture: DestinationCapture): Record<string, string> {
   if (!dependency?.dataBase64) throw new Error('Destination styles unavailable');
   const binary = atob(dependency.dataBase64);
   const xml = new TextDecoder().decode(Uint8Array.from(binary, (char) => char.charCodeAt(0)));
-  const styles = parseXml(xml);
+  // The live sheet shows each level's Hebrew font/size in its Latin slot
+  // (docx-cs-display.ts); read the document's own values, as Word would.
+  const styles = parseXml(restoreComplexScriptStyles(xml) ?? xml);
   const fonts: Record<string, string> = { b: '0', bCs: '0', i: '0', iCs: '0' };
   function add(rPr: Element | undefined, styleToggle = false): void {
     const node = rPr && elements(rPr, 'rFonts')[0];

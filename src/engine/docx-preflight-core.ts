@@ -107,11 +107,26 @@ import {
   type Bytes,
   type ZipEntry,
 } from './docx-parts';
+import { PARAGRAPH_PARTS, templateAlignmentApplies } from './docx-cs-align';
+import {
+  NO_THEME_FONTS,
+  readThemeFonts,
+  showComplexScriptRuns,
+  showComplexScriptStyles,
+  type ThemeFonts,
+} from './docx-cs-display';
 import { mergeFragmentedRuns } from './docx-run-merge';
+import { readStyleSheet } from './docx-style-sheet';
 import { readDocumentVba, type DocumentVba } from './vba-import';
 
 /** החלק שבו יושבות הגדרות המסמך. */
 export const SETTINGS_PART = 'word/settings.xml';
+
+/** גיליון הסגנונות הראשי. */
+const STYLES_PART = 'word/styles.xml';
+
+/** הקשרים של החלק הראשי — משם נמצאת ערכת הנושא. */
+const DOCUMENT_RELS_PART = 'word/_rels/document.xml.rels';
 
 /**
  * החלק שמתאר את הגופנים שהמסמך משתמש בהם — כולל כאלה שאינם מותקנים.
@@ -359,11 +374,18 @@ export function repairComplexScriptBold(xml: string): string | null {
 export const COMPLEX_SCRIPT_BOLD_NOTICE =
   'הדגשה שמוצגת ב-Word ולא הוצגה כאן הושלמה במסמך — שמירה תכתוב אותה לקובץ';
 
+/** מה שתיקון של חלק אחד צריך לדעת על החבילה כולה. ראו `packageContext`. */
+interface PackageContext {
+  fonts: ThemeFonts;
+  /** האם להציג את המורכב בחריץ הלטיני של הסגנונות (`docx-cs-display.ts`). */
+  showStyles: boolean;
+}
+
 /** תיקון אחד: על אילו חלקים הוא חל, מה הוא עושה, ומה נרשם ביומן כשעשה. */
 interface PartRepair {
   matches(name: string): boolean;
   /** `null` = אין מה לתקן בחלק הזה. */
-  repair(xml: string): string | null;
+  repair(xml: string, context: PackageContext): string | null;
   note(name: string): string;
   /**
    * מה שנאמר למשתמש בשורת המצב כשהתיקון הוחל, או `null` כשאין מה לומר לו.
@@ -398,6 +420,21 @@ const REPAIRS: PartRepair[] = [
     repair: repairComplexScriptBold,
     note: (name) => `${name}: <w:b/> הושלם לצד <w:bCs/> — בלעדיו הדגשת עברית אינה מגיעה למסך`,
     notice: COMPLEX_SCRIPT_BOLD_NOTICE,
+  },
+  {
+    matches: (name) => name.toLowerCase() === STYLES_PART,
+    repair: (xml, context) => (context.showStyles ? showComplexScriptStyles(xml, context.fonts) : null),
+    note: (name) => `${name}: הגופן והגודל העבריים של הסגנונות מוצגים בחריץ הלטיני — יוחזרו בשמירה`,
+    // אינו נשמר: השמירה מחזירה כל רמה למקור. ראו engine/docx-cs-display.ts.
+    notice: null,
+  },
+  {
+    // לפני האיחוד: ריצות שנבדלו רק בחריץ הלטיני — ש-Word אינו קורא בהן — מתאחדות.
+    matches: (name) => PARAGRAPH_PARTS.test(name),
+    repair: (xml, context) => showComplexScriptRuns(xml, context.fonts),
+    note: (name) => `${name}: ריצות עבריות עם גופן או גודל עבריים ישירים קיבלו אותם גם בחריץ הלטיני`,
+    // ‏Word אינו קורא את החריץ הלטיני של ריצה עברית — אין מה לומר למשתמש.
+    notice: null,
   },
   {
     // אחרון, ובכוונה: ההשוואה בין ריצות היא על ה-`rPr` כמחרוזת, ולכן היא
@@ -534,6 +571,7 @@ async function repairEntries(
   const notes: string[] = [];
   let notice: string | null = null;
   const patched = new Map<ZipEntry, ZipEntry>();
+  const context = await packageContext(entries);
 
   for (const entry of entries) {
     const repairs = REPAIRS.filter((candidate) => candidate.matches(entry.name));
@@ -544,7 +582,7 @@ async function repairEntries(
 
     let xml = original;
     for (const repair of repairs) {
-      const next = repair.repair(xml);
+      const next = repair.repair(xml, context);
       if (next === null) continue;
       xml = next;
       notes.push(repair.note(entry.name));
@@ -559,4 +597,34 @@ async function repairEntries(
 
   const rewritten = entries.map((entry) => patched.get(entry) ?? entry);
   return { bytes: writeZip(rewritten, archiveComment), notes, notice };
+}
+
+/** הנתיב של ערכת הנושא מתוך הקשרי החלק הראשי, או `null`. */
+function themePartName(rels: string | null): string | null {
+  if (!rels) return null;
+  for (const match of rels.matchAll(/<(?:[\w.-]+:)?Relationship\b([^>]*)>/g)) {
+    const attributes = match[1]!;
+    if (!/\sType\s*=\s*"[^"]*\/theme"/.test(attributes)) continue;
+    const target = /\sTarget\s*=\s*"([^"]*)"/.exec(attributes)?.[1];
+    if (!target) return null;
+    return target.startsWith('/') ? target.slice(1) : `word/${target}`;
+  }
+  return null;
+}
+
+/**
+ * מה שתיקוני החלקים צריכים לדעת על החבילה כולה: גופני ערכת הנושא, והאם
+ * להציג את המורכב בסגנונות — לא כשהשמירה תיישר אותו ללטיני (`docx-cs-align.ts`).
+ */
+async function packageContext(entries: readonly ZipEntry[]): Promise<PackageContext> {
+  const text = (name: string) => partText(entries, name);
+  const styles = await text(STYLES_PART);
+  if (!styles) return { fonts: NO_THEME_FONTS, showStyles: false };
+  const names = entries.map((entry) => entry.name);
+  const aligns = await templateAlignmentApplies(readStyleSheet(styles), names, text);
+  const theme = themePartName(await text(DOCUMENT_RELS_PART));
+  return {
+    fonts: readThemeFonts(theme ? await text(theme) : null, await text(SETTINGS_PART)),
+    showStyles: !aligns,
+  };
 }

@@ -97,7 +97,7 @@ const ANY_RTL =
  * סדר האיברים ב-`CT_RPr` (ECMA-376 §17.3.2.28). כל איבר חדש נכתב לפני הראשון
  * שבא אחריו בסדר הזה. איבר ממרחב שמות אחר (`w14:ligatures`) בא אחרי כולם.
  */
-const RPR_ORDER = [
+export const RPR_ORDER = [
   'rStyle', 'rFonts', 'b', 'bCs', 'i', 'iCs', 'caps', 'smallCaps', 'strike', 'dstrike', 'outline',
   'shadow', 'emboss', 'imprint', 'noProof', 'snapToGrid', 'vanish', 'webHidden', 'color', 'spacing',
   'w', 'kern', 'position', 'sz', 'szCs', 'highlight', 'u', 'effect', 'bdr', 'shd', 'fitText',
@@ -750,4 +750,32 @@ export function hasDeclaredRtlRuns(xml: string): boolean {
     return found;
   });
   return found;
+}
+
+/** ה-`rPr` החיה של ריצה, וההצהרה שלה. */
+export interface LiveRunProps {
+  /** תחילת `<w:rPr>` וסוף `</w:rPr>`. */
+  from: number;
+  to: number;
+  /** ‏`w:rtl`/`w:cs` — כמו ב-`RunProps.declared`. */
+  declared: boolean | null;
+}
+
+/**
+ * כל `rPr` חיה בחלק (לא `rPrChange`, לא סימן הפסקה). ל-`docx-cs-display.ts`,
+ * שצריך לדעת אילו ריצות Word קורא מהמחסנית המורכבת.
+ */
+export function liveRunProps(xml: string): LiveRunProps[] {
+  const prefix = wordPrefix(xml);
+  if (prefix === null) return [];
+  const out: LiveRunProps[] = [];
+  scanParagraphs(xml, prefix, (paragraph) => {
+    for (const run of paragraph.runs) {
+      const props = run.props;
+      if (!props || props.empty || props.closeEnd < 0 || run.opaque) continue;
+      out.push({ from: props.openAt, to: props.closeEnd, declared: props.declared });
+    }
+    return false;
+  });
+  return out;
 }
