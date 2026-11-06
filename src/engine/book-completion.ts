@@ -167,6 +167,30 @@ export function matchAtCursor(
   context: TypedContext,
   options: MatchOptions = {},
 ): BookCompletionMatch | null {
+  return matchAcrossBooks([cache], context, options)?.match ?? null;
+}
+
+export interface MultiBookMatch {
+  /** האינדקס ב-`caches` של הספר שבו נמצאה ההתאמה. */
+  bookIndex: number;
+  match: BookCompletionMatch;
+}
+
+/**
+ * כמו `matchAtCursor`, על כמה ספרים פתוחים. `caches[0]` הוא הספר שנקרא אחרון.
+ *
+ * ההקשר הארוך ביותר מנצח בכל הספרים יחד, ורק בשוויון — הסדר. כך הספר שממנו
+ * באמת מעתיקים נבחר מעצמו, גם כשהמשתמש הציץ בינתיים בספר אחר.
+ *
+ * התאמה בלי שום מילת הקשר נשארת בספר הראשון בלבד: שלוש אותיות תואמות מילה
+ * כלשהי כמעט בכל ספר, ובחמישה ספרים פתוחים זה היה בדיוק „אין קשר בין מה שהוא
+ * מציע לנכתב” — קטע אקראי מספר שהמשתמש אינו מעתיק ממנו.
+ */
+export function matchAcrossBooks(
+  caches: readonly SectionWordCache[],
+  context: TypedContext,
+  options: MatchOptions = {},
+): MultiBookMatch | null {
   const maxContextWords = options.maxContextWords ?? 3;
   const wordsToShow = options.wordsToShow ?? 5;
   const minStandalone = options.minStandalonePartial ?? 3;
@@ -180,8 +204,11 @@ export function matchAtCursor(
   for (let contextLen = queryWords.length; contextLen >= 0; contextLen -= 1) {
     if (!hasEnoughSignal(contextLen, partial, minStandalone)) continue;
     const slice = queryWords.slice(queryWords.length - contextLen);
-    const found = matchWithContext(cache, slice, partial, wordsToShow);
-    if (found) return found;
+    const books = contextLen === 0 ? Math.min(1, caches.length) : caches.length;
+    for (let bookIndex = 0; bookIndex < books; bookIndex += 1) {
+      const found = matchWithContext(caches[bookIndex], slice, partial, wordsToShow);
+      if (found) return { bookIndex, match: found };
+    }
   }
   return null;
 }

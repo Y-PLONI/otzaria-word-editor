@@ -22,10 +22,10 @@
  * ב-`keydown` הטקסט עדיין לא נכתב למודל של המנוע; קריאת `doc.selection` שם
  * הייתה מחזירה את המצב הישן.
  *
- * ## Tab נתפס רק כשיש הצעה פעילה
+ * ## Tab נתפס רק כשיש הצעה פעילה וגלויה
  *
  * `keydown` על שלב ה-capture (כמו format-painter.ts/word-selection.ts), אבל
- * `preventDefault` נקרא רק כש-session.kind === 'suggesting' — אחרת Tab ממשיך
+ * `preventDefault` נקרא רק כשההצעה מצוירת על המסך — אחרת Tab ממשיך
  * להתנהג רגיל (מעבר בין תאים בטבלה, למשל).
  *
  * ## למה ההחלפה היא "מחליפה את המילה החלקית", לא "מוסיפה אחריה"
@@ -49,7 +49,7 @@ import {
 import type { DocReceipt, MaybePromise } from './document-api';
 import {
   buildSectionCache,
-  matchAtCursor,
+  matchAcrossBooks,
   matchBookTitle,
   sliceWords,
   type SectionWordCache,
@@ -66,6 +66,12 @@ import {
   normalizeSelectedText,
 } from '../host/otzaria-reader';
 import { on } from '../host/otzaria-client';
+import type { ReaderState } from '../types/otzaria_plugin';
+import {
+  loadCompletionWindow,
+  validateCompletionRange,
+  type CompletionWindow,
+} from './book-completion-window';
 
 export interface CompletionDoc extends WordSelectionDoc {
   insert?: (input: { value: string; type: 'text'; target?: unknown }) => MaybePromise<DocReceipt>;
@@ -84,6 +90,7 @@ export interface CompletionHost {
   ui?: {
     selection?: {
       getAnchorRect?: (input?: { placement?: 'start' | 'end' | 'center' }) => AnchorRectLike | null;
+      apply?: (target: unknown) => { ok?: boolean } | void;
     } | null;
   } | null;
 }
@@ -112,8 +119,6 @@ const INPUT_DEBOUNCE_MS = 150;
  * שלמות, וההשלמות הגיעו מטקסט שאינו מול עיניו. החלון הוא הקירוב ל"טקסט
  * המוצג": יותר מאחת, והרבה פחות מהספר כולו — וזה גם החיסכון ב-RAM.
  */
-const CONTEXT_LINES_BACK = 5;
-const CONTEXT_LINES_FORWARD = 25;
 const CONTEXT_CHAR_CAP = 20_000;
 
 /**
@@ -125,6 +130,83 @@ const CONTEXT_CHAR_CAP = 20_000;
  * כבר תחת `reader.open` הקיים, ולכן בדיקה עצלה בזמן הקלדה פותרת בלי הרשאה חדשה.
  */
 const STATE_TTL_MS = 1200;
+
+/**
+ * גילוי התאמה חדשה במארח שלא שלח אירוע שינוי. נבדק רק בזמן הקלדה; אין טיימר
+ * שסורק ספרים ברקע. טריות ההצעה עצמה נבדקת בנפרד, לפי הפסקאות שהיא מצטטת.
+ */
+const WINDOW_TTL_MS = 30_000;
+
+/**
+ * כמה ספרים פתוחים נטענים להשלמה, כולל הספר שנקרא אחרון. כל ספר הוא חלון של
+ * עד `CONTEXT_CHAR_CAP` תווים ו-31 קריאות לטעינה, ולכן יש תקרה.
+ */
+const MAX_OPEN_BOOKS = 6;
+
+/** ספר פתוח בקורא, כפי שהוא מזוהה מול `getSectionTextMap`. */
+interface BookRef {
+  bookId: string;
+  /** מזהה יציב. `bookId` הוא כותרת הטאב, ובמהדורה חלופית היא אינה שם הספר. */
+  bookUid: string | null;
+  index: number;
+}
+
+/** החלון הטעון של ספר פתוח אחד. */
+interface BookContext extends BookRef {
+  key: string;
+  cache: SectionWordCache | null;
+  window: CompletionWindow | null;
+  loadedAt: number;
+  lastAttemptAt: number;
+  dirty: boolean;
+  revision: number;
+  loading: Promise<void> | null;
+  /** הוצא מרשימת הספרים הפתוחים; טעינה שבאוויר אינה כותבת אליו. */
+  dropped: boolean;
+}
+
+/** מקום שמור לספר שעוד לא נטען, כדי שהאינדקס ב-`matchAcrossBooks` יישאר הספר. */
+const EMPTY_CACHE = buildSectionCache('');
+
+/** גם מסמך מומר נקרא ב-TextBookTab; המארח משמר את סיומת המקור ב-type. */
+const TEXT_BOOK_TYPES = new Set([
+  'text', 'epub', 'docx', 'docm', 'dotx', 'dotm', 'doc', 'dot', 'wbk', 'xml', 'rtf', 'odt',
+  'html', 'htm', 'xhtml',
+]);
+
+/** חסר = מארח ישן; null מפורש = טאב שאינו ספר, למשל חיפוש. */
+function isTextBook(type: string | null | undefined): boolean {
+  return type === undefined || (typeof type === 'string' && TEXT_BOOK_TYPES.has(type));
+}
+
+function isSectionIndex(index: unknown): index is number {
+  return typeof index === 'number' && Number.isSafeInteger(index) && index >= 0;
+}
+
+/**
+ * הספר שנקרא אחרון ראשון, ואחריו שאר טאבי הספרים. ריק כשאין ספר טקסט שנקרא
+ * אחרון: ספר רקע היה תופס את מקומו, כולל ההשלמה בלי הקשר ששמורה לראשון בלבד.
+ */
+function openBookRefs(state: ReaderState): BookRef[] {
+  if (typeof state.currentBookId !== 'string' || state.currentBookId === '' ||
+      !isSectionIndex(state.currentIndex) || !isTextBook(state.currentType)) {
+    return [];
+  }
+  const refs: BookRef[] = [
+    { bookId: state.currentBookId, bookUid: state.bookUid ?? null, index: state.currentIndex },
+  ];
+  for (const tab of state.openTabs ?? []) {
+    if (tab.toolId != null || tab.isSelf === true) continue;
+    if (typeof tab.bookId !== 'string' || tab.bookId === '' || !isSectionIndex(tab.index)) continue;
+    if (!isTextBook(tab.type)) continue;
+    refs.push({ bookId: tab.bookId, bookUid: tab.bookUid ?? null, index: tab.index });
+  }
+  return refs;
+}
+
+function bookKey(ref: BookRef): string {
+  return `${ref.bookUid ?? ref.bookId}:${ref.index}`;
+}
 
 const GHOST_CLASS = 'otzaria-book-completion-ghost';
 
@@ -243,7 +325,44 @@ type Suggestion =
       story: unknown;
       /** אינדקס המילה הבאה בספר, כדי להציע רצף בלי חיפוש נוסף אחרי קבלה. */
       continueFrom: number | null;
+      /** החלון שממנו באה ההצעה — `continueFrom` הוא אינדקס בו, ולא בספר אחר. */
+      source: SectionWordCache | null;
+      sourceFrom: number | null;
+      sourceTo: number | null;
+      /** הקשר המסמך שנבדק לפני הצגת ההצעה; נבדק שוב לפני ההכנסה. */
+      expectedBeforeText: string;
     };
+
+interface BookContinuation {
+  source: SectionWordCache;
+  sourceFrom: number;
+  sourceTo: number;
+  cursorOffset: number;
+  blockId: string;
+  story: unknown;
+  expectedSuffix: string;
+}
+
+function storyKey(story: unknown): string | null {
+  if (!story || (story as { storyType?: unknown }).storyType === 'body') return '';
+  try {
+    return JSON.stringify(story, (_key, value: unknown) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+      return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)));
+    }) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function sameCaret(
+  expected: { blockId: string; cursorOffset: number; story: unknown },
+  actual: { blockId: string; cursorOffset: number; story: unknown },
+): boolean {
+  const expectedStory = storyKey(expected.story);
+  return expected.blockId === actual.blockId && expected.cursorOffset === actual.cursorOffset &&
+    expectedStory !== null && expectedStory === storyKey(actual.story);
+}
 
 /** מתקינה את הפיצ'ר על ה-container של מסמך יחיד. ראו create-editor.ts:EditorSession.container. */
 export function installBookCompletion(
@@ -255,15 +374,19 @@ export function installBookCompletion(
   const selectionHandle = (host as CompletionHost | null | undefined)?.ui?.selection;
   let disposed = false;
   let suggestion: Suggestion = { kind: 'idle' };
-  let cache: SectionWordCache | null = null;
-  let contextKey: string | null = null;
+  let continuation: BookContinuation | null = null;
+  let pendingAcceptance: object | null = null;
+  /** הספרים הפתוחים, הספר שנקרא אחרון ראשון. */
+  let books: BookContext[] = [];
+  let backgroundLoading = false;
   let currentBook: string | null = null;
-  let currentBookId: string | null = null;
   let currentRef: string | null = null;
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;
   let ghostEl: HTMLSpanElement | null = null;
   let lastStateAt = 0;
   let stateRefreshing = false;
+  let stateRequest = 0;
+  let evaluationRequested = false;
   let lastReported: string | null = null;
   /**
    * טוקן ריצה: `evaluate` היא א-סינכרונית (שתי קריאות מנוע), וקריאה איטית
@@ -281,6 +404,8 @@ export function installBookCompletion(
 
   function clearSuggestion(): void {
     suggestion = { kind: 'idle' };
+    continuation = null;
+    pendingAcceptance = null;
     hideGhost();
   }
 
@@ -347,52 +472,171 @@ export function installBookCompletion(
     ghostEl.style.top = `${rect.top}px`;
   }
 
-  /** טקסט של שורה אחת בספר, כולל ה-pagination הפנימית שלה. `null` = כשל. */
-  async function readSectionText(bookId: string, sectionIndex: number): Promise<string | null> {
+  /**
+   * טקסט של שורה אחת בספר, כולל ה-pagination הפנימית שלה, וטביעת התצוגה
+   * שלה. `null` = כשל. `report` רק לספר שנקרא אחרון: כשל בטאב רקע (ספר מוגן,
+   * למשל) אינו מה שהמשתמש עושה עכשיו, ודיווח עליו היה מציף את שורת המצב.
+   */
+  async function readSectionText(
+    ref: BookRef,
+    sectionIndex: number,
+    report: boolean,
+    isCurrent: () => boolean = () => !disposed,
+  ): Promise<{ text: string; fingerprint: string } | null> {
     let text = '';
+    let fingerprint: string | null = null;
     let cursor: string | undefined;
     for (let page = 0; page < 8 && text.length < CONTEXT_CHAR_CAP; page += 1) {
-      const result = await getSectionTextMap({ bookId, sectionIndex, layer: 'both', cursor });
+      if (!isCurrent()) return null;
+      const result = await getSectionTextMap({
+        bookId: ref.bookId,
+        ...(ref.bookUid ? { bookUid: ref.bookUid } : {}),
+        sectionIndex,
+        layer: 'both',
+        cursor,
+      });
+      if (!isCurrent()) return null;
       if (!result.ok) {
-        options.onStatus?.(result.message, true);
+        if (report) options.onStatus?.(result.message, true);
         return null;
       }
-      if (!result.value) break;
+      if (!result.value) return null;
       // `renderedText` לפני `sourceText`: זו שכבת התצוגה בפועל — אוצריא בונה
       // אותה מהגדרות החלונית החיה (הסתרת ניקוד/טעמים, החלפת שמות קדושים).
       // המשתמש ביקש "הטקסט המוצג", וכשהניקוד מוסתר אצלו `sourceText` היה
       // מנקד לו את מה שהקליד. `layer: 'both'` נשמר כדי שתמיד תהיה נפילה אחורה.
-      text += result.value.renderedText || result.value.sourceText || '';
+      // ריק מפורש הוא תצוגה תקפה; רק היעדר השכבה מצדיק נפילה למקור.
+      const pageText = result.value.renderedText ?? result.value.sourceText ?? '';
+      fingerprint ??= result.value.renderedTextHash ?? null;
+      text += pageText;
       if (!result.value.hasMore || !result.value.nextCursor) break;
       cursor = result.value.nextCursor;
     }
-    return text;
+    return { text, fingerprint: fingerprint ?? text };
   }
 
-  /** חלון השורות סביב המיקום בקורא — ראו CONTEXT_LINES_BACK/FORWARD. */
-  async function ensureContext(bookId: string, centerIndex: number): Promise<void> {
-    const key = `${bookId}:${centerIndex}`;
-    if (key === contextKey) return;
-    contextKey = key;
-    cache = null;
-
-    const from = Math.max(0, centerIndex - CONTEXT_LINES_BACK);
-    const to = centerIndex + CONTEXT_LINES_FORWARD;
-    const lines: string[] = [];
-    let total = 0;
-
-    for (let index = from; index <= to && total < CONTEXT_CHAR_CAP; index += 1) {
-      const line = await readSectionText(bookId, index);
-      // ניווט חדש בזמן ההמתנה — מה שנטען שייך למיקום שכבר אינו הנוכחי.
-      if (key !== contextKey || disposed) return;
-      // כשל (או סוף הספר) עוצר את החלון, אבל מה שכבר נאסף נשאר שמיש.
-      if (line === null) break;
-      if (line === '') continue;
-      lines.push(line);
-      total += line.length;
+  /** חלון של עד חמש פסקאות לפני המרכז ו-25 אחריו, עם קדימות למרכז. */
+  async function loadWindow(book: BookContext, report: boolean, reevaluate: boolean): Promise<void> {
+    const revision = book.revision;
+    const isCurrent = () => !disposed && !book.dropped && book.revision === revision;
+    const window = await loadCompletionWindow(
+      book.index,
+      (index) => readSectionText(book, index, report && index === book.index, isCurrent),
+      isCurrent,
+      CONTEXT_CHAR_CAP,
+    );
+    if (!isCurrent()) return;
+    if (window === null) {
+      book.dirty = true;
+      return;
     }
+    // רענון TTL שלא שינה טקסט אינו משנה את זהות המקור של רצף Tab חי.
+    // משווים גם את אינדקס המילים: קיטוע במגבלת התווים עשוי להסיר מילת קצה.
+    const previous = book.cache;
+    if (previous && previous.sourceText === window.cache.sourceText &&
+        previous.words.length === window.cache.words.length &&
+        previous.words.every((word, index) => word.start === window.cache.words[index].start &&
+          word.end === window.cache.words[index].end)) {
+      window.cache = previous;
+    }
+    // מפרסמים רק חלון שלם מאותה גרסה. אירוע שהגיע בזמן RPC פוסל את הבנייה.
+    book.window = window;
+    book.cache = window.cache;
+    book.loadedAt = Date.now();
+    book.dirty = false;
+    // הקשה שכבר חיפשה לפני סיום הטעינה צריכה לראות גם מקור שנוסף ברקע.
+    // אין הערכה יזומה לפני הקלדה, ואין המתנה לספר רקע איטי במסלול הפעיל.
+    if (reevaluate && evaluationRequested) scheduleEvaluate();
+  }
 
-    cache = buildSectionCache(lines.join('\n').slice(0, CONTEXT_CHAR_CAP));
+  /**
+   * מאמתים רק את הפסקאות שמהן ההצעה, גם כשהאירוע לא הגיע/אינו נתמך במארח.
+   * טביעת כותרת אינה מעידה על הניקוד של הפסקה הסמוכה. קריאת המקטע עצמו
+   * מכסה גם שינוי תוכן וגם שינוי תצוגה, בלי לסרוק מחדש 31 פסקאות בכל הקשה.
+   */
+  async function validateSourceRange(
+    source: SectionWordCache,
+    fromWord: number,
+    toWord: number,
+  ): Promise<boolean> {
+    const book = books.find((candidate) => candidate.cache === source);
+    if (!book || book.dropped || book.dirty || !book.window || disposed) return false;
+    const revision = book.revision;
+    const window = book.window;
+    const validationToken = evalToken;
+    const isCurrent = () => !disposed && !book.dropped && !book.dirty &&
+      book.revision === revision && book.cache === source && evalToken === validationToken;
+    const result = await validateCompletionRange(
+      window, fromWord, toWord,
+      (index) => readSectionText(book, index, false, isCurrent),
+      isCurrent,
+    );
+    if (result === 'valid') return isCurrent();
+    if (!isCurrent()) return false;
+    book.dirty = true;
+    book.revision += 1;
+    if (result === 'changed') {
+      book.lastAttemptAt = Number.NEGATIVE_INFINITY;
+      // הקריאה הממתינה מחליטה אם לנסות התאמה שוב; פרסום החלון אינו יוצר
+      // retry נוסף בעצמו, אחרת מקור שמשתנה בכל קריאה ייצור לולאת טעינות.
+      await refreshBook(book, book === books[0], false);
+    } else {
+      // כשל גשר אינו רישיון להציע מטמון ישן או לנסות שוב בכל אירוע מקלדת.
+      book.lastAttemptAt = Date.now();
+    }
+    return false;
+  }
+
+  /** ממזגת את רשימת הספרים הפתוחים: חלון שכבר נטען נשמר, ספר שנסגר יוצא. */
+  function syncBooks(refs: BookRef[]): void {
+    const next: BookContext[] = [];
+    for (const ref of refs) {
+      if (next.length >= MAX_OPEN_BOOKS) break;
+      const key = bookKey(ref);
+      if (next.some((book) => book.key === key)) continue;
+      const existing = books.find((book) => book.key === key);
+      next.push(
+        existing ?? {
+          ...ref, key, cache: null, window: null, loadedAt: 0,
+          lastAttemptAt: Number.NEGATIVE_INFINITY, dirty: true, revision: 0,
+          loading: null, dropped: false,
+        },
+      );
+    }
+    for (const book of books) {
+      if (!next.includes(book)) book.dropped = true;
+    }
+    books = next;
+  }
+
+  /** חלון חסר/פסול/ישן נטען פעם אחת; רענונים חופפים חולקים אותה עבודה. */
+  async function refreshBook(book: BookContext, report: boolean, reevaluate = true): Promise<void> {
+    if (disposed || book.dropped) return;
+    if (book.loading) return book.loading;
+    if (!book.dirty && book.cache !== null && Date.now() - book.loadedAt < WINDOW_TTL_MS) return;
+    if (Date.now() - book.lastAttemptAt < STATE_TTL_MS) return;
+    book.lastAttemptAt = Date.now();
+    const pending = loadWindow(book, report, reevaluate);
+    book.loading = pending;
+    try {
+      await pending;
+    } finally {
+      if (book.loading === pending) book.loading = null;
+    }
+  }
+
+  /** שאר הספרים — ברקע ובזה אחר זה, כדי לא לעכב את הספר שנקרא אחרון. */
+  async function refreshBackgroundBooks(): Promise<void> {
+    if (backgroundLoading) return;
+    backgroundLoading = true;
+    try {
+      for (const book of books.slice(1)) {
+        if (disposed) return;
+        if (!book.dropped) await refreshBook(book, false);
+      }
+    } finally {
+      backgroundLoading = false;
+    }
   }
 
   /**
@@ -406,7 +650,10 @@ export function installBookCompletion(
   }
 
   async function refreshReaderState(): Promise<void> {
+    if (disposed) return;
+    const request = ++stateRequest;
     const result = await getCurrentReaderState();
+    if (disposed || request !== stateRequest) return;
     if (!result.ok) {
       reportOnce(result.message);
       return;
@@ -414,16 +661,15 @@ export function installBookCompletion(
     const state = result.value;
     currentBook = state?.currentBook ?? null;
     currentRef = state?.currentRef ?? null;
-    currentBookId = state?.currentBookId ?? null;
 
-    if (currentBookId !== null && typeof state?.currentIndex === 'number') {
-      reportOnce(null);
-      await ensureContext(currentBookId, state.currentIndex);
-    } else {
-      contextKey = null;
-      cache = null;
+    syncBooks(state ? openBookRefs(state) : []);
+    if (books.length === 0) {
       reportOnce('השלמה מהספר: לא זוהה ספר פתוח בקורא של אוצריא');
+      return;
     }
+    reportOnce(null);
+    await refreshBook(books[0], true);
+    void refreshBackgroundBooks();
   }
 
   /** בדיקה עצלה וממותנת של מצב הקורא — ראו STATE_TTL_MS. */
@@ -436,8 +682,56 @@ export function installBookCompletion(
     });
   }
 
-  async function evaluate(): Promise<void> {
-    if (disposed || !doc) return;
+  async function caretStillAt(expected: { blockId: string; cursorOffset: number; story: unknown }): Promise<boolean> {
+    const info = await doc?.selection?.current?.();
+    const seed = readCaretSeed(info?.selectionTarget);
+    return seed !== null && sameCaret(expected, { ...seed, cursorOffset: seed.offset });
+  }
+
+  /**
+   * בהכנסה ליעד מכווץ המנוע משאיר את הסמן לפני הטקסט. מזיזים אותו דרך ה-UI
+   * הציבורי, ורק כל עוד הוא עדיין במקומו המקורי; שינוי של המשתמש פוסל גם
+   * ניסיון חוזר שממתין לפריסה. מארח שכבר הזיז את הסמן אינו זקוק ל-apply.
+   */
+  async function placeCaretAfter(
+    before: { blockId: string; cursorOffset: number; story: unknown },
+    offset: number,
+    isCurrent: () => boolean,
+  ): Promise<boolean> {
+    const after = { blockId: before.blockId, cursorOffset: offset, story: before.story };
+    const target: SelectionTargetLike = {
+      kind: 'selection',
+      start: pointAt(before.blockId, offset, before.story),
+      end: pointAt(before.blockId, offset, before.story),
+      ...(before.story ? { story: before.story } : {}),
+    };
+    try {
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        if (!isCurrent()) return false;
+        const info = await doc?.selection?.current?.();
+        if (!isCurrent()) return false;
+        const seed = readCaretSeed(info?.selectionTarget);
+        if (!seed) return false;
+        const actual = { ...seed, cursorOffset: seed.offset };
+        if (sameCaret(after, actual)) return true;
+        if (!sameCaret(before, actual) || typeof selectionHandle?.apply !== 'function') return false;
+
+        const result = selectionHandle.apply.call(selectionHandle, target);
+        if (!isCurrent()) return false;
+        if (result?.ok !== false) {
+          const placed = await caretStillAt(after);
+          return isCurrent() && placed;
+        }
+        if (attempt < 9) await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+    } catch (error) {
+      console.warn('[otzaria-word] השלמה מהספר: הצבת הסמן אחרי ההשלמה נכשלה', error);
+    }
+    return false;
+  }
+
+  async function evaluate(retryAfterReload = true): Promise<void> {
+    if (disposed || !doc || pendingAcceptance !== null) return;
     // לא ממתינים: ההקשה הזאת תשתמש במטמון שכבר יש, וההקשה הבאה כבר תראה את
     // הספר החדש. המתנה כאן הייתה מוסיפה השהיית RPC לכל הקלדה.
     refreshReaderStateIfStale();
@@ -450,6 +744,51 @@ export function installBookCompletion(
       clearSuggestion();
       return;
     }
+
+    // שחרור Tab וציור מאוחר ממשיכים מהמקור שנבחר, גם כשאותן מילים מופיעות
+    // בספר אחר. ההמשך תקף רק כל עוד הסמן והטקסט שהוכנס נשארו במקומם.
+    const activeContinuation = continuation;
+    if (activeContinuation && sameCaret(activeContinuation, snapshot) &&
+        snapshot.rawBeforeText.endsWith(activeContinuation.expectedSuffix)) {
+      const { source, sourceFrom, sourceTo } = activeContinuation;
+      const next = sliceWords(source, sourceFrom, sourceTo - sourceFrom);
+      if (!next) {
+        suggestion = { kind: 'idle' };
+        hideGhost();
+        return;
+      }
+      const validSource = await validateSourceRange(source, sourceFrom, sourceTo);
+      if (token !== evalToken || disposed || continuation !== activeContinuation) return;
+      if (!validSource) {
+        clearSuggestion();
+        if (retryAfterReload) scheduleEvaluate(false);
+        return;
+      }
+      const currentCaret = await caretStillAt(snapshot);
+      if (token !== evalToken || disposed || continuation !== activeContinuation) return;
+      if (!currentCaret) {
+        clearSuggestion();
+        return;
+      }
+      const nextText = ` ${normalizeSelectedText(next.text)}`;
+      suggestion = {
+        kind: 'suggesting',
+        ghostText: nextText,
+        insertText: nextText,
+        replaceStart: snapshot.cursorOffset,
+        cursorOffset: snapshot.cursorOffset,
+        blockId: snapshot.blockId,
+        story: snapshot.story,
+        continueFrom: next.nextWordIndex,
+        source,
+        sourceFrom,
+        sourceTo,
+        expectedBeforeText: snapshot.rawBeforeText,
+      };
+      showGhost(nextText);
+      return;
+    }
+    if (activeContinuation) clearSuggestion();
 
     // אזכור המקור מקבל את כל הקשות ה-@; אחרת שתי שכבות נפרדות היו יכולות
     // להציג הצעה ולתפוס Tab מול הרשימה של at-mention-overlay.
@@ -471,50 +810,74 @@ export function installBookCompletion(
         blockId: snapshot.blockId,
         story: snapshot.story,
         continueFrom: null,
+        source: null,
+        sourceFrom: null,
+        sourceTo: null,
+        expectedBeforeText: snapshot.rawBeforeText,
       };
       showGhost(titleMatch.completionText);
       return;
     }
 
-    if (cache) {
-      const bookMatch = matchAtCursor(cache, snapshot, {
-        maxContextWords: CONTEXT_WORDS,
-        wordsToShow: WORDS_TO_SHOW,
-      });
-      if (bookMatch) {
-        // לשורה אחת: חלון ההקשר מחבר שורות ב-`\n`, והצעה שחוצה שורה בספר
-        // הייתה נכנסת למסמך עם שבר שורה בתוכה — `insert` עם `type: 'text'`
-        // מכניס טקסט לפסקה. אותו נימוק בדיוק כמו בציטוט (otzaria-reader.ts).
-        const ghostText = normalizeSelectedText(bookMatch.text);
-        if (ghostText === '') {
-          clearSuggestion();
-          return;
-        }
-        // ההחלפה נמתחת אחורה גם על מילות ההקשר שתאמו: המשתמש הקליד אותן בלי
-        // ניקוד, וללא זה יצא משפט שרק סופו מנוקד — התסמין שנמדד ("כתבתי שתי
-        // מילים, ניקד רק את השנייה").
-        const used = Math.min(bookMatch.contextWordsUsed, snapshot.precedingWordStarts.length);
-        const withContext =
-          used > 0 ? sliceWords(cache, bookMatch.matchedWordIndex - used, used + WORDS_TO_SHOW) : null;
-        const insertText = withContext ? normalizeSelectedText(withContext.text) : ghostText;
-        const replaceStart =
-          withContext && insertText !== ''
-            ? snapshot.precedingWordStarts[snapshot.precedingWordStarts.length - used]
-            : snapshot.replaceStart;
-
-        suggestion = {
-          kind: 'suggesting',
-          ghostText,
-          insertText: insertText === '' ? ghostText : insertText,
-          replaceStart,
-          cursorOffset: snapshot.cursorOffset,
-          blockId: snapshot.blockId,
-          story: snapshot.story,
-          continueFrom: bookMatch.nextWordIndex,
-        };
-        showGhost(ghostText);
+    const found = matchAcrossBooks(
+      books.map((book) => book.cache ?? EMPTY_CACHE),
+      snapshot,
+      { maxContextWords: CONTEXT_WORDS, wordsToShow: WORDS_TO_SHOW },
+    );
+    if (found) {
+      const { match: bookMatch } = found;
+      const cache = books[found.bookIndex].cache ?? EMPTY_CACHE;
+      // לשורה אחת: חלון ההקשר מחבר שורות ב-`\n`, והצעה שחוצה שורה בספר
+      // הייתה נכנסת למסמך עם שבר שורה בתוכה — `insert` עם `type: 'text'`
+      // מכניס טקסט לפסקה. אותו נימוק בדיוק כמו בציטוט (otzaria-reader.ts).
+      const ghostText = normalizeSelectedText(bookMatch.text);
+      if (ghostText === '') {
+        clearSuggestion();
         return;
       }
+      // ההחלפה נמתחת אחורה גם על מילות ההקשר שתאמו: המשתמש הקליד אותן בלי
+      // ניקוד, וללא זה יצא משפט שרק סופו מנוקד — התסמין שנמדד ("כתבתי שתי
+      // מילים, ניקד רק את השנייה").
+      const used = Math.min(bookMatch.contextWordsUsed, snapshot.precedingWordStarts.length);
+      const withContext =
+        used > 0 ? sliceWords(cache, bookMatch.matchedWordIndex - used, used + WORDS_TO_SHOW) : null;
+      const insertText = withContext ? normalizeSelectedText(withContext.text) : ghostText;
+      const replaceStart =
+        withContext && insertText !== ''
+          ? snapshot.precedingWordStarts[snapshot.precedingWordStarts.length - used]
+          : snapshot.replaceStart;
+      const sourceFrom = bookMatch.matchedWordIndex - used;
+      const sourceTo = bookMatch.nextWordIndex;
+      const validSource = await validateSourceRange(cache, sourceFrom, sourceTo);
+      if (token !== evalToken || disposed) return;
+      if (!validSource) {
+        clearSuggestion();
+        if (retryAfterReload) scheduleEvaluate(false);
+        return;
+      }
+      const currentCaret = await caretStillAt(snapshot);
+      if (token !== evalToken || disposed) return;
+      if (!currentCaret) {
+        clearSuggestion();
+        return;
+      }
+
+      suggestion = {
+        kind: 'suggesting',
+        ghostText,
+        insertText: insertText === '' ? ghostText : insertText,
+        replaceStart,
+        cursorOffset: snapshot.cursorOffset,
+        blockId: snapshot.blockId,
+        story: snapshot.story,
+        continueFrom: bookMatch.nextWordIndex,
+        source: cache,
+        sourceFrom,
+        sourceTo,
+        expectedBeforeText: snapshot.rawBeforeText,
+      };
+      showGhost(ghostText);
+      return;
     }
 
     /*
@@ -541,6 +904,10 @@ export function installBookCompletion(
           blockId: snapshot.blockId,
           story: snapshot.story,
           continueFrom: null,
+          source: null,
+          sourceFrom: null,
+          sourceTo: null,
+          expectedBeforeText: snapshot.rawBeforeText,
         };
         showGhost(ghostText);
         return;
@@ -569,6 +936,10 @@ export function installBookCompletion(
           blockId: snapshot.blockId,
           story: snapshot.story,
           continueFrom: null,
+          source: null,
+          sourceFrom: null,
+          sourceTo: null,
+          expectedBeforeText: snapshot.rawBeforeText,
         };
         showGhost(ghostText);
         return;
@@ -578,75 +949,99 @@ export function installBookCompletion(
     clearSuggestion();
   }
 
-  function scheduleEvaluate(): void {
-    if (pendingPastes.size > 0) return;
+  function scheduleEvaluate(retryAfterReload = true): void {
+    if (disposed || pendingPastes.size > 0 || pendingAcceptance !== null) return;
+    evaluationRequested = true;
     if (debounceTimer !== undefined) clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => void evaluate(), INPUT_DEBOUNCE_MS);
+    debounceTimer = setTimeout(() => {
+      debounceTimer = undefined;
+      void evaluate(retryAfterReload);
+    }, INPUT_DEBOUNCE_MS);
   }
 
   async function accept(): Promise<void> {
     if (suggestion.kind !== 'suggesting' || !doc || typeof doc.insert !== 'function') return;
-    const { insertText, replaceStart, cursorOffset, blockId, story, continueFrom } = suggestion;
+    const accepted = suggestion;
+    const { insertText, replaceStart, cursorOffset, blockId, story, continueFrom, source, sourceFrom, sourceTo } = accepted;
+    const token = ++evalToken;
+    if (debounceTimer !== undefined) clearTimeout(debounceTimer);
+    debounceTimer = undefined;
     clearSuggestion();
-
-    const target: SelectionTargetLike = {
-      kind: 'selection',
-      start: pointAt(blockId, replaceStart, story),
-      end: pointAt(blockId, cursorOffset, story),
-      ...(story ? { story } : {}),
-    };
+    const operation = {};
+    pendingAcceptance = operation;
+    const isCurrent = (): boolean => !disposed && token === evalToken && pendingAcceptance === operation;
 
     let receipt: DocReceipt;
     try {
+      if (source !== null && sourceFrom !== null && sourceTo !== null) {
+        const validSource = await validateSourceRange(source, sourceFrom, sourceTo);
+        if (!isCurrent()) return;
+        if (!validSource) {
+          clearSuggestion();
+          scheduleEvaluate(false);
+          return;
+        }
+      }
+      const snapshot = await readTypedSnapshot(doc);
+      if (!isCurrent()) return;
+      if (!snapshot || !sameCaret(accepted, snapshot) || snapshot.rawBeforeText !== accepted.expectedBeforeText) {
+        clearSuggestion();
+        scheduleEvaluate();
+        return;
+      }
+      const currentCaret = await caretStillAt(accepted);
+      if (!isCurrent()) return;
+      if (!currentCaret) {
+        clearSuggestion();
+        return;
+      }
+      const target: SelectionTargetLike = {
+        kind: 'selection',
+        start: pointAt(blockId, replaceStart, story),
+        end: pointAt(blockId, cursorOffset, story),
+        ...(story ? { story } : {}),
+      };
       receipt = await doc.insert({ value: insertText, type: 'text', target });
     } catch (error) {
+      if (isCurrent()) clearSuggestion();
       console.warn('[otzaria-word] השלמה מהספר: הכנסת הטקסט נכשלה', error);
       return;
     }
-    if (receipt?.success === false || disposed) return;
-
-    /*
-     * להשלמה בלי המשך — ר"ת, רשימה סטטית, שם ספר — ההכנסה היא סוף העניין,
-     * וכל הערכה שנקבעה או שרצה לפניה מסתמכת על הטקסט שלפניה: היא הייתה
-     * מציעה שוב את אותה השלמה בדיוק. נמדד: ה-ghost חזר מיד אחרי Tab ונשאר
-     * על המסך עד ההקשה הבאה. הטוקן פוסל את מי שבאוויר, וה-timer את מי שעוד
-     * לא יצא.
-     *
-     * **ורק שם.** להשלמה מהספר יש המשך, וההערכה המושהית היא מי שמצייר אותו
-     * בפועל: ה-`requestAnimationFrame` שלמטה נופל כשהמנוע עדיין לא מחזיר
-     * `getAnchorRect` מיד אחרי ההכנסה, ואין לו ניסיון שני. ביטול עיוור של
-     * ההערכה הותיר הצעה חיה ובלתי נראית — Tab נתפס והכניס חמש מילים בלי
-     * ששום דבר הוצג (נמדד ב-scripts/qa/book-completion-qa.mjs).
-     */
-    if (continueFrom === null) {
-      evalToken += 1;
-      if (debounceTimer !== undefined) clearTimeout(debounceTimer);
+    if (!isCurrent()) return;
+    if (receipt?.success === false) {
+      clearSuggestion();
+      return;
+    }
+    const newCursor = replaceStart + insertText.length;
+    const placed = await placeCaretAfter(accepted, newCursor, isCurrent);
+    if (!isCurrent()) return;
+    if (!placed) {
+      clearSuggestion();
+      return;
+    }
+    pendingAcceptance = null;
+    if (continueFrom === null || source === null) {
       clearSuggestion();
       return;
     }
 
-    if (cache) {
-      const next = sliceWords(cache, continueFrom, WORDS_TO_SHOW);
-      // רווח מפריד ולא הצמדה: ההשלמה הקודמת הסתיימה במילה, וה-5 הבאות הן
-      // המשך המשפט. `normalizeSelectedText` מטפל גם כאן בשבר שורה מהספר.
-      const nextText = next ? ` ${normalizeSelectedText(next.text)}` : '';
-      if (next && nextText.trim() !== '') {
-        const newCursor = replaceStart + insertText.length;
-        suggestion = {
-          kind: 'suggesting',
-          ghostText: nextText,
-          insertText: nextText,
-          replaceStart: newCursor,
-          cursorOffset: newCursor,
-          blockId,
-          story,
-          continueFrom: next.nextWordIndex,
-        };
-        requestAnimationFrame(() => {
-          if (!disposed && suggestion.kind === 'suggesting') showGhost(suggestion.ghostText);
-        });
-      }
-    }
+    const next = sliceWords(source, continueFrom, WORDS_TO_SHOW);
+    const activeContinuation: BookContinuation = {
+      source,
+      sourceFrom: continueFrom,
+      sourceTo: next?.nextWordIndex ?? continueFrom,
+      cursorOffset: newCursor,
+      blockId,
+      story,
+      expectedSuffix: insertText.slice(-WORD_WINDOW_RADIUS),
+    };
+    continuation = activeContinuation;
+    // אם הגיאומטריה עדיין אינה זמינה בפריים הראשון, ההערכה המושהית מציירת
+    // את אותו ההמשך. גם בסוף הספר נשמרת הנעילה עד שינוי טקסט או סמן.
+    requestAnimationFrame(() => {
+      if (!disposed && continuation === activeContinuation) void evaluate();
+    });
+    scheduleEvaluate();
   }
 
   const onPasteStarted = (event: Event): void => {
@@ -661,7 +1056,14 @@ export function installBookCompletion(
     if (!disposed && pendingPastes.size === 0 && event.detail?.evaluate !== false) scheduleEvaluate();
   };
 
-  const onInput = (): void => scheduleEvaluate();
+  const onInput = (): void => {
+    invalidate();
+    scheduleEvaluate();
+  };
+  const onKeyUp = (event: KeyboardEvent): void => {
+    if (event.key === 'Tab' && continuation === null) return;
+    scheduleEvaluate();
+  };
   /*
    * כל הקשה אחרת פוסלת את ההצעה **מיד**, ולא אחרי ההשהיה. ה-ghost מצויר
    * בעמדת הסמן של ההערכה האחרונה, והאותיות החדשות מצוירות בדיוק שם — מתחתיו.
@@ -671,12 +1073,14 @@ export function installBookCompletion(
    * שכבר באוויר עם הקשר שקדם להקשה.
    */
   const invalidate = (): void => {
-    if (suggestion.kind === 'idle' && !ghostEl) return;
+    evaluationRequested = false;
     evalToken += 1;
+    if (debounceTimer !== undefined) clearTimeout(debounceTimer);
+    debounceTimer = undefined;
     clearSuggestion();
   };
   const onKeyDown = (event: KeyboardEvent): void => {
-    if (event.key === 'Tab' && suggestion.kind === 'suggesting') {
+    if (event.key === 'Tab' && suggestion.kind === 'suggesting' && ghostEl !== null) {
       event.preventDefault();
       event.stopPropagation();
       void accept();
@@ -697,22 +1101,39 @@ export function installBookCompletion(
   container.addEventListener(PASTE_STARTED, onPasteStarted);
   container.addEventListener(PASTE_FINISHED, onPasteFinished);
   container.addEventListener('input', onInput);
-  container.addEventListener('keyup', onInput);
+  container.addEventListener('keyup', onKeyUp);
   container.addEventListener('keydown', onKeyDown, true);
   // הדבקה מהתפריט והכתבה אינן עוברות ב-keydown.
   container.addEventListener('beforeinput', invalidate, true);
+  container.addEventListener('pointerdown', invalidate, true);
   container.addEventListener('scroll', onScroll, true);
 
   const offRefChanged = on('reader.current_ref_changed', (detail) => {
     currentBook = detail.currentBook;
-    currentBookId = detail.currentBookId;
     currentRef = detail.currentRef;
-    clearSuggestion();
-    if (currentBookId !== null) void ensureContext(currentBookId, detail.currentIndex);
+    invalidate();
+    void refreshReaderState();
   });
   const offBookChanged = on('reader.current_book_changed', () => {
-    clearSuggestion();
+    invalidate();
     void refreshReaderState();
+  });
+  const offSectionChanged = on('reader.sectionContentChanged', (detail) => {
+    if (disposed) return;
+    // האירוע נושא כותרת קנונית, אך לא bookUid/זהות מהדורה. כותרת מהדורה
+    // עשויה להיות שונה; במקרה עמום פוסלים עד שישה חלונות במקום להשאיר ישן.
+    const matches = books.filter((book) => book.bookId === detail.bookId ||
+      book.bookId.startsWith(`${detail.bookId} (`));
+    const affected = matches.length > 0 ? matches : books;
+    for (const book of affected) {
+      book.dirty = true;
+      book.revision += 1;
+      book.lastAttemptAt = Number.NEGATIVE_INFINITY;
+    }
+    // גם hash זהה בכותרת יכול לשאת settings-changed. לא קוראים טקסט מתוך
+    // האירוע: עשרות אירועי שורות מתאחדים לטעינה עצלה אחת בזמן הקלדה.
+    invalidate();
+    lastStateAt = Number.NEGATIVE_INFINITY;
   });
 
   void refreshReaderState();
@@ -725,12 +1146,14 @@ export function installBookCompletion(
       container.removeEventListener(PASTE_STARTED, onPasteStarted);
       container.removeEventListener(PASTE_FINISHED, onPasteFinished);
       container.removeEventListener('input', onInput);
-      container.removeEventListener('keyup', onInput);
+      container.removeEventListener('keyup', onKeyUp);
       container.removeEventListener('keydown', onKeyDown, true);
       container.removeEventListener('beforeinput', invalidate, true);
+      container.removeEventListener('pointerdown', invalidate, true);
       container.removeEventListener('scroll', onScroll, true);
       offRefChanged();
       offBookChanged();
+      offSectionChanged();
     },
   };
 }

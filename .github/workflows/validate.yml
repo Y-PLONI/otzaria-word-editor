@@ -60,6 +60,21 @@ jobs:
       - name: Check dist
         run: npm run check:dist
 
+      # Ghost text and Tab acceptance depend on the real DOCX engine and keyup
+      # timing. Exercise the packaged app, including both shared fallback paths.
+      - name: Browser completion regressions
+        timeout-minutes: 5
+        env:
+          CHROME: /usr/bin/google-chrome
+          # Node 20 exposes CDP's global WebSocket behind this flag. run-all
+          # starts child Node processes, which inherit NODE_OPTIONS.
+          NODE_OPTIONS: --experimental-websocket
+        run: >-
+          node scripts/qa/run-all.mjs
+          scripts/qa/book-completion-qa.mjs
+          scripts/qa/acronym-completion-qa.mjs
+          scripts/qa/static-completion-qa.mjs
+
       # `fail-on-warnings: true` משקף את החנות, שחוסמת גם על אזהרות. dist עובר
       # ב-0 אזהרות, ולכן זה שער אמיתי ולא רעש.
       #

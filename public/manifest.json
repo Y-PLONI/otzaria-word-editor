@@ -15,6 +15,7 @@
     "fs.user_files.read",
     "fs.user_files.write",
     "reader.open",
+    "events.subscribe:reader.sectionContentChanged",
     "reader.context_menu",
     "reader.toolbar",
     "app.startup_contributions",

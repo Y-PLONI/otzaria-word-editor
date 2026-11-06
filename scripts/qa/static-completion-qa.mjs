@@ -140,6 +140,12 @@ try {
     } else {
       report.pass('מה שנכתב אינו חוצה רשומה');
     }
+
+    await app.type('א');
+    await app.sleep(250);
+    const typedAfter = await docText();
+    if (typedAfter === `${text}א`) report.pass('ההקלדה אחרי Tab נמצאת אחרי הביטוי');
+    else report.fail('ההקלדה אחרי Tab נמצאת אחרי הביטוי', `המסמך: ${JSON.stringify(typedAfter.slice(-80))}`);
   });
 
   await step('שם מחבר: ה-fallback לרשימה השנייה, והפיסוק', async () => {

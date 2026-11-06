@@ -31,7 +31,7 @@ import type {
   ResolvedRefHit,
   NavigationTarget,
   OpenSearchTabArgs,
-  ReaderRefState,
+  ReaderState,
   ReaderSelection,
   SectionTextMapResult,
 } from '../types/otzaria_plugin';
@@ -184,10 +184,10 @@ export async function getReaderSelection(): Promise<ReaderResult<ReaderSelection
 }
 
 /**
- * מצב הקריאה הנוכחי: ספר, מיקום (`currentRef`) וטאב פעיל. `null` תקין —
+ * מצב הקריאה הנוכחי: ספר, מיקום (`currentRef`), טאב פעיל ו-`openTabs`. `null` תקין —
  * אין ספר פתוח (מסך ספרייה, למשל), וזה לא כשל.
  */
-export async function getCurrentReaderState(): Promise<ReaderResult<ReaderRefState | null>> {
+export async function getCurrentReaderState(): Promise<ReaderResult<ReaderState | null>> {
   let data: unknown;
   try {
     data = await call<unknown>('reader.getCurrentState');
@@ -196,7 +196,7 @@ export async function getCurrentReaderState(): Promise<ReaderResult<ReaderRefSta
   }
 
   if (!data || typeof data !== 'object') return { ok: true, value: null };
-  return { ok: true, value: data as ReaderRefState };
+  return { ok: true, value: data as ReaderState };
 }
 
 /**

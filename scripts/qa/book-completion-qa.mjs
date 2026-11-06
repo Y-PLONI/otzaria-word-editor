@@ -37,6 +37,18 @@ async function docText() {
   return (files['word/document.xml'] ?? '').replace(/<[^>]+>/g, '').replace(/\r?\n/g, '');
 }
 
+/** מתחילה תרחיש עצמאי במסמך ריק, בלי להניח שהסמן הקודם היה בסוף המסמך. */
+async function clearDoc() {
+  await app.caretPara(0);
+  await app.press('a', 'KeyA', 65, process.platform === 'darwin' ? 4 : 2);
+  await app.sleep(150);
+  await app.press('Backspace', 'Backspace', 8, 0);
+  await app.sleep(500);
+  await app.caretPara(0);
+  const text = await docText();
+  if (text !== '') throw new Error(`ניקוי המסמך לא הושלם: ${JSON.stringify(text)}`);
+}
+
 async function step(name, fn) {
   log(`\n──────── ${name} ────────`);
   try {
@@ -160,6 +172,216 @@ try {
     }
     if (stale.length === 0) report.pass('ghost אינו נשאר מעל טקסט שמוקלד');
     else report.fail('ghost אינו נשאר מעל טקסט שמוקלד', `ghost מחוץ לסמן: ${stale.join(' ')}`);
+  });
+
+  /*
+   * מכאן הקורא המדומה מחזיק כמה ספרים, ואפשר לשנות את הטקסט „המוצג” שלהם
+   * באמצע. `Shift` לבדו מעורר הערכה (keyup) בלי לפסול הצעה ובלי לכתוב, ושתי
+   * הערכות במרחק של יותר מ-STATE_TTL_MS הן מה שמריץ רענון של מצב הקורא
+   * ואחריו הערכה שרואה את התוצאה שלו.
+   */
+  const nudge = async (wait = 600) => {
+    await app.press('Shift', 'ShiftLeft', 16, 0);
+    await app.sleep(wait);
+  };
+  const refreshReader = async () => {
+    await nudge(1_800);
+    await nudge(1_800);
+  };
+  const setReader = (state, books) =>
+    app.js(`
+      window.__qaReader = { state: ${JSON.stringify(state)}, books: ${JSON.stringify(books)} };
+      window.__qaHost.replies['reader.getCurrentState'] = function () {
+        return Promise.resolve({ success: true, data: window.__qaReader.state, error: null });
+      };
+      window.__qaHost.replies['reader.getSectionTextMap'] = function (payload) {
+        var book = window.__qaReader.books[(payload && (payload.bookUid || payload.bookId)) || ''];
+        if (book === undefined) {
+          return Promise.resolve({ success: false, data: null, error: { code: 'error.not_found', message: 'text book was not found' } });
+        }
+        var text = payload.sectionIndex === 0 ? book : '';
+        return Promise.resolve({ success: true, data: { renderedText: text, sourceText: text, hasMore: false, nextCursor: null }, error: null });
+      };
+    `);
+
+  /** אותו פסוק, כפי שהקורא מציג אותו כשהניקוד גלוי. */
+  const NIKUD_LINE = 'בְּרֵאשִׁית בָּרָא אֱלֹהִים אֵת הַשָּׁמַיִם וְאֵת הָאָרֶץ וְהָאָרֶץ הָיְתָה תֹהוּ וָבֹהוּ';
+  const NIKUD_GHOST = 'בָּרָא אֱלֹהִים אֵת הַשָּׁמַיִם וְאֵת';
+  const GENESIS = { currentBook: 'בראשית', currentBookId: 'b1', bookUid: null, currentRef: 'בראשית א', currentIndex: 0 };
+
+  /*
+   * הדיווח: „מעתיק עם ניקוד ולא לפי איך שזה מוצג”. המטמון נשמר לפי ספר
+   * ושורה, והסתרת ניקוד אינה משנה אף אחד מהם — ולכן ההשלמה המשיכה להציע את
+   * מה שנטען קודם, עד גלילה. כאן שני הכיוונים, בלי לזוז מהשורה.
+   */
+  await step('שינוי ניקוד בקורא מגיע להשלמה בלי גלילה', async () => {
+    await setReader(GENESIS, { b1: NIKUD_LINE });
+    await refreshReader();
+    await app.press('Enter', 'Enter', 13, 0);
+    await app.type('בראשית ב');
+    await app.sleep(1_600);
+    const shown = (await ghostText()).trim();
+    log('ניקוד גלוי:', JSON.stringify(shown));
+    if (shown === NIKUD_GHOST) report.pass('הצגת ניקוד בקורא — ההשלמה מנוקדת');
+    else report.fail('הצגת ניקוד בקורא — ההשלמה מנוקדת', `הוצג ${JSON.stringify(shown)} במקום „${NIKUD_GHOST}”`);
+
+    await setReader(GENESIS, { b1: LINE });
+    await refreshReader();
+    const hidden = (await ghostText()).trim();
+    log('ניקוד מוסתר:', JSON.stringify(hidden));
+    if (hidden === FIRST_GHOST) report.pass('הסתרת ניקוד בקורא — ההשלמה בלי ניקוד');
+    else report.fail('הסתרת ניקוד בקורא — ההשלמה בלי ניקוד', `הוצג ${JSON.stringify(hidden)} במקום „${FIRST_GHOST}”`);
+  });
+
+  /*
+   * הדיווח: „כשיש הרבה ספרים פתוחים אין קשר בין מה שהוא מציע לנכתב”. הספר
+   * שנקרא אחרון (שמות) אינו הספר שמעתיקים ממנו (בראשית, בטאב של מהדורה
+   * חלופית — הכותרת אינה שם הספר, ולכן הוא נמצא רק לפי `bookUid`).
+   */
+  await step('ספר שמעתיקים ממנו גובר על הספר שנקרא אחרון', async () => {
+    const EXODUS_LINE = 'ואלה שמות בני ישראל הבאים מצרימה את יעקב איש וביתו באו';
+    await setReader(
+      {
+        currentBook: 'שמות',
+        currentBookId: 'שמות',
+        bookUid: 'u2',
+        currentType: 'text',
+        currentRef: 'שמות א',
+        currentIndex: 0,
+        openTabs: [
+          { toolId: null, isSelf: false, bookId: 'שמות', bookUid: 'u2', type: 'text', index: 0 },
+          { toolId: null, isSelf: false, bookId: 'בראשית (מהדורה)', bookUid: 'u1', type: 'text', index: 0 },
+          { toolId: 'otzaria.word', isSelf: true, bookId: 'וורד', bookUid: null, type: null, index: 0 },
+        ],
+      },
+      { u2: EXODUS_LINE, u1: LINE },
+    );
+    await app.press('Enter', 'Enter', 13, 0);
+    await refreshReader();
+
+    await app.type('בראשית ב');
+    await app.sleep(1_600);
+    const withContext = (await ghostText()).trim();
+    log('עם הקשר:', JSON.stringify(withContext));
+    if (withContext === FIRST_GHOST) report.pass('הקשר תואם בספר רקע מציע ממנו');
+    else report.fail('הקשר תואם בספר רקע מציע ממנו', `הוצג ${JSON.stringify(withContext)} במקום „${FIRST_GHOST}”`);
+
+    // „וחש” מופיע רק בבראשית, ובלי שום מילת הקשר: זה בדיוק הקטע האקראי מספר
+    // אחר שדווח. מותר רק מהספר שנקרא אחרון. הטענה על המשך **הספר** ולא על
+    // „אין ghost”: הרשימות הסטטיות רצות אחרי הספר ומציעות לאותן אותיות משלהן.
+    const BACKGROUND_CONTINUATION = 'וחשך על פני תהום';
+    await app.press('Enter', 'Enter', 13, 0);
+    await app.type('וחש');
+    await app.sleep(1_600);
+    const standalone = (await ghostText()).trim();
+    log('בלי הקשר:', JSON.stringify(standalone));
+    if (standalone !== BACKGROUND_CONTINUATION) report.pass('בלי הקשר אין הצעה מספר רקע');
+    else report.fail('בלי הקשר אין הצעה מספר רקע', `הוצג ${JSON.stringify(standalone)} מספר הרקע`);
+  });
+
+  /*
+   * אחרי ההשלמה הראשונה ארבע מילות ההקשר משותפות לשני ספרים. התאמה חדשה
+   * ב-keyup של Tab הייתה מעבירה את ההמשך לספר הראשי. `app.press` שולח גם
+   * keydown וגם keyup דרך CDP; ההמתנה שאחריהם מכסה גם את ה-debounce.
+   */
+  await step('רצף Tab נשאר בספר הרקע גם כשמילות ההקשר משותפות', async () => {
+    const primary = 'commonone commontwo commonthree commonfour primarytail primaryend';
+    const background = 'distinct seed commonone commontwo commonthree commonfour backgroundtail backgroundend';
+    const first = 'seed commonone commontwo commonthree commonfour';
+    const next = 'backgroundtail backgroundend';
+    await setReader(
+      {
+        currentBook: 'Primary continuation book', currentBookId: 'continuation-primary',
+        bookUid: 'continuation-primary', currentType: 'text', currentIndex: 0,
+        currentRef: null,
+        openTabs: [
+          { toolId: null, isSelf: false, bookId: 'Background continuation book', bookUid: 'continuation-background', type: 'text', index: 0 },
+        ],
+      },
+      { 'continuation-primary': primary, 'continuation-background': background },
+    );
+    await clearDoc();
+    await refreshReader();
+    await app.type('distinct s');
+    await app.sleep(1_600);
+    const initial = (await ghostText()).trim();
+    const typed = await docText();
+    if (initial !== first || typed !== 'distinct s') {
+      return report.fail('התאמה ייחודית מתחילה בספר הרקע', `ghost: ${JSON.stringify(initial)}, מסמך: ${JSON.stringify(typed)}`);
+    }
+    report.pass('התאמה ייחודית מתחילה בספר הרקע');
+
+    await app.press('Tab', 'Tab', 9, 0);
+    await app.sleep(1_000);
+    const continued = (await ghostText()).trim();
+    const afterFirst = await docText();
+    log('רקע אחרי Tab ו-keyup:', JSON.stringify(continued));
+    if (continued !== next || afterFirst !== `distinct ${first}`) {
+      report.fail('keyup של Tab שומר את מקור ההמשך', `ghost: ${JSON.stringify(continued)}, מסמך: ${JSON.stringify(afterFirst)}`);
+    } else {
+      report.pass('keyup של Tab שומר את מקור ההמשך');
+    }
+
+    await app.press('Tab', 'Tab', 9, 0);
+    await app.sleep(1_000);
+    const afterSecond = await docText();
+    if (afterSecond === background) report.pass('Tab חוזר מכניס את המשך ספר הרקע');
+    else report.fail('Tab חוזר מכניס את המשך ספר הרקע', `המסמך אינו שווה לספר הרקע: ${JSON.stringify(afterSecond)}`);
+    const exhausted = (await ghostText()).trim();
+    if (exhausted === '') report.pass('סוף ספר הרקע אינו מתחיל התאמה חדשה');
+    else report.fail('סוף ספר הרקע אינו מתחיל התאמה חדשה', `נשאר ghost: ${JSON.stringify(exhausted)}`);
+
+    await app.type('x');
+    await app.sleep(250);
+    const typedAfter = await docText();
+    if (typedAfter === `${background}x`) report.pass('ההקלדה אחרי Tab חוזר נמצאת בסוף ההשלמה');
+    else report.fail('ההקלדה אחרי Tab חוזר נמצאת בסוף ההשלמה', `המסמך: ${JSON.stringify(typedAfter)}`);
+  });
+
+  /*
+   * שינוי מקור בין ההצגה לבין קבלת ההצעה, בלי אירוע מהקורא ובלי keyup
+   * מקדים שירענן אותו. Tab חייב לאמת את המקור לפני כתיבה למסמך האמיתי.
+   */
+  await step('Tab דוחה טקסט מקור שהשתנה אחרי הצגת ההצעה', async () => {
+    const state = {
+      currentBook: 'Mutable source book', currentBookId: 'mutable-source',
+      bookUid: 'mutable-source', currentType: 'text', currentIndex: 0,
+      currentRef: null, openTabs: [],
+    };
+    const original = 'unique seed originalone originaltwo originalthree originalfour originalend';
+    const replacement = 'unique seed replacementone replacementtwo replacementthree replacementfour replacementend';
+    const originalGhost = 'seed originalone originaltwo originalthree originalfour';
+    const replacementGhost = 'seed replacementone replacementtwo replacementthree replacementfour';
+    await setReader(state, { 'mutable-source': original });
+    await clearDoc();
+    await refreshReader();
+    await app.type('unique s');
+    await app.sleep(1_600);
+    const initial = (await ghostText()).trim();
+    const before = await docText();
+    if (initial !== originalGhost || before !== 'unique s') {
+      return report.fail('הצעת המקור לפני השינוי', `ghost: ${JSON.stringify(initial)}, מסמך: ${JSON.stringify(before)}`);
+    }
+    report.pass('הצעת המקור לפני השינוי');
+
+    await setReader(state, { 'mutable-source': replacement });
+    await app.press('Tab', 'Tab', 9, 0);
+    await app.sleep(1_000);
+    const after = await docText();
+    if (after === before) report.pass('הצעה מיושנת אינה נכתבת למסמך');
+    else report.fail('הצעה מיושנת אינה נכתבת למסמך', `לפני: ${JSON.stringify(before)}, אחרי: ${JSON.stringify(after)}`);
+
+    const updated = (await ghostText()).trim();
+    if (updated !== replacementGhost) {
+      return report.fail('המקור העדכני מוצג לאחר דחיית ההצעה', `הוצג ${JSON.stringify(updated)} במקום ${JSON.stringify(replacementGhost)}`);
+    }
+    report.pass('המקור העדכני מוצג לאחר דחיית ההצעה');
+
+    await app.press('Tab', 'Tab', 9, 0);
+    await app.sleep(1_000);
+    const accepted = await docText();
+    if (accepted === `unique ${replacementGhost}`) report.pass('Tab נוסף מקבל את הטקסט העדכני בלבד');
+    else report.fail('Tab נוסף מקבל את הטקסט העדכני בלבד', `המסמך אינו שווה להצעה העדכנית: ${JSON.stringify(accepted)}`);
   });
 
   await step('כיבוי מסיר את ה-ghost', async () => {

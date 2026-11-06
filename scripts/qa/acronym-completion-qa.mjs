@@ -105,7 +105,7 @@ try {
 
     const typed = await docText();
     if (!typed.includes(ACRONYM)) {
-      return report.stuck('ההקלדה', `הר"ת לא נכנס למסמך כפי שהוקלד: ${JSON.stringify(typed.slice(-40))}`);
+      return report.fail('ההקלדה', `הר"ת לא נכנס למסמך כפי שהוקלד: ${JSON.stringify(typed.slice(-40))}`);
     }
 
     const state = await assetState();
@@ -135,6 +135,12 @@ try {
     const ghost = await ghostText();
     if (ghost === '') report.pass('ה-ghost נעלם אחרי הקבלה');
     else report.fail('ה-ghost נעלם אחרי הקבלה', `נשאר ${JSON.stringify(ghost)}`);
+
+    await app.type('א');
+    await app.sleep(250);
+    const typedAfter = await docText();
+    if (typedAfter === `${text}א`) report.pass('ההקלדה אחרי Tab נמצאת אחרי הפירוש');
+    else report.fail('ההקלדה אחרי Tab נמצאת אחרי הפירוש', `המסמך: ${JSON.stringify(typedAfter.slice(-100))}`);
   });
 
   /* 4. ניקיון ------------------------------------------------------- */
