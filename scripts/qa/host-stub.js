@@ -13,12 +13,14 @@
     theme: { mode: 'light', colorScheme: {}, typography: {} },
     connectivity: { isOnline: false },
     // כמו במארח, app.info.read היא הרשאת בסיס ולכן גם מופיעה בצילום ההרשאות.
-    permissions: ['app.info.read', 'storage', 'clipboard.read', 'fs.read', 'fs.write'],
+    permissions: ['app.info.read', 'storage', 'clipboard.read', 'fs.read', 'fs.write', 'reader.toolbar'],
   };
 
   var H = (window.__qaHost = {
     calls: [],
     storage: {},
+    /** פקדי הקורא שנרשמו במופע; רישום חוזר של אותו id מחליף אותו. */
+    toolbarItems: Object.create(null),
     /** מה שהמאחז יענה על מתודה מסוימת. שער יכול לדרוס לפני שהוא לוחץ. */
     replies: {},
     /** מה שהוצג למשתמש דרך המאחז — showError / showMessage / showConfirm. */
@@ -50,6 +52,11 @@
     });
   }
 
+  function validToolbarText(value, maxLength) {
+    return typeof value === 'string' && value.length > 0 && value.length <= maxLength &&
+      !/[\u0000-\u001F\u007F]/.test(value);
+  }
+
   var listeners = {};
 
   window.Otzaria = {
@@ -68,6 +75,25 @@
           return ok(BOOT.theme);
         case 'app.getGrantedPermissions':
           return ok({ permissions: BOOT.permissions });
+        // המארח מחזיר true, כולל בהסרת id שלא קיים. הרישומים נשארים אחרי
+        // H.reset(), שמנקה מדידות בלבד, כמו H.storage.
+        case 'reader.addToolbarItem':
+          if (!payload || !validToolbarText(payload.id, 128) ||
+              !validToolbarText(payload.title, 100) || !validToolbarText(payload.icon, 100)) {
+            return fail('toolbar item requires valid id, title and icon', 'error.invalid_params');
+          }
+          if (!Object.prototype.hasOwnProperty.call(H.toolbarItems, payload.id) &&
+              Object.keys(H.toolbarItems).length >= 2) {
+            return fail('a plugin can register at most 2 toolbar items', 'error.invalid_params');
+          }
+          H.toolbarItems[payload.id] = JSON.parse(JSON.stringify(payload));
+          return ok(true);
+        case 'reader.removeToolbarItem':
+          if (!payload || typeof payload.id !== 'string') {
+            return fail('id required', 'error.invalid_params');
+          }
+          delete H.toolbarItems[payload.id];
+          return ok(true);
         /*
          * הערך **עצמו**, לא `{ value }`: `call()` מוסר את `res.data` כמו שהוא
          * (host/otzaria-client.ts), וכל הצרכנים קוראים ישירות —

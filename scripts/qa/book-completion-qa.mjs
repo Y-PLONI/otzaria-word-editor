@@ -37,6 +37,18 @@ async function docText() {
   return (files['word/document.xml'] ?? '').replace(/<[^>]+>/g, '').replace(/\r?\n/g, '');
 }
 
+/** מתחילה תרחיש עצמאי במסמך ריק, בלי להניח שהסמן הקודם היה בסוף המסמך. */
+async function clearDoc() {
+  await app.caretPara(0);
+  await app.press('a', 'KeyA', 65, process.platform === 'darwin' ? 4 : 2);
+  await app.sleep(150);
+  await app.press('Backspace', 'Backspace', 8, 0);
+  await app.sleep(500);
+  await app.caretPara(0);
+  const text = await docText();
+  if (text !== '') throw new Error(`ניקוי המסמך לא הושלם: ${JSON.stringify(text)}`);
+}
+
 async function step(name, fn) {
   log(`\n──────── ${name} ────────`);
   try {
@@ -288,13 +300,14 @@ try {
       },
       { 'continuation-primary': primary, 'continuation-background': background },
     );
-    await app.press('Enter', 'Enter', 13, 0);
+    await clearDoc();
     await refreshReader();
     await app.type('distinct s');
     await app.sleep(1_600);
     const initial = (await ghostText()).trim();
-    if (initial !== first) {
-      return report.fail('התאמה ייחודית מתחילה בספר הרקע', `הוצג ${JSON.stringify(initial)} במקום ${JSON.stringify(first)}`);
+    const typed = await docText();
+    if (initial !== first || typed !== 'distinct s') {
+      return report.fail('התאמה ייחודית מתחילה בספר הרקע', `ghost: ${JSON.stringify(initial)}, מסמך: ${JSON.stringify(typed)}`);
     }
     report.pass('התאמה ייחודית מתחילה בספר הרקע');
 
@@ -303,19 +316,26 @@ try {
     const continued = (await ghostText()).trim();
     const afterFirst = await docText();
     log('רקע אחרי Tab ו-keyup:', JSON.stringify(continued));
-    if (continued !== next || !afterFirst.endsWith(`distinct ${first}`)) {
-      return report.fail('keyup של Tab שומר את מקור ההמשך', `ghost: ${JSON.stringify(continued)}, מסמך: ${JSON.stringify(afterFirst)}`);
+    if (continued !== next || afterFirst !== `distinct ${first}`) {
+      report.fail('keyup של Tab שומר את מקור ההמשך', `ghost: ${JSON.stringify(continued)}, מסמך: ${JSON.stringify(afterFirst)}`);
+    } else {
+      report.pass('keyup של Tab שומר את מקור ההמשך');
     }
-    report.pass('keyup של Tab שומר את מקור ההמשך');
 
     await app.press('Tab', 'Tab', 9, 0);
     await app.sleep(1_000);
     const afterSecond = await docText();
-    if (afterSecond.endsWith(background)) report.pass('Tab חוזר מכניס את המשך ספר הרקע');
-    else report.fail('Tab חוזר מכניס את המשך ספר הרקע', `סוף המסמך אינו ספר הרקע: ${JSON.stringify(afterSecond)}`);
+    if (afterSecond === background) report.pass('Tab חוזר מכניס את המשך ספר הרקע');
+    else report.fail('Tab חוזר מכניס את המשך ספר הרקע', `המסמך אינו שווה לספר הרקע: ${JSON.stringify(afterSecond)}`);
     const exhausted = (await ghostText()).trim();
     if (exhausted === '') report.pass('סוף ספר הרקע אינו מתחיל התאמה חדשה');
     else report.fail('סוף ספר הרקע אינו מתחיל התאמה חדשה', `נשאר ghost: ${JSON.stringify(exhausted)}`);
+
+    await app.type('x');
+    await app.sleep(250);
+    const typedAfter = await docText();
+    if (typedAfter === `${background}x`) report.pass('ההקלדה אחרי Tab חוזר נמצאת בסוף ההשלמה');
+    else report.fail('ההקלדה אחרי Tab חוזר נמצאת בסוף ההשלמה', `המסמך: ${JSON.stringify(typedAfter)}`);
   });
 
   /*
@@ -333,16 +353,16 @@ try {
     const originalGhost = 'seed originalone originaltwo originalthree originalfour';
     const replacementGhost = 'seed replacementone replacementtwo replacementthree replacementfour';
     await setReader(state, { 'mutable-source': original });
-    await app.press('Enter', 'Enter', 13, 0);
+    await clearDoc();
     await refreshReader();
     await app.type('unique s');
     await app.sleep(1_600);
     const initial = (await ghostText()).trim();
-    if (initial !== originalGhost) {
-      return report.fail('הצעת המקור לפני השינוי', `הוצג ${JSON.stringify(initial)} במקום ${JSON.stringify(originalGhost)}`);
+    const before = await docText();
+    if (initial !== originalGhost || before !== 'unique s') {
+      return report.fail('הצעת המקור לפני השינוי', `ghost: ${JSON.stringify(initial)}, מסמך: ${JSON.stringify(before)}`);
     }
     report.pass('הצעת המקור לפני השינוי');
-    const before = await docText();
 
     await setReader(state, { 'mutable-source': replacement });
     await app.press('Tab', 'Tab', 9, 0);
@@ -360,8 +380,8 @@ try {
     await app.press('Tab', 'Tab', 9, 0);
     await app.sleep(1_000);
     const accepted = await docText();
-    if (accepted.endsWith(`unique ${replacementGhost}`)) report.pass('Tab נוסף מקבל את הטקסט העדכני בלבד');
-    else report.fail('Tab נוסף מקבל את הטקסט העדכני בלבד', `סוף המסמך אינו ההצעה העדכנית: ${JSON.stringify(accepted)}`);
+    if (accepted === `unique ${replacementGhost}`) report.pass('Tab נוסף מקבל את הטקסט העדכני בלבד');
+    else report.fail('Tab נוסף מקבל את הטקסט העדכני בלבד', `המסמך אינו שווה להצעה העדכנית: ${JSON.stringify(accepted)}`);
   });
 
   await step('כיבוי מסיר את ה-ghost', async () => {
@@ -377,7 +397,7 @@ try {
       (l) =>
         /error|שגיאה|failed|נכשל/i.test(l) &&
         !/DevTools|Download the Vue/i.test(l) &&
-        !/reader\.addContextMenuItem|reader\.addToolbarItem|fonts\.listInstalled/.test(l) &&
+        !/reader\.addContextMenuItem|fonts\.listInstalled/.test(l) &&
         !/projection-incomplete|typing-mutation: engine pass failed/.test(l),
     );
     if (noisy.length) report.fail('ללא רעש', noisy.join(' | '));

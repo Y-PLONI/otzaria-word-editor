@@ -90,6 +90,7 @@ export interface CompletionHost {
   ui?: {
     selection?: {
       getAnchorRect?: (input?: { placement?: 'start' | 'end' | 'center' }) => AnchorRectLike | null;
+      apply?: (target: unknown) => { ok?: boolean } | void;
     } | null;
   } | null;
 }
@@ -687,6 +688,48 @@ export function installBookCompletion(
     return seed !== null && sameCaret(expected, { ...seed, cursorOffset: seed.offset });
   }
 
+  /**
+   * בהכנסה ליעד מכווץ המנוע משאיר את הסמן לפני הטקסט. מזיזים אותו דרך ה-UI
+   * הציבורי, ורק כל עוד הוא עדיין במקומו המקורי; שינוי של המשתמש פוסל גם
+   * ניסיון חוזר שממתין לפריסה. מארח שכבר הזיז את הסמן אינו זקוק ל-apply.
+   */
+  async function placeCaretAfter(
+    before: { blockId: string; cursorOffset: number; story: unknown },
+    offset: number,
+    isCurrent: () => boolean,
+  ): Promise<boolean> {
+    const after = { blockId: before.blockId, cursorOffset: offset, story: before.story };
+    const target: SelectionTargetLike = {
+      kind: 'selection',
+      start: pointAt(before.blockId, offset, before.story),
+      end: pointAt(before.blockId, offset, before.story),
+      ...(before.story ? { story: before.story } : {}),
+    };
+    try {
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        if (!isCurrent()) return false;
+        const info = await doc?.selection?.current?.();
+        if (!isCurrent()) return false;
+        const seed = readCaretSeed(info?.selectionTarget);
+        if (!seed) return false;
+        const actual = { ...seed, cursorOffset: seed.offset };
+        if (sameCaret(after, actual)) return true;
+        if (!sameCaret(before, actual) || typeof selectionHandle?.apply !== 'function') return false;
+
+        const result = selectionHandle.apply.call(selectionHandle, target);
+        if (!isCurrent()) return false;
+        if (result?.ok !== false) {
+          const placed = await caretStillAt(after);
+          return isCurrent() && placed;
+        }
+        if (attempt < 9) await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+    } catch (error) {
+      console.warn('[otzaria-word] השלמה מהספר: הצבת הסמן אחרי ההשלמה נכשלה', error);
+    }
+    return false;
+  }
+
   async function evaluate(retryAfterReload = true): Promise<void> {
     if (disposed || !doc || pendingAcceptance !== null) return;
     // לא ממתינים: ההקשה הזאת תשתמש במטמון שכבר יש, וההקשה הבאה כבר תראה את
@@ -965,8 +1008,19 @@ export function installBookCompletion(
       return;
     }
     if (!isCurrent()) return;
+    if (receipt?.success === false) {
+      clearSuggestion();
+      return;
+    }
+    const newCursor = replaceStart + insertText.length;
+    const placed = await placeCaretAfter(accepted, newCursor, isCurrent);
+    if (!isCurrent()) return;
+    if (!placed) {
+      clearSuggestion();
+      return;
+    }
     pendingAcceptance = null;
-    if (receipt?.success === false || continueFrom === null || source === null) {
+    if (continueFrom === null || source === null) {
       clearSuggestion();
       return;
     }
@@ -976,7 +1030,7 @@ export function installBookCompletion(
       source,
       sourceFrom: continueFrom,
       sourceTo: next?.nextWordIndex ?? continueFrom,
-      cursorOffset: replaceStart + insertText.length,
+      cursorOffset: newCursor,
       blockId,
       story,
       expectedSuffix: insertText.slice(-WORD_WINDOW_RADIUS),

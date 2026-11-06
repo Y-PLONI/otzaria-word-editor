@@ -7,6 +7,7 @@ const reader = vi.hoisted(() => ({
   state: {} as Record<string, unknown>,
   text: {} as Record<string, string>,
   staticMatch: vi.fn(() => null as { text: string } | null),
+  acronymLookup: vi.fn(() => null as string | null),
 }));
 
 vi.mock('../../src/host/otzaria-reader', async (original) => ({
@@ -24,7 +25,9 @@ vi.mock('../../src/host/otzaria-reader', async (original) => ({
 vi.mock('../../src/host/otzaria-client', () => ({ on: () => () => {} }));
 vi.mock('../../src/engine/static-completion-dictionary', () => ({ loadStaticSources: async () => [] }));
 vi.mock('../../src/engine/static-completion', () => ({ matchStaticCompletion: reader.staticMatch }));
-vi.mock('../../src/engine/acronym-dictionary', () => ({ loadAcronymDictionary: async () => null }));
+vi.mock('../../src/engine/acronym-dictionary', () => ({
+  loadAcronymDictionary: async () => ({ lookup: reader.acronymLookup }),
+}));
 
 const PRIMARY = 'common1 common2 common3 common4 Aunique Aend';
 const BACKGROUND = 'unique seed common1 common2 common3 common4 Bunique Bend';
@@ -46,6 +49,7 @@ function fakeDoc(initialText = 'unique s') {
     story: null as unknown,
     rect: RECT as AnchorRectLike | null,
     insertReceipt: undefined as Promise<{ success: boolean }> | undefined,
+    moveCaretOnInsert: 'replacement' as 'replacement' | 'always' | 'never',
   };
   const doc = {
     selection: { current: vi.fn(async () => ({ selectionTarget: {
@@ -65,15 +69,26 @@ function fakeDoc(initialText = 'unique s') {
       const start = range.start!.offset!;
       const end = range.end!.offset!;
       state.text = state.text.slice(0, start) + value + state.text.slice(end);
-      state.caret = start + value.length;
+      // The engine maps the end of a replacement, but a caret at a collapsed
+      // insertion boundary stays before the inserted text until selection.apply.
+      if (state.moveCaretOnInsert === 'always' || (state.moveCaretOnInsert === 'replacement' && start !== end)) {
+        state.caret = start + value.length;
+      }
       return await (state.insertReceipt ?? Promise.resolve({ success: true }));
     }),
   };
+  const apply = vi.fn((target: unknown) => {
+    const range = target as SelectionTargetLike;
+    state.caret = range.end!.offset!;
+    state.blockId = range.end!.blockId!;
+    state.story = range.story ?? range.end!.story ?? null;
+    return { ok: true };
+  });
   const host = {
     activeEditor: { doc },
-    ui: { selection: { getAnchorRect: () => state.rect } },
+    ui: { selection: { getAnchorRect: () => state.rect, apply } },
   };
-  return { state, doc, host };
+  return { state, doc, host, apply };
 }
 
 beforeEach(() => {
@@ -84,6 +99,7 @@ beforeEach(() => {
   reader.sectionGate = null;
   reader.text = { primary: PRIMARY, background: BACKGROUND };
   reader.staticMatch.mockReset().mockReturnValue(null);
+  reader.acronymLookup.mockReset().mockReturnValue(null);
   reader.state = {
     currentBook: 'Primary Book', currentBookId: 'primary', bookUid: 'primary',
     currentType: 'text', currentIndex: 0, currentRef: null,
@@ -98,6 +114,7 @@ afterEach(() => {
   handle?.dispose();
   handle = undefined;
   document.body.innerHTML = '';
+  vi.restoreAllMocks();
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -127,7 +144,7 @@ async function tab() {
 
 describe('book completion continuation', () => {
   it('keeps the selected background source across Tab keyup and repeated Tab', async () => {
-    const { state } = await start();
+    const { state, apply } = await start();
     expect(ghost()).toBe('seed common1 common2 common3 common4');
 
     await tab();
@@ -136,7 +153,15 @@ describe('book completion continuation', () => {
 
     await tab();
     expect(state.text).toBe(BACKGROUND);
+    expect(state.caret).toBe(BACKGROUND.length);
+    expect(apply).toHaveBeenCalledTimes(1);
     expect(ghost()).toBe('');
+
+    container.dispatchEvent(new Event('beforeinput'));
+    state.text = state.text.slice(0, state.caret) + ' typed' + state.text.slice(state.caret);
+    state.caret += ' typed'.length;
+    container.dispatchEvent(new Event('input'));
+    expect(state.text).toBe(`${BACKGROUND} typed`);
   });
 
   it('keeps the selected source after an unchanged reader window is refreshed', async () => {
@@ -347,6 +372,175 @@ describe('book completion continuation', () => {
     expect(ghost()).toBe('known phrase');
     await tab();
     expect(state.text).toBe('known known phrase');
+    expect(ghost()).toBe('');
+  });
+});
+
+describe('completion caret placement', () => {
+  it('places the caret after a static completion even when insertion preserves it', async () => {
+    reader.staticMatch.mockReturnValue({ text: 'known phrase' });
+    const { state, apply } = await start('known p');
+    state.moveCaretOnInsert = 'never';
+
+    await tab();
+    expect(state.text).toBe('known known phrase');
+    expect(state.caret).toBe(state.text.length);
+    expect(apply).toHaveBeenCalledTimes(1);
+    expect(ghost()).toBe('');
+  });
+
+  it('places the caret after an acronym expansion at a collapsed target', async () => {
+    reader.acronymLookup.mockReturnValue('חכמינו זכרונם לברכה');
+    const { state, apply } = await start('חז"ל ');
+    expect(ghost()).toBe('חכמינו זכרונם לברכה');
+
+    await tab();
+    expect(state.text).toBe('חז"ל חכמינו זכרונם לברכה');
+    expect(state.caret).toBe(state.text.length);
+    expect(apply).toHaveBeenCalledTimes(1);
+    expect(ghost()).toBe('');
+  });
+
+  it('retries temporary layout failures before showing the continuation', async () => {
+    const { state, apply } = await start();
+    state.moveCaretOnInsert = 'never';
+    apply.mockReturnValueOnce({ ok: false }).mockReturnValueOnce({ ok: false });
+    expect(keydown('Tab').defaultPrevented).toBe(true);
+    keyup('Tab');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(apply).toHaveBeenCalledTimes(1);
+    expect(state.caret).toBe(8);
+    expect(ghost()).toBe('');
+
+    await vi.advanceTimersByTimeAsync(200);
+    expect(apply).toHaveBeenCalledTimes(3);
+    expect(state.caret).toBe(state.text.length);
+    expect(ghost()).toBe(' Bunique Bend');
+  });
+
+  it('bounds retries and leaves no live continuation after permanent layout failure', async () => {
+    const { state, apply } = await start();
+    state.moveCaretOnInsert = 'never';
+    apply.mockReturnValue({ ok: false });
+    expect(keydown('Tab').defaultPrevented).toBe(true);
+    keyup('Tab');
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(apply).toHaveBeenCalledTimes(10);
+    expect(state.caret).toBe(8);
+    expect(ghost()).toBe('');
+    expect(keydown('Tab').defaultPrevented).toBe(false);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(apply).toHaveBeenCalledTimes(10);
+  });
+
+  it('clears continuation if the public selection API throws', async () => {
+    const { state, apply } = await start();
+    state.moveCaretOnInsert = 'never';
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    apply.mockImplementation(() => { throw new Error('selection unavailable'); });
+
+    await tab();
+    expect(apply).toHaveBeenCalledTimes(1);
+    expect(warning).toHaveBeenCalledTimes(1);
+    expect(state.caret).toBe(8);
+    expect(ghost()).toBe('');
+    expect(keydown('Tab').defaultPrevented).toBe(false);
+  });
+
+  it('does not claim continuation without apply when insertion leaves the caret behind', async () => {
+    const { state, host, apply } = await start();
+    state.moveCaretOnInsert = 'never';
+    Reflect.deleteProperty(host.ui.selection, 'apply');
+
+    await tab();
+    expect(state.text).toBe('unique seed common1 common2 common3 common4');
+    expect(state.caret).toBe(8);
+    expect(apply).not.toHaveBeenCalled();
+    expect(ghost()).toBe('');
+    expect(keydown('Tab').defaultPrevented).toBe(false);
+  });
+
+  it('supports hosts without apply when insertion already places the caret correctly', async () => {
+    const { state, host, apply } = await start();
+    state.moveCaretOnInsert = 'always';
+    Reflect.deleteProperty(host.ui.selection, 'apply');
+
+    await tab();
+    expect(ghost()).toBe(' Bunique Bend');
+    await tab();
+    expect(state.text).toBe(BACKGROUND);
+    expect(state.caret).toBe(BACKGROUND.length);
+    expect(apply).not.toHaveBeenCalled();
+    expect(ghost()).toBe('');
+  });
+
+  it.each(['failed receipt', 'exception'])('does not move the caret after an insertion %s', async (failure) => {
+    const { state, doc, apply } = await start();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    if (failure === 'failed receipt') doc.insert.mockResolvedValueOnce({ success: false });
+    else doc.insert.mockRejectedValueOnce(new Error('insertion failed'));
+
+    await tab();
+    expect(state.text).toBe('unique s');
+    expect(state.caret).toBe(8);
+    expect(apply).not.toHaveBeenCalled();
+    expect(ghost()).toBe('');
+  });
+
+  it.each(['beforeinput', 'pointerdown', 'dispose'])('stops caret retries after %s', async (event) => {
+    const { state, apply } = await start();
+    state.moveCaretOnInsert = 'never';
+    apply.mockReturnValueOnce({ ok: false });
+    expect(keydown('Tab').defaultPrevented).toBe(true);
+    keyup('Tab');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(apply).toHaveBeenCalledTimes(1);
+
+    if (event === 'dispose') handle?.dispose();
+    else container.dispatchEvent(new Event(event, { bubbles: true }));
+    state.caret = 0;
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(apply).toHaveBeenCalledTimes(1);
+    expect(state.caret).toBe(0);
+    expect(ghost()).toBe('');
+  });
+
+  it.each(['offset', 'block', 'story'])('does not steal a changed %s while insertion is pending', async (change) => {
+    const { state, apply } = await start();
+    state.moveCaretOnInsert = 'never';
+    const receipt = deferred<{ success: boolean }>();
+    state.insertReceipt = receipt.promise;
+    expect(keydown('Tab').defaultPrevented).toBe(true);
+    keyup('Tab');
+    await vi.advanceTimersByTimeAsync(0);
+
+    if (change === 'offset') state.caret = 0;
+    else if (change === 'block') state.blockId = 'another paragraph';
+    else state.story = { storyType: 'footnote', noteId: 'another story' };
+    const selected = { caret: state.caret, blockId: state.blockId, story: state.story };
+    receipt.resolve({ success: true });
+    await vi.advanceTimersByTimeAsync(200);
+    expect(apply).not.toHaveBeenCalled();
+    expect({ caret: state.caret, blockId: state.blockId, story: state.story }).toEqual(selected);
+    expect(ghost()).toBe('');
+  });
+
+  it.each(['offset', 'block', 'story'])('rechecks a changed %s before retrying caret placement', async (change) => {
+    const { state, apply } = await start();
+    state.moveCaretOnInsert = 'never';
+    apply.mockReturnValueOnce({ ok: false });
+    expect(keydown('Tab').defaultPrevented).toBe(true);
+    keyup('Tab');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(apply).toHaveBeenCalledTimes(1);
+
+    if (change === 'offset') state.caret = 0;
+    else if (change === 'block') state.blockId = 'another paragraph';
+    else state.story = { storyType: 'footnote', noteId: 'another story' };
+    const selected = { caret: state.caret, blockId: state.blockId, story: state.story };
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(apply).toHaveBeenCalledTimes(1);
+    expect({ caret: state.caret, blockId: state.blockId, story: state.story }).toEqual(selected);
     expect(ghost()).toBe('');
   });
 });
