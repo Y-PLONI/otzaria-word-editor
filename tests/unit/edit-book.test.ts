@@ -3,7 +3,7 @@
  *
  * שלושה חלקים: הפענוח של אירוע הלחיצה (ספר Word נפתח, ספר אחר מקבל הודעה,
  * פקד אחר נבלע), ה-latch שב-`index.html` — הלחיצה מגיעה בסוף ה-boot, לפני
- * הבאנדל — וההצהרה במניפסט, שהיא המסלול שבו הכפתור קיים לפני שהתוסף רץ.
+ * הבאנדל — וההצהרה במניפסט, שהיא המסלול היחיד שבו הכפתור קיים, ורק על ספר Word.
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -12,11 +12,12 @@ import {
   EDIT_BOOK_ITEM,
   EDIT_BOOK_ITEM_ID,
   TOOLBAR_LATCH_KEY,
+  WORD_BOOK_PROGRAM,
   readEditBookClick,
   takePendingToolbarClicks,
   type EditBookEvent,
 } from '../../src/host/edit-book';
-import { READER_PERMISSIONS } from '../../src/host/otzaria-reader';
+import { EDITABLE_BOOK_TYPES } from '../../src/sessions/open-sources';
 
 /** בדיוק מה ש-`_dispatchItemClick` באוצריא בונה, לספר Word אישי. */
 function click(overrides: Partial<EditBookEvent> = {}): EditBookEvent {
@@ -149,17 +150,30 @@ describe('ה-latch של reader.toolbar_item_clicked', () => {
 describe('ההצהרה במניפסט', () => {
   const manifest = JSON.parse(readFileSync(join(process.cwd(), 'public/manifest.json'), 'utf8')) as {
     permissions?: string[];
-    contributes?: { startup?: { toolbarItems?: unknown[] } };
+    minAppVersion?: string;
+    contributes?: { startup?: { toolbarItems?: unknown[]; programs?: unknown[] } };
   };
 
-  it('הפקד מוצהר כתרומת עלייה, זהה לזה שנרשם מ-JS', () => {
-    expect(manifest.contributes?.startup?.toolbarItems).toEqual([
-      { ...EDIT_BOOK_ITEM, contexts: [...EDIT_BOOK_ITEM.contexts] },
-    ]);
+  it('הפקד מוצהר כתרומת עלייה, קשור לתכנית שמזהה ספר Word', () => {
+    expect(manifest.contributes?.startup?.toolbarItems).toEqual([EDIT_BOOK_ITEM]);
+    expect(manifest.contributes?.startup?.programs).toEqual([WORD_BOOK_PROGRAM]);
+    expect(EDIT_BOOK_ITEM.binding.program).toBe(WORD_BOOK_PROGRAM.id);
+    expect(Object.keys(WORD_BOOK_PROGRAM.outputs)).toContain(EDIT_BOOK_ITEM.binding.visibleOutput);
+  });
+
+  it('התכנית משווה בדיוק לסוגים שהלחיצה מקבלת', () => {
+    const [command] = WORD_BOOK_PROGRAM.commands;
+    const compared = command.args.condition.conditions.map((condition) => condition.right);
+    expect(compared).toEqual([...EDITABLE_BOOK_TYPES]);
+  });
+
+  it('openPlugin בפקד קשור דורש אוצריא 0.9.98.1', () => {
+    // הוולידטור של אוצריא חוסם פקד קשור עם openPlugin במניפסט שמצהיר פחות.
+    expect(manifest.minAppVersion).toBe('0.9.98.1');
   });
 
   it('ההרשאה שהפקד דורש מוצהרת', () => {
-    expect(READER_PERMISSIONS['reader.addToolbarItem']).toBe('reader.toolbar');
     expect(manifest.permissions).toContain('reader.toolbar');
+    expect(manifest.permissions).toContain('app.startup_contributions');
   });
 });
