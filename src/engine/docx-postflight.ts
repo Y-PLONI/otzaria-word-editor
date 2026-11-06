@@ -3,7 +3,9 @@
  * שהם נכתבים לקובץ. הצד הנכנס הוא `docx-preflight.ts`, ושניהם יושבים על אותו
  * קורא וכותב zip (`docx-parts.ts`).
  *
- * חמישה תיקונים, בסדר הזה:
+ * שישה תיקונים, בסדר הזה:
+ *   - `docx-cs-display.ts` — מה שהוצג בפתיחה בחריץ הלטיני של הסגנונות חוזר
+ *     למקור, ב-`styles.xml`. ראשון: כל מה שאחריו קורא את הגיליון המקורי.
  *   - `docx-cs-align.ts` — במסמך שנוצר בתוסף ושאין בו עברית מוצהרת, הצד
  *     המורכב של הסגנונות מיושר לצד הלטיני, ב-`styles.xml`.
  *   - `docx-neutral-mark.ts` — תו ניטרלי שסוגר פסקה עברית מקבל RLM אחריו.
@@ -21,8 +23,9 @@ import { CONTENT_PARTS, rewriteDocxXmlParts, type Bytes } from './docx-parts';
 import { uniqueNumberingIds } from './docx-numbering-ids';
 import { markNeutralParagraphEnds } from './docx-neutral-mark';
 import { mirrorComplexScript } from './docx-cs-mirror';
-import { alignComplexScriptStyles, ENGINE_TEMPLATE_CS_FONT } from './docx-cs-align';
-import { hasDeclaredRtlRuns, markRtlRuns } from './docx-run-direction';
+import { PARAGRAPH_PARTS, alignComplexScriptStyles, templateAlignmentApplies } from './docx-cs-align';
+import { restoreComplexScriptStyles } from './docx-cs-display';
+import { markRtlRuns } from './docx-run-direction';
 import { readStyleSheet, type StyleSheet } from './docx-style-sheet';
 
 /** הספרה אופציונלית, בדיוק כמו ב-`CONTENT_PARTS` — זה אותו שם חלק. */
@@ -31,13 +34,10 @@ const NUMBERING_PART = /^word\/numbering\d*\.xml$/i;
 /** גיליון הסגנונות הראשי. ‏`stylesWithEffects.xml` הוא עותק ל-Word 2010. */
 const STYLES_PART = 'word/styles.xml';
 
-/** החלקים שיש בהם פסקאות — ושם בלבד יש ריצות לסמן. */
-const PARAGRAPH_PARTS = /^word\/(?:document|footnotes|endnotes|comments|header|footer)\d*\.xml$/i;
-
 interface Context {
   sheet: StyleSheet;
-  /** ‏`styles.xml` אחרי היישור, או `null` כשאין יישור. */
-  alignedStyles: string | null;
+  /** ‏`styles.xml` אחרי ההחזרה והיישור, או `null` כששניהם לא נגעו בו. */
+  styles: string | null;
 }
 
 /**
@@ -45,24 +45,12 @@ interface Context {
  * הסגנונות, והאם ליישר אותו — מה שתלוי בכל חלקי התוכן ולא רק באחד.
  */
 async function prepare(read: (name: string) => Promise<string | null>, names: readonly string[]): Promise<Context> {
-  const styles = await read(STYLES_PART);
-  let alignedStyles: string | null = null;
-  const original = readStyleSheet(styles);
-  if (original.defaults.fontCs?.name === ENGINE_TEMPLATE_CS_FONT) {
-    // ‏`w:rtl` בסגנון כלשהו — עברית שיורשת אותו כבר נקראת מהצד המורכב.
-    let declared = [original.defaults, ...[...original.styles.values()].flatMap((s) => [s.run, ...s.conditionalRuns])]
-      .some((level) => level.complex);
-    for (const name of declared ? [] : names) {
-      if (!PARAGRAPH_PARTS.test(name)) continue;
-      const xml = await read(name);
-      if (xml && hasDeclaredRtlRuns(xml)) {
-        declared = true;
-        break;
-      }
-    }
-    if (!declared && styles) alignedStyles = alignComplexScriptStyles(styles);
-  }
-  return { sheet: alignedStyles ? readStyleSheet(alignedStyles) : original, alignedStyles };
+  const original = await read(STYLES_PART);
+  const restored = original ? restoreComplexScriptStyles(original) : null;
+  const styles = restored ?? original;
+  const sheet = readStyleSheet(styles);
+  const aligned = styles && (await templateAlignmentApplies(sheet, names, read)) ? alignComplexScriptStyles(styles) : null;
+  return { sheet: aligned ? readStyleSheet(aligned) : sheet, styles: aligned ?? restored };
 }
 
 /** הבייטים המתוקנים, או `null` כשאין מה לתקן. */
@@ -71,7 +59,7 @@ export function postflightDocx(bytes: Bytes): Promise<Bytes | null> {
     bytes,
     (name) => CONTENT_PARTS.test(name),
     (xml, name, context) => {
-      let next = name === STYLES_PART ? (context.alignedStyles ?? xml) : xml;
+      let next = name === STYLES_PART ? (context.styles ?? xml) : xml;
       if (PARAGRAPH_PARTS.test(name)) {
         next = markNeutralParagraphEnds(next) ?? next;
         next = markRtlRuns(next, context.sheet) ?? next;

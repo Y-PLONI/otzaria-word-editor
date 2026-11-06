@@ -29,6 +29,7 @@ import {
 import { formatPatch, selectionStyleFormat, withoutThemedFont } from '../engine/style-from-selection';
 import { readParagraphFormat } from '../engine/paragraph-format';
 import { styleDisplayLabel } from '../engine/style-gallery';
+import { restoreComplexScriptStyles } from '../engine/docx-cs-display';
 import type { StyleAction } from '../ui/ribbon/common/StyleGallery.vue';
 import type { StyleChoice, StyleDialogMode, StyleDialogResult } from '../ui/panels/StyleDialog.vue';
 import type { CommandOutcome } from '../engine/command-adapter';
@@ -239,7 +240,12 @@ export function useStyleManager(activeStyleId: () => string | null) {
     // „גם לכל מסמך חדש”: העיצוב השלם שהדיאלוג החזיר, אחרי שהמסמך עצמו עודכן.
     const rememberForNewDocuments = async (): Promise<boolean> => {
       if (!result.forNewDocuments || !state.styleId) return true;
-      if (!await rememberStyleDefault(state.styleId, result.format)) {
+      // הדיאלוג מולא מהגיליון החי, שבו החריץ הלטיני מציג את העברי
+      // (engine/docx-cs-display.ts). להגדרות נשמר מה שהסגנון אומר באמת, ועליו
+      // רק מה שהמשתמש שינה — אחרת ערך שהוצג ולא נבחר הופך לברירת מחדל.
+      const authored = resolveFormat(restoreComplexScriptStyles(state.xml) ?? state.xml, state.styleId);
+      const remembered = { ...authored, ...formatPatch(result.format, state.baseline) };
+      if (!await rememberStyleDefault(state.styleId, remembered)) {
         error.value = UNSUPPORTED_STYLE_DEFAULTS_MESSAGE;
         fail(UNSUPPORTED_STYLE_DEFAULTS_MESSAGE, 'style-new-documents');
         return false;

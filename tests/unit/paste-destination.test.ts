@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { marksFromDestinationCapture } from '../../src/engine/paste-destination';
+import { NO_THEME_FONTS, showComplexScriptStyles } from '../../src/engine/docx-cs-display';
 const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const capture = (props: string, style = '') => ({
   fragment: { xml: `<w:r><w:rPr>${props}</w:rPr><w:t>x</w:t></w:r>` },
@@ -34,6 +35,13 @@ describe('destination font capture', () => {
       expect(() => marksFromDestinationCapture(capture(props))).toThrow();
     }
     expect(() => marksFromDestinationCapture({ ...capture(''), context: { xml: ['<w:pPr><w:numPr><w:numId w:val="1"/></w:numPr></w:pPr>'] } })).toThrow();
+  });
+  it('reads the document\'s own Latin font/size, not the Hebrew one shown in the live sheet', () => {
+    const authored = `<w:styles xmlns:w="${W}"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="David"/><w:sz w:val="22"/><w:szCs w:val="28"/></w:rPr></w:rPrDefault></w:docDefaults></w:styles>`;
+    const live = showComplexScriptStyles(authored, NO_THEME_FONTS)!;
+    const marks = (styles: string) => marksFromDestinationCapture({ ...capture(''), dependencies: [{ target: '/word/styles.xml', dataBase64: btoa(styles) }] });
+    expect(marks(live)).toEqual(marks(authored));
+    expect(marks(live)).toMatchObject({ fontFamily: 'Calibri', fontFamilyCs: 'David', fontSizePt: 11, fontSizeCsPt: 14 });
   });
   it('retains explicit CS false and separate authored size channels', () => {
     expect(marksFromDestinationCapture(capture('<w:bCs w:val="0"/><w:iCs w:val="false"/><w:sz w:val="22"/><w:szCs w:val="32"/>')))

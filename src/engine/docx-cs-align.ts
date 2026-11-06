@@ -54,7 +54,8 @@ import {
   wordPrefix,
   type XmlEdit,
 } from './docx-parts';
-import { readStyleSheet } from './docx-style-sheet';
+import { hasDeclaredRtlRuns } from './docx-run-direction';
+import { readStyleSheet, type StyleSheet } from './docx-style-sheet';
 
 /** ההצהרה השבורה שבתבנית המנוע — ראו הערת הפתיחה. */
 export const ENGINE_TEMPLATE_CS_FONT = 'Times New Roman (Body CS)';
@@ -204,4 +205,28 @@ export function alignComplexScriptStyles(xml: string): string | null {
 
   if (edits.length === 0) return null;
   return applyXmlEdits(xml, edits);
+}
+
+/** החלקים שיש בהם פסקאות — ושם בלבד יש ריצות עבריות מוצהרות. */
+export const PARAGRAPH_PARTS = /^word\/(?:document|footnotes|endnotes|comments|header|footer)\d*\.xml$/i;
+
+/**
+ * „מתי” של הקובץ הזה: חתימת התבנית, ואף לא עברית מוצהרת אחת — לא בסגנונות
+ * ולא בחלקי התוכן. ‏`read` נקרא רק כשהחתימה קיימת, ועוצר בעברית הראשונה.
+ */
+export async function templateAlignmentApplies(
+  sheet: StyleSheet,
+  names: readonly string[],
+  read: (name: string) => Promise<string | null>,
+): Promise<boolean> {
+  if (sheet.defaults.fontCs?.name !== ENGINE_TEMPLATE_CS_FONT) return false;
+  // ‏`w:rtl` בסגנון כלשהו — עברית שיורשת אותו כבר נקראת מהצד המורכב.
+  const levels = [sheet.defaults, ...[...sheet.styles.values()].flatMap((s) => [s.run, ...s.conditionalRuns])];
+  if (levels.some((level) => level.complex)) return false;
+  for (const name of names) {
+    if (!PARAGRAPH_PARTS.test(name)) continue;
+    const xml = await read(name);
+    if (xml && hasDeclaredRtlRuns(xml)) return false;
+  }
+  return true;
 }
