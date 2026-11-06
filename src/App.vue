@@ -463,7 +463,6 @@ import {
   openOtzariaLink,
   openSearchTab,
   registerSendToDocumentItem,
-  registerEditBookItem,
   handleSendToDocument,
   sendToDocumentText,
   SEND_TO_DOCUMENT_ITEM_ID,
@@ -6225,15 +6224,12 @@ function queueEditBook(event: EditBookEvent): void {
 
 /**
  * „ערוך בוורד לאוצריא” בסרגל הקורא — אותו סדר בדיוק כמו `registerReceivedFiles`.
- * הפקד מוצהר במניפסט; הרישום מ-JS הוא הגיבוי (ראו `EDIT_BOOK_ITEM`).
+ * הפקד מוצהר במניפסט בלבד, בלי רישום מ-JS (ראו `EDIT_BOOK_ITEM`).
  */
 function registerEditBook(): void {
   if (!isAvailable()) return;
 
   try {
-    void registerEditBookItem().then((outcome) => {
-      if (!outcome.ok) console.warn('[otzaria-word]', outcome.message);
-    });
     toolbarClickListener = on('reader.toolbar_item_clicked', (event) => queueEditBook(event));
     for (const pending of takePendingToolbarClicks()) queueEditBook(pending);
   } catch (error) {

@@ -60,9 +60,11 @@ describe('public/manifest.json', () => {
   it('minAppVersion מכסה את ה-API החדש ביותר שהתוסף קורא לו', () => {
     // `reader.getSelection`, `reader.openSearchTab` ו-`navigation.goTo` קיימים
     // מ-0.9.89; מסלול הכתיבה (`fs.commitUserFileWrite`, `access: 'readwrite'`)
-    // דורש 0.9.97 והוא הגבוה מביניהם. סקריפט האריזה של אוצריא חוסם אריזה
-    // כשההצהרה נמוכה ממה שהקוד קורא לו, ולכן זו אינה בדיקה תיאורטית.
-    expect(manifest.minAppVersion).toBe('0.9.97');
+    // דורש 0.9.97. הגבוה ביותר הוא `openPlugin` בפקד הסרגל הקשור לתכנית
+    // („ערוך בוורד לאוצריא” רק על ספר Word) — 0.9.98.1. סקריפט האריזה של
+    // אוצריא חוסם אריזה כשההצהרה נמוכה ממה שהקוד קורא לו, ולכן זו אינה בדיקה
+    // תיאורטית.
+    expect(manifest.minAppVersion).toBe('0.9.98.1');
   });
 
   /**

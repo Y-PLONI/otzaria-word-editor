@@ -13,7 +13,6 @@
  */
 import type { SuperDoc } from 'superdoc';
 import { call, isPermissionDenied, hostErrorCode } from './otzaria-client';
-import { EDIT_BOOK_ITEM } from './edit-book';
 import { readDocSelection, type SelectionDocumentApi } from '../engine/doc-selection';
 import type { OtzariaLinkTarget } from '../engine/otzaria-link';
 import {
@@ -58,7 +57,6 @@ export const READER_PERMISSIONS: Record<string, string> = {
   'reader.addContextMenuItem': 'reader.context_menu',
   'library.resolveRef': 'library.books.read',
   'reader.openBook': 'reader.open',
-  'reader.addToolbarItem': 'reader.toolbar',
 };
 
 /**
@@ -619,17 +617,6 @@ export function registerSendToDocumentItem(): Promise<ReaderResult> {
   return callAck('reader.addContextMenuItem', 'רישום פריט תפריט ההקשר נכשל', {
     ...SEND_TO_DOCUMENT_ITEM,
     contexts: [...SEND_TO_DOCUMENT_ITEM.contexts],
-  });
-}
-
-/**
- * „ערוך בוורד לאוצריא” בסרגל הקורא — אותו גיבוי בדיוק כמו
- * `registerSendToDocumentItem`, ומאותה סיבה. ראו host/edit-book.ts.
- */
-export function registerEditBookItem(): Promise<ReaderResult> {
-  return callAck('reader.addToolbarItem', 'רישום הכפתור „ערוך בוורד לאוצריא” נכשל', {
-    ...EDIT_BOOK_ITEM,
-    contexts: [...EDIT_BOOK_ITEM.contexts],
   });
 }
 

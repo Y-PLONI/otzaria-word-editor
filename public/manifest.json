@@ -9,7 +9,7 @@
   "category": "Utilities",
   "stability": "experimental",
   "entrypoint": "index.html",
-  "minAppVersion": "0.9.97",
+  "minAppVersion": "0.9.98.1",
   "sdkVersion": "1.x",
   "permissions": [
     "fs.user_files.read",
@@ -44,12 +44,38 @@
           "openPlugin": true
         }
       ],
+      "programs": [
+        {
+          "id": "word-book",
+          "version": 1,
+          "triggers": ["reader.activeBookChanged"],
+          "commands": [
+            {
+              "id": "isWord",
+              "type": "data.choose",
+              "args": {
+                "condition": {
+                  "op": "or",
+                  "conditions": [
+                    { "op": "equals", "left": { "$context": "reader.book.type" }, "right": "docx" },
+                    { "op": "equals", "left": { "$context": "reader.book.type" }, "right": "docm" }
+                  ]
+                },
+                "whenTrue": true,
+                "whenFalse": null
+              }
+            }
+          ],
+          "outputs": { "isWord": { "$result": "isWord" } }
+        }
+      ],
       "toolbarItems": [
         {
           "id": "otzaria-word-edit-book",
           "title": "ערוך בוורד לאוצריא",
           "icon": "document_edit_24_regular",
           "contexts": ["reader-text"],
+          "binding": { "program": "word-book", "visibleOutput": "isWord" },
           "openPlugin": true
         }
       ]

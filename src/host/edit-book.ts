@@ -11,12 +11,16 @@
  * (`openLibraryBook` ב-host/open-sources.ts). ספר אישי נפתח לכתיבה, ו„שמור”
  * כותב לקובץ עצמו; ספר של הספרייה נפתח לקריאה, והשמירה הראשונה היא „שמור בשם”.
  *
- * ## למה הכפתור מופיע גם על ספר שאינו Word
+ * ## רק על ספר Word
  *
- * תנאי `when` של אוצריא בודק רק הגדרות ואחסון, לא את סוג הספר, ו-`contexts`
- * מבחין רק בין טקסט ל-PDF. ספר Word מוצג בקורא הטקסט, ולכן הפקד מוצהר
- * ל-`reader-text` — וההכרעה נעשית כאן, אחרי הלחיצה: ספר שאינו Word מקבל הודעה
- * שאומרת את זה, ולא לשונית שנפתחת ושותקת.
+ * `contexts` מבחין רק בין טקסט ל-PDF, ו-`when` בודק רק הגדרות ואחסון. מה שכן
+ * רואה את סוג הספר הוא תכנית Host (`startup.programs`): אוצריא מריצה אותה בכל
+ * החלפת ספר, בלי להעיר את התוסף, עם `reader.book.type` — `docx`/`docm` לספר
+ * Word. הפקד קשור אליה ב-`binding.visibleOutput`, ולכן מוצג רק כשהיא מחזירה
+ * ערך. `openPlugin` בפקד קשור נתמך מ-0.9.98.1, ומכאן `minAppVersion`.
+ *
+ * הבדיקה אחרי הלחיצה (`readEditBookClick`) נשארת: היא מה שמגן אם התכנית לא
+ * חושבה מחדש, ובכל מקרה היא שעושה את הפענוח.
  *
  * ## ה-latch
  *
@@ -28,20 +32,57 @@ import type { ToolbarItemClickedEvent } from '../types/otzaria_plugin';
 
 export const EDIT_BOOK_ITEM_ID = 'otzaria-word-edit-book';
 
+/** מזהה התכנית שמכריעה אם הספר המוצג הוא Word. */
+export const WORD_BOOK_PROGRAM_ID = 'word-book';
+
 /**
- * הפקד עצמו — אובייקט אחד למניפסט ולרישום מ-JS, כמו `SEND_TO_DOCUMENT_ITEM`.
+ * התכנית כפי שהיא מוצהרת ב-`contributes.startup.programs`. נגזרת מ-
+ * `EDITABLE_BOOK_TYPES`, כך שהסוגים שהכפתור מוצג עליהם הם בדיוק הסוגים
+ * שהלחיצה מקבלת; tests/unit/edit-book.test.ts מקבע שהמניפסט זהה לה.
  *
- * הרישום מ-JS הוא הגיבוי לאותה סיבה: `app.startup_contributions` מגיעה כבויה
- * בהתקנה, ועד שהמשתמש מדליק אותה ההצהרה אינה מיושמת. אוצריא מאחדת לפי
- * `(תוסף, id)`, ולכן שני המסלולים אינם יוצרים פקד כפול.
+ * `data.choose` מחזיר `null` על ספר שאינו Word, ו-`visibleOutput` מסתיר פקד
+ * שהפלט שלו ריק. בלי ספר פתוח `reader.book.type` חסר, וההשוואה שקרית.
+ */
+export const WORD_BOOK_PROGRAM = {
+  id: WORD_BOOK_PROGRAM_ID,
+  version: 1,
+  triggers: ['reader.activeBookChanged'],
+  commands: [
+    {
+      id: 'isWord',
+      type: 'data.choose',
+      args: {
+        condition: {
+          op: 'or',
+          conditions: EDITABLE_BOOK_TYPES.map((type) => ({
+            op: 'equals',
+            left: { $context: 'reader.book.type' },
+            right: type,
+          })),
+        },
+        whenTrue: true,
+        whenFalse: null,
+      },
+    },
+  ],
+  outputs: { isWord: { $result: 'isWord' } },
+};
+
+/**
+ * הפקד כפי שהוא מוצהר ב-`contributes.startup.toolbarItems`.
+ *
+ * אין לו רישום מ-JS כגיבוי, בניגוד ל„שלח למסמך”: `reader.addToolbarItem` אינו
+ * מקבל `binding`, ופקד באותו מזהה היה חוזר להופיע על כל ספר. המחיר: עד
+ * שהמשתמש מדליק את `app.startup_contributions` הכפתור אינו מופיע כלל.
  */
 export const EDIT_BOOK_ITEM = {
   id: EDIT_BOOK_ITEM_ID,
   title: 'ערוך בוורד לאוצריא',
   icon: 'document_edit_24_regular',
   contexts: ['reader-text'],
+  binding: { program: WORD_BOOK_PROGRAM_ID, visibleOutput: 'isWord' },
   openPlugin: true,
-} as const;
+};
 
 /**
  * הצורה שנצרכת מהאירוע. `bookUid` אינו ב-d.ts, אבל אוצריא שולחת אותו
