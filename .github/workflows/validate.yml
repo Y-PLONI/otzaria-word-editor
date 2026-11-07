@@ -75,6 +75,15 @@ jobs:
           scripts/qa/acronym-completion-qa.mjs
           scripts/qa/static-completion-qa.mjs
 
+      # Caret endpoints and goal columns depend on the real painted layout.
+      # Run the vertical navigation gate against the packaged DOCX engine.
+      - name: Browser vertical caret regressions
+        timeout-minutes: 10
+        env:
+          CHROME: /usr/bin/google-chrome
+          NODE_OPTIONS: --experimental-websocket
+        run: node scripts/qa/run-all.mjs scripts/qa/rtl-vertical-caret-qa.mjs
+
       # `fail-on-warnings: true` משקף את החנות, שחוסמת גם על אזהרות. dist עובר
       # ב-0 אזהרות, ולכן זה שער אמיתי ולא רעש.
       #

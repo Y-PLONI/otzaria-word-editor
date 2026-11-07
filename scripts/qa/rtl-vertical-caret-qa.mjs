@@ -28,6 +28,7 @@
  */
 import { openApp, createReport } from './harness.mjs';
 import { zipStored } from './docx-fixtures.mjs';
+import { runDocumentEndCaretQa } from './rtl-document-end-caret-qa.mjs';
 
 const W =
   'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" ' +
@@ -503,6 +504,8 @@ try {
   } catch (e) {
     report.stuck('המסלול שדווח', String(e.message || e).slice(0, 100));
   }
+
+  await runDocumentEndCaretQa(app, report);
 
   /*
    * ‏„תקוע” אינו נספר כשבור ב-`createReport` — ובצדק, מפני שהוא נועד לקפיאת
