@@ -44,8 +44,6 @@ export const NUMBER_STYLES: readonly string[] = [
   'decimal',
   'upperLetter',
   'lowerLetter',
-  'upperRoman',
-  'lowerRoman',
   'hebrew1',
   'hebrew2',
 ];
@@ -65,8 +63,6 @@ export const NUMBER_STYLE_LABELS: Record<string, string> = {
   decimal: '1, 2, 3',
   upperLetter: 'A, B, C',
   lowerLetter: 'a, b, c',
-  upperRoman: 'I, II, III',
-  lowerRoman: 'i, ii, iii',
   hebrew1: 'א, ב, ג … יא, יב (גימטריה)',
   hebrew2: 'א, ב, ג … כ, ל (אלף־בית)',
 };

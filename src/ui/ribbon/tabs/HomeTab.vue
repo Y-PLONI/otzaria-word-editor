@@ -1593,8 +1593,6 @@ const NUMBER_STYLE_ORDER = [
   'decimal',
   'upperLetter',
   'lowerLetter',
-  'upperRoman',
-  'lowerRoman',
 ] as const;
 
 /** „המר לטקסט” — אותו פריט בשני התפריטים, כולל מצב החימוש. */
