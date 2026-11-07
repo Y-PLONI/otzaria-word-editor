@@ -748,6 +748,7 @@ describe('installRtlVerticalArrows — מה שנמסר למנוע', () => {
       caretOffset: 40,
       caretX: 700,
     });
+    const rangeRects = vi.spyOn(Range.prototype, 'getBoundingClientRect');
     const handle = installRtlVerticalArrows({ host: state.host, superdoc: state.superdoc });
 
     const first = press(state.source, 'ArrowDown');
@@ -758,6 +759,8 @@ describe('installRtlVerticalArrows — מה שנמסר למנוע', () => {
     const second = press(state.source, 'ArrowDown');
     expect(second.defaultPrevented).toBe(true);
     expect(state.setSelectionTarget, 'כבר בסוף השורה — לא שולחים כתיבה מיותרת').toHaveBeenCalledTimes(1);
+    expect(rangeRects, 'סוף השורה ידוע בלי למדוד את התווים שבה').not.toHaveBeenCalled();
+    rangeRects.mockRestore();
     handle.dispose();
   });
 
@@ -789,6 +792,52 @@ describe('installRtlVerticalArrows — מה שנמסר למנוע', () => {
     expect(press(state.source, 'ArrowDown').defaultPrevented).toBe(true);
     // pm 80 (סוף השורה השנייה) פחות בסיס הבלוק 1.
     expect(state.caret().offset).toBe(79);
+    handle.dispose();
+  });
+
+  it.each([true, false])('פסקה אחרונה ריקה נשארת בהיסט אפס בלי כתיבה חוזרת (rtl=%s)', (rtl) => {
+    const state = setup({
+      paras: [
+        { id: 'p1', lines: [LONG] },
+        { id: 'p2', lines: [{ pmStart: 72, count: 0, left: 700, right: 700, empty: true, rtl }] },
+      ],
+      sourcePara: 1,
+      caretOffset: 0,
+      caretX: 700,
+    });
+    const handle = installRtlVerticalArrows({ host: state.host, superdoc: state.superdoc });
+
+    expect(press(state.source, 'ArrowDown').defaultPrevented).toBe(true);
+    expect(press(state.source, 'ArrowDown').defaultPrevented).toBe(true);
+    expect(state.caret()).toMatchObject({ blockId: 'p2', offset: 0 });
+    expect(state.setSelectionTarget).not.toHaveBeenCalled();
+    handle.dispose();
+  });
+
+  it('סוף פסקה שנמשכת לעמוד שני משתמש בהיסט מתחילת הפסקה, לא מתחילת העמוד', () => {
+    const state = setup({
+      paras: [
+        { id: 'p1', lines: [{ ...LONG, pmStart: 100 }] },
+        { id: 'p1', lines: [{ ...SHORT, pmStart: 170 }] },
+      ],
+      sourcePara: 1,
+      caretOffset: 74,
+      caretX: 1000,
+    });
+    const firstFragment = state.lineEls[0]!.parentElement!;
+    const lastFragment = state.source.parentElement!;
+    firstFragment.setAttribute('data-continues-on-next', 'true');
+    lastFragment.setAttribute('data-continues-from-prev', 'true');
+    const lastPage = document.createElement('div');
+    lastPage.className = 'superdoc-page';
+    lastPage.append(lastFragment);
+    state.host.append(lastPage);
+    const handle = installRtlVerticalArrows({ host: state.host, superdoc: state.superdoc });
+
+    expect(press(state.source, 'ArrowDown').defaultPrevented).toBe(true);
+    // סוף pm 179 פחות בסיס הפסקה 100, לא בסיס ההמשך 170.
+    expect(state.caret()).toMatchObject({ blockId: 'p1', offset: 79 });
+    expect(state.setSelectionTarget).toHaveBeenCalledTimes(1);
     handle.dispose();
   });
 
@@ -826,6 +875,37 @@ describe('installRtlVerticalArrows — מה שנמסר למנוע', () => {
       caretX: 700,
     });
     state.source.parentElement!.setAttribute('data-continues-on-next', 'true');
+    const handle = installRtlVerticalArrows({ host: state.host, superdoc: state.superdoc });
+
+    expectHandedOver(press(state.source, 'ArrowDown'), state);
+    handle.dispose();
+  });
+
+  it('סוף פסקה שהתחלתה אינה מצוירת נמסר למנוע — אין בסיס להיסט', () => {
+    const state = setup({
+      // גם אם מנחשים בטעות שההמשך הוא ההתחלה, ההיסט עדיין נופל בתוך
+      // הטווח הזה. רק בדיקת המקור החסר מונעת כאן כתיבה לכתובת שגויה.
+      paras: [{ id: 'p1', lines: [{ ...LONG, pmStart: 170 }] }],
+      caretOffset: 14,
+      caretX: 1000,
+    });
+    state.source.parentElement!.setAttribute('data-continues-from-prev', 'true');
+    const handle = installRtlVerticalArrows({ host: state.host, superdoc: state.superdoc });
+
+    expectHandedOver(press(state.source, 'ArrowDown'), state);
+    handle.dispose();
+  });
+
+  it.each(['header', 'td'] as const)('סוף שורה בתוך %s אינו סוף גוף המסמך', (tag) => {
+    const state = setup({
+      paras: [{ id: 'p1', lines: [LONG] }],
+      caretOffset: 40,
+      caretX: 700,
+    });
+    const fragment = state.source.parentElement!;
+    const container = document.createElement(tag);
+    fragment.replaceWith(container);
+    container.append(fragment);
     const handle = installRtlVerticalArrows({ host: state.host, superdoc: state.superdoc });
 
     expectHandedOver(press(state.source, 'ArrowDown'), state);
@@ -1167,6 +1247,30 @@ describe('installRtlVerticalArrows — עמודת המטרה', () => {
     expect(written(state.setSelectionTarget, 1).target.end.blockId).toBe('p1');
     // העמודה המקורית, 700 — ולא ההיסט שהתחלנו ממנו (40).
     expect(written(state.setSelectionTarget, 1).target.end.offset).toBe(49);
+    handle.dispose();
+  });
+
+  it.each([true, false])('עלייה אחרי ירידה לסוף המסמך שומרת את העמודה המקורית (rtl=%s)', (rtl) => {
+    const line = { pmStart: 1, count: 10, left: 100, right: 200, rtl };
+    const state = setup({
+      paras: [
+        { id: 'p1', lines: [line] },
+        { id: 'p2', lines: [{ ...line, pmStart: 12 }] },
+      ],
+      sourcePara: 1,
+      caretOffset: 4,
+      caretX: rtl ? 160 : 140,
+    });
+    const handle = installRtlVerticalArrows({ host: state.host, superdoc: state.superdoc });
+
+    expect(press(state.source, 'ArrowDown').defaultPrevented).toBe(true);
+    expect(state.caret()).toMatchObject({ blockId: 'p2', offset: 10, x: rtl ? 100 : 200 });
+    expect(press(state.source, 'ArrowDown').defaultPrevented).toBe(true);
+    expect(state.setSelectionTarget, 'הקשה חוזרת בסוף אינה כותבת ואינה מאפסת את העמודה').toHaveBeenCalledTimes(1);
+
+    expect(press(state.source, 'ArrowUp').defaultPrevented).toBe(true);
+    expect(state.caret()).toMatchObject({ blockId: 'p1', offset: 4, x: rtl ? 160 : 140 });
+    expect(state.setSelectionTarget).toHaveBeenCalledTimes(2);
     handle.dispose();
   });
 

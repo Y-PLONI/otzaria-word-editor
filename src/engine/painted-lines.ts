@@ -318,6 +318,11 @@ export function isEmptyRange(el: Element): boolean {
   return Number.isFinite(from) && from === attr(el, 'data-pm-end');
 }
 
+/** Logical end of a painted line, without measuring its runs or characters. */
+export function lineEndPm(line: Element): number {
+  return attr(line, 'data-pm-end');
+}
+
 /**
  * החריץ היחיד של שורה ריקה, או `null` כשאינה ריקה.
  *

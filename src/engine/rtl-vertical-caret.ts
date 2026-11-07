@@ -90,7 +90,6 @@
 import {
   CARET_SELECTOR,
   atDocumentEdge,
-  attr,
   blockIdOf,
   blockStart,
   caretSlots,
@@ -98,6 +97,7 @@ import {
   findFragment,
   isEmptyRange,
   lineAt,
+  lineEndPm,
   lineExtent,
   linesOf,
   neighbourOf,
@@ -438,8 +438,10 @@ export function installRtlVerticalArrows({
         return;
       }
 
-      const endPm = attr(lines[index]!, 'data-pm-end');
-      const base = blockStart(host, head.blockId);
+      const endPm = lineEndPm(lines[index]!);
+      // findFragment already resolved this block's source start. Reuse that
+      // mapping instead of scanning every painted block again at the bottom.
+      const base = home.caretPm - head.offset;
       if (!Number.isFinite(endPm) || !Number.isFinite(base) || endPm < base) {
         passToEngine();
         return;
