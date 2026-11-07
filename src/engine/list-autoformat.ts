@@ -84,8 +84,6 @@ const SEEDS: Readonly<Record<string, { numFmt: string; startAt: number }>> = {
   '1': { numFmt: 'decimal', startAt: 1 },
   a: { numFmt: 'lowerLetter', startAt: 1 },
   A: { numFmt: 'upperLetter', startAt: 1 },
-  i: { numFmt: 'lowerRoman', startAt: 1 },
-  I: { numFmt: 'upperRoman', startAt: 1 },
   // א — `hebrew1`, גימטריה. נמדד NumberStyle=45 ב-Word.
   'א': { numFmt: 'hebrew1', startAt: 1 },
 };

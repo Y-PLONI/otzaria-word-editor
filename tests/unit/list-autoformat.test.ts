@@ -25,8 +25,6 @@ describe('planListAutoformat — ממוספרות', () => {
     ['a. ', 'lowerLetter', '%1.', 1],
     ['a) ', 'lowerLetter', '%1)', 1],
     ['A. ', 'upperLetter', '%1.', 1],
-    ['i. ', 'lowerRoman', '%1.', 1],
-    ['I. ', 'upperRoman', '%1.', 1],
   ])('%s → %s עם תבנית %s', (typed, numFmt, lvlText, startAt) => {
     expect(planListAutoformat(typed)).toEqual({
       kind: 'numbered',
