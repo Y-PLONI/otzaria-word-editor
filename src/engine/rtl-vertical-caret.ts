@@ -74,6 +74,11 @@
  *   `nextVisualLine` מחזיר `null`, וההקשה עוברת כפי שהיא.
  * * **שורת יעד ריקה** — יש בה מקום סמן אחד בלבד, והמנוע נוחת עליו בכל עמודה.
  *
+ * חריג מכוון: בשורה החזותית האחרונה **של המסמך עצמו**, `ArrowDown` ממקם את
+ * הסמן בסופה הלוגי של השורה (גם ב-LTR), כמו בדפדפן. התנועה אינה נשענת על
+ * חיפוש שורה חסרה בלבד, אלא על `atDocumentEdge` כדי לא ליירט חץ לפני טבלה,
+ * עמוד נוסף או המשך שטרם צויר. לא קוראים גאומטריית תווים במסלול הזה.
+ *
  * ובכל אחד מאלה ההקשה נמסרת, וה**עמודה נשמרת**. זה נראה כמו פרט ואינו: אילו
  * מסירה הייתה מאפסת, הרצף „פסקה ארוכה → פסקה ריקה → פסקה קצרה” — צירוף שגרתי
  * במסמך עברי — היה נשבר. המסירה הראשונה (השורה הריקה) הייתה מאפסת, ההקשה
@@ -84,6 +89,8 @@
 
 import {
   CARET_SELECTOR,
+  atDocumentEdge,
+  attr,
   blockIdOf,
   blockStart,
   caretSlots,
@@ -416,70 +423,92 @@ export function installRtlVerticalArrows({
     }
 
     const target = nextVisualLine(host, home.fragment, lines, index, event.key === 'ArrowDown');
+    let blockId: string;
+    let offset: number;
     if (!target) {
-      passToEngine();
-      return;
-    }
+      // No next *painted* line is not sufficient: there may be a table, a
+      // later page, or an unpainted continuation. Only the actual document
+      // bottom should turn ArrowDown into a move to the current line's end.
+      if (
+        event.key !== 'ArrowDown' ||
+        index !== lines.length - 1 ||
+        !atDocumentEdge(host, home.fragment, true)
+      ) {
+        passToEngine();
+        return;
+      }
 
-    /* שורת יעד ריקה: מקום סמן אחד, והמנוע נוחת עליו בכל עמודה. אין מה לתקן,
-       וגם אין מה לבחור — מסירה כאן היא ניטרלית. */
-    if (isEmptyRange(target.line)) {
-      passToEngine();
-      return;
-    }
+      const endPm = attr(lines[index]!, 'data-pm-end');
+      const base = blockStart(host, head.blockId);
+      if (!Number.isFinite(endPm) || !Number.isFinite(base) || endPm < base) {
+        passToEngine();
+        return;
+      }
+      blockId = head.blockId;
+      offset = endPm - base;
+    } else {
+      /* שורת יעד ריקה: מקום סמן אחד, והמנוע נוחת עליו בכל עמודה. אין מה לתקן,
+         וגם אין מה לבחור — מסירה כאן היא ניטרלית. */
+      if (isEmptyRange(target.line)) {
+        passToEngine();
+        return;
+      }
 
-    const targetRtl = target.line.getAttribute('dir') === 'rtl';
+      const targetRtl = target.line.getAttribute('dir') === 'rtl';
 
-    // LTR destinations were measured to behave correctly. When we have not
-    // taken ownership, hand them back before measuring every run in the line.
-    if (!owns && !targetRtl) {
-      passToEngine();
-      return;
-    }
+      // LTR destinations were measured to behave correctly. When we have not
+      // taken ownership, hand them back before measuring every run in the line.
+      if (!owns && !targetRtl) {
+        passToEngine();
+        return;
+      }
 
-    const extent = lineExtent(target.line);
-    if (!extent) {
-      passToEngine();
-      return;
-    }
+      const extent = lineExtent(target.line);
+      if (!extent) {
+        passToEngine();
+        return;
+      }
 
-    /*
-     * כיוון השורה נבדק לפני המדידה: שורה לטינית נמסרת למנוע בלי למדוד את
-     * הריצות שבה. בשורה עברית, `lineExtent` בודק אם עמודת המטרה בפנים — ואז
-     * גם היא נמסרת. זה זול מ-`readLineChars`: מלבן אחד לכל ריצה ולא לכל גרפמה.
-     */
-    if (!owns && goalInside(extent, goal)) {
-      passToEngine();
-      return;
-    }
+      /*
+       * כיוון השורה נבדק לפני המדידה: שורה לטינית נמסרת למנוע בלי למדוד את
+       * הריצות שבה. בשורה עברית, `lineExtent` בודק אם עמודת המטרה בפנים — ואז
+       * גם היא נמסרת. זה זול מ-`readLineChars`: מלבן אחד לכל ריצה ולא לכל גרפמה.
+       */
+      if (!owns && goalInside(extent, goal)) {
+        passToEngine();
+        return;
+      }
 
-    /* `null` כשהטווחים המצוירים אינם מכסים את השורה ברצף — אין מיפוי, וההקשה
-       נמסרת. שורה בלי תוכן כבר יצאה למעלה, ולכן אין כאן מסלול „ריקה”. */
-    const chars = readLineChars(target.line);
-    if (!chars) {
-      passToEngine();
-      return;
-    }
-    const slots = caretSlots(chars, targetRtl);
+      /* `null` כשהטווחים המצוירים אינם מכסים את השורה ברצף — אין מיפוי, וההקשה
+         נמסרת. שורה בלי תוכן כבר יצאה למעלה, ולכן אין כאן מסלול „ריקה”. */
+      const chars = readLineChars(target.line);
+      if (!chars) {
+        passToEngine();
+        return;
+      }
+      const slots = caretSlots(chars, targetRtl);
 
-    const slot = landingSlot(slots, goal, startIsSeam(target.fragment, target.lines, target.index));
-    if (!slot) {
-      passToEngine();
-      return;
-    }
+      const slot = landingSlot(slots, goal, startIsSeam(target.fragment, target.lines, target.index));
+      if (!slot) {
+        passToEngine();
+        return;
+      }
 
-    const blockId = blockIdOf(target.fragment);
-    if (!blockId) {
-      passToEngine();
-      return;
-    }
+      const targetBlockId = blockIdOf(target.fragment);
+      if (!targetBlockId) {
+        passToEngine();
+        return;
+      }
 
-    /* `NaN` כשהחלק הראשון של הבלוק אינו מצויר — פסקה שהתחילה בעמוד שהמנוע לא
-       צייר. אין מיפוי מ-pm להיסט, וההקשה נמסרת. */
-    const offset = slot.pm - blockStart(host, blockId);
-    if (!Number.isFinite(offset)) {
-      passToEngine();
-      return;
+      /* `NaN` כשהחלק הראשון של הבלוק אינו מצויר — פסקה שהתחילה בעמוד שהמנוע לא
+         צייר. אין מיפוי מ-pm להיסט, וההקשה נמסרת. */
+      offset = slot.pm - blockStart(host, targetBlockId);
+      if (!Number.isFinite(offset)) {
+        passToEngine();
+        return;
+      }
+
+      blockId = targetBlockId;
     }
 
     /*
