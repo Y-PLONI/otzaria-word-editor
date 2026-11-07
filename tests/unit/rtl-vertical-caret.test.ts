@@ -742,12 +742,90 @@ describe('installRtlVerticalArrows — מה שנמסר למנוע', () => {
     handle.dispose();
   });
 
-  it('שורה אחרונה במסמך — אין לאן לרדת', () => {
+  it('ArrowDown בשורה האחרונה במסמך עברי מעביר לסופה, והקשה נוספת אינה כותבת שוב', () => {
     const state = setup({
       paras: [{ id: 'p1', lines: [LONG] }],
       caretOffset: 40,
       caretX: 700,
     });
+    const handle = installRtlVerticalArrows({ host: state.host, superdoc: state.superdoc });
+
+    const first = press(state.source, 'ArrowDown');
+    expect(first.defaultPrevented).toBe(true);
+    expect(state.caret()).toMatchObject({ blockId: 'p1', offset: 70 });
+    expect(state.setSelectionTarget).toHaveBeenCalledTimes(1);
+
+    const second = press(state.source, 'ArrowDown');
+    expect(second.defaultPrevented).toBe(true);
+    expect(state.setSelectionTarget, 'כבר בסוף השורה — לא שולחים כתיבה מיותרת').toHaveBeenCalledTimes(1);
+    handle.dispose();
+  });
+
+  it('ArrowDown בסוף המסמך עובד גם בשורה לטינית', () => {
+    const state = setup({
+      paras: [{ id: 'p1', lines: [{ ...LTR_SHORT, pmStart: 1 }] }],
+      caretOffset: 3,
+      caretX: 460,
+    });
+    const handle = installRtlVerticalArrows({ host: state.host, superdoc: state.superdoc });
+
+    expect(press(state.source, 'ArrowDown').defaultPrevented).toBe(true);
+    expect(written(state.setSelectionTarget).target.end.offset).toBe(10);
+    handle.dispose();
+  });
+
+  it('הסוף הוא סוף השורה החזותית האחרונה, גם בפסקה שנשברת לשתי שורות', () => {
+    const state = setup({
+      paras: [{
+        id: 'p1',
+        lines: [LONG, { ...SHORT, pmStart: 71 }],
+      }],
+      sourceLine: 1,
+      caretOffset: 74,
+      caretX: 1000,
+    });
+    const handle = installRtlVerticalArrows({ host: state.host, superdoc: state.superdoc });
+
+    expect(press(state.source, 'ArrowDown').defaultPrevented).toBe(true);
+    // pm 80 (סוף השורה השנייה) פחות בסיס הבלוק 1.
+    expect(state.caret().offset).toBe(79);
+    handle.dispose();
+  });
+
+  it('חץ למעלה בקצה המסמך נשאר למנוע', () => {
+    const state = setup({
+      paras: [{ id: 'p1', lines: [LONG] }],
+      caretOffset: 40,
+      caretX: 700,
+    });
+    const handle = installRtlVerticalArrows({ host: state.host, superdoc: state.superdoc });
+
+    expectHandedOver(press(state.source, 'ArrowUp'), state);
+    handle.dispose();
+  });
+
+  it('סוף עמוד מצויר אינו סוף המסמך כשקיים עמוד נוסף', () => {
+    const state = setup({
+      paras: [{ id: 'p1', lines: [LONG] }],
+      caretOffset: 40,
+      caretX: 700,
+    });
+    const nextPage = document.createElement('div');
+    nextPage.className = 'superdoc-page';
+    state.host.append(nextPage);
+    const handle = installRtlVerticalArrows({ host: state.host, superdoc: state.superdoc });
+
+    expectHandedOver(press(state.source, 'ArrowDown'), state);
+    handle.dispose();
+  });
+
+  it('fragment שממשיך בעמוד הבא אינו קצה מסמך גם אם העמוד הבא טרם צויר', () => {
+    const state = setup({
+      paras: [{ id: 'p1', lines: [LONG] }],
+      caretOffset: 40,
+      caretX: 700,
+    });
+    state.source.parentElement!.setAttribute('data-continues-on-next', 'true');
     const handle = installRtlVerticalArrows({ host: state.host, superdoc: state.superdoc });
 
     expectHandedOver(press(state.source, 'ArrowDown'), state);
