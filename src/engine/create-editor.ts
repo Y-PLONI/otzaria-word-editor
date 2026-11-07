@@ -295,6 +295,8 @@ export function createEditor(options: CreateEditorOptions): Promise<EditorSessio
         // שנחתה שם כשהמיקוד היה ברצועה מחזירה אותו — ראו click-focus.ts.
         // כאן ולא לפני הבנאי: החזרת המיקוד היא דרך המופע.
         session.onDispose(installClickFocus(container, ready).dispose);
+        const justificationDocument = ready.activeEditor?.doc;
+        if (justificationDocument) session.onDispose(installJustifyLastLine(container, justificationDocument).dispose);
         // מברשת עיצוב: המנוע מחיל רק כשמישהו קורא ל-notifyPointerUp/notifyKeyUp
         // של ui.formatPainter, וזה בדיוק מה ש-SuperToolbar עושה — אבל הוא לא קם
         // כש-ui: false. ראו format-painter.ts.
@@ -325,8 +327,6 @@ export function createEditor(options: CreateEditorOptions): Promise<EditorSessio
     // מותקן על ה-container ולא על המסמך, ונרשם כ-disposer: destroy מפרק את
     // ה-observer *לפני* המנוע, כדי שלא ירוץ על עץ שכבר נפרק.
     disposers.push(localizeEngineChrome(container).dispose);
-    // שורה אחרונה של פסקה מיושרת שחורגת מהשוליים — ראו justify-last-line.ts.
-    disposers.push(installJustifyLastLine(container).dispose);
 
     if (settled) return;
     timer = setTimeout(() => {
