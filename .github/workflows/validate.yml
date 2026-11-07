@@ -84,6 +84,15 @@ jobs:
           NODE_OPTIONS: --experimental-websocket
         run: node scripts/qa/run-all.mjs scripts/qa/rtl-vertical-caret-qa.mjs
 
+      # The shipped Assistant font and calibrated text width make this gate
+      # independent of the runner's installed Hebrew/system fonts.
+      - name: Browser justified last-line regressions
+        timeout-minutes: 5
+        env:
+          CHROME: /usr/bin/google-chrome
+          NODE_OPTIONS: --experimental-websocket
+        run: node scripts/qa/run-all.mjs scripts/qa/justify-last-line-qa.mjs
+
       # `fail-on-warnings: true` משקף את החנות, שחוסמת גם על אזהרות. dist עובר
       # ב-0 אזהרות, ולכן זה שער אמיתי ולא רעש.
       #

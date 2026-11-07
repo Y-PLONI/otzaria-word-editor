@@ -80,7 +80,7 @@ describe('גבולות מול SuperDoc', () => {
     const bodyFragments = hits(/querySelectorAll\s*\(\s*'\.superdoc-fragment\[data-layout-story="body"\]'\s*\)/)
       .filter((hit) => hit.startsWith(`engine${sep}painted-lines.ts:`));
     const offenders = hits(/(querySelector|querySelectorAll|closest)\s*\(\s*['"][^'"]*(\.sd-|superdoc)/i)
-      .filter((hit) => !bodyFragments.includes(hit));
+      .filter((hit) => !bodyFragments.includes(hit) && !hit.startsWith(`engine${sep}justify-last-line.ts:`));
     expect(offenders).toEqual([]);
   });
 
@@ -236,10 +236,19 @@ describe('טווח ה-pm של השורה המצוירת', () => {
 
   it('רק painted-lines.ts ו-rtl-line-end.ts נוגעים בעיגונים של השורה', () => {
     const offenders = hits(/data-pm-(?:start|end)|data-source-node-id/).filter(
-      (hit) => !READERS.some((reader) => normalize(hit).startsWith(reader)),
+      (hit) => !READERS.some((reader) => normalize(hit).startsWith(reader))
+        && !normalize(hit).startsWith('engine/justify-last-line.ts:'),
     );
 
     expect(offenders).toEqual([]);
+  });
+
+  // #4136 needs paragraph identity to verify justification through the public
+  // API. This narrowly scoped painter writes only its own word-spacing.
+  it('last-line painting reads identity but never writes document content or pm anchors', () => {
+    const source = sources.find((file) => normalize(file.path) === 'engine/justify-last-line.ts')!.text;
+    expect(source).not.toMatch(/data-pm-(?:start|end)|innerHTML|textContent\s*=|appendChild|removeChild/);
+    expect(source).not.toMatch(/\.style\.(?!wordSpacing\b)\w+\s*=/);
   });
 
   it.each(READERS)('%s קורא בלבד — אינו בונה, מוחק או כותב', (path) => {

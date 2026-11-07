@@ -18,6 +18,7 @@ import { splashStage, SPLASH_STAGES } from '../host/splash';
 import { installClickFocus } from './click-focus';
 import { installFormatPainter } from './format-painter';
 import { localizeEngineChrome } from './hf-chrome';
+import { installJustifyLastLine } from './justify-last-line';
 import { installPointerSnap } from './pointer-snap';
 import { installWordSelection } from './word-selection';
 import { createOtzariaLinkActivation } from './otzaria-link-activation';
@@ -294,6 +295,8 @@ export function createEditor(options: CreateEditorOptions): Promise<EditorSessio
         // שנחתה שם כשהמיקוד היה ברצועה מחזירה אותו — ראו click-focus.ts.
         // כאן ולא לפני הבנאי: החזרת המיקוד היא דרך המופע.
         session.onDispose(installClickFocus(container, ready).dispose);
+        const justificationDocument = ready.activeEditor?.doc;
+        if (justificationDocument) session.onDispose(installJustifyLastLine(container, justificationDocument).dispose);
         // מברשת עיצוב: המנוע מחיל רק כשמישהו קורא ל-notifyPointerUp/notifyKeyUp
         // של ui.formatPainter, וזה בדיוק מה ש-SuperToolbar עושה — אבל הוא לא קם
         // כש-ui: false. ראו format-painter.ts.
