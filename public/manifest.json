@@ -9,7 +9,7 @@
   "category": "Utilities",
   "stability": "experimental",
   "entrypoint": "index.html",
-  "minAppVersion": "0.9.97",
+  "minAppVersion": "0.9.99",
   "sdkVersion": "1.x",
   "permissions": [
     "fs.user_files.read",
@@ -50,6 +50,7 @@
           "title": "ערוך בוורד לאוצריא",
           "icon": "document_edit_24_regular",
           "contexts": ["reader-text"],
+          "bookTypes": ["docx", "docm"],
           "openPlugin": true
         }
       ]
