@@ -37,6 +37,13 @@
  *   If `defaultPinned: false`, the user must manually pin the plugin from the
  *   plugin side panel (🧩 button) before it appears as a tab.
  *
+ * HEADLESS PLUGINS (manifest: headless, since 0.9.98)
+ *   `"headless": true` + `"entrypoint": "main.js"` runs the script in the
+ *   background engine only — no tab, no tools-panel entry, no nav-rail pin.
+ *   On Windows/macOS it loads as an ES module; on Linux/Android as a classic
+ *   script (bundle to one file to run everywhere). Requires
+ *   `app.run_on_startup` and a `contributes.startup` activation trigger.
+ *
  * RTL SUPPORT
  *   Add `dir="rtl"` to the <html> element for Hebrew / Arabic content:
  *     <html dir="rtl" lang="he">
@@ -118,6 +125,7 @@ export interface ThemePayload {
 export interface BootPayload {
   plugin: { id: string; version: string };
   app: {
+    /** Includes the hotfix as a 4th part: `'0.9.98.1'`, or `'0.9.98'` without one. */
     version: string;
     platform: 'windows' | 'linux' | 'macos' | 'android' | 'ios' | string;
     /** Full locale tag, e.g. `'he-IL'` or `'en'`. */
@@ -143,6 +151,23 @@ export interface BootPayload {
    *  For a fresh runtime snapshot, call `app.getGrantedPermissions()` or
    *  listen to `plugin.permissions_changed`. */
   permissions: string[];
+  /** Present whenever the page of an already open tab loads again (discard,
+   *  crash, update) — then `state` may be `null`. For a tab restored from a
+   *  previous session or a workspace, present only if a state was saved.
+   *  Absent on a fresh open. `state` is the last value passed to
+   *  `plugin.setRestoreState`. Since 0.9.98.1. */
+  restore?: PluginRestorePayload;
+}
+
+/** The `restore` field of `plugin.boot`. Since 0.9.98.1. */
+export interface PluginRestorePayload {
+  reason: 'discarded' | 'crashed' | 'reloaded' | 'session';
+  state: unknown | null;
+}
+
+/** Arguments of `plugin.setRestoreState`. `null` clears; at most 64KB as JSON. */
+export interface PluginSetRestoreStateArgs {
+  state: unknown | null;
 }
 
 /** Result of `app.getConnectivity`, and the `connectivity` field of `plugin.boot`. */
@@ -177,7 +202,10 @@ export type BookType =
   | 'wbk'
   | 'xml'
   | 'rtf'
-  | 'odt';
+  | 'odt'
+  | 'html'
+  | 'htm'
+  | 'xhtml';
 
 export interface BookMeta {
   id?: number | null;
@@ -191,7 +219,7 @@ export interface BookMeta {
   bookUid?: string;
   title: string;
   type?: BookType | null;
-  source?: 'library' | 'user' | 'external' | null;
+  source?: 'library' | 'user' | 'external' | 'attached' | null;
   topics?: string[];
   categoryPath?: string | null;
   external?: { provider: 'hebrewbooks' | 'otzar'; id: number | string };
@@ -249,9 +277,21 @@ export interface SearchResult {
   /** `'text'` for a text book, `'pdf'` for a PDF book. */
   type: 'text' | 'pdf';
   book: string;
+  /** Snippet; שם הוי"ה per the user's setting (from 0.9.98.1) — see `RawDivineNamesOption`. */
   text: string;
+  /** ראה `SearchTextStatus`. */
+  textStatus?: SearchTextStatus;
+  /** הביטוי נמשך מסוף השורה `index` אל השורה הבאה; `text` מחבר את שתיהן ב-`<br>`. */
+  continuesToNextLine?: boolean;
   index: number;
 }
+
+/**
+ * האם `text` הוא השורה שבה נמצאה ההתאמה. `'stale'`: הספר השתנה מאז האינדקס,
+ * ו-`text` הוא השורה הנוכחית בלי הדגשה (או ריק). `'unavailable'`: `text` ריק.
+ * חסר בגרסאות קודמות — להתייחס כ-`'ok'`.
+ */
+export type SearchTextStatus = 'ok' | 'stale' | 'unavailable';
 
 /**
  * זהות ספר קנונית. בקלט די באחד מ-`bookUid`/`id`/`bookId`.
@@ -264,8 +304,119 @@ export interface BookIdentity {
   id?: number | null;
   bookId?: string;
   type?: BookType | null;
-  source?: 'library' | 'user' | 'external' | null;
+  source?: 'library' | 'user' | 'external' | 'attached' | null;
   external?: { provider: 'hebrewbooks' | 'otzar'; id: number | string };
+}
+
+/**
+ * Opt-out of the user's divine-names display setting (from 0.9.98.1).
+ *
+ * By default every API that returns book text applies the setting chosen by
+ * the user (שם הוי"ה as יקוק / ה' / יי / ידוד, and the other names where the
+ * library marks them). Accepted by `library.getBookContent`,
+ * `library.getBookToc`, `library.getBookAltToc`,
+ * `library.listBookAltStructures`, `library.getLinks` (anchor labels),
+ * `library.getLinkContent`, `library.getBookDetails` (descriptions),
+ * `search.fullText`, `search.query`, `reader.getSelection`,
+ * `reader.findTextOccurrences`, `reader.getSectionTextMap`,
+ * `tools.dictionary` (meanings) and `tools.biographies` (summaries); and, as
+ * a field of each `DatabaseQuerySpec`, by `database.query` on library-text
+ * sources (`talmud_synopsis`). A non-boolean value is `error.invalid_params`.
+ *
+ * Text taken from the screen (commentary/PDF selections, reader selections
+ * that cannot be anchored) can only come back as shown, possibly filtered.
+ *
+ * Plain text fields never contain the U+2060 word joiner of the substitute
+ * forms; offset-bearing structures (rendered layer maps, `renderedRange`)
+ * keep it, because their offsets count it.
+ *
+ * ⚠️ Raw text that reaches the user (shown, printed, saved or sent) bypasses
+ * the user's choice — filter it yourself with `app.getDivineNamesDisplay`.
+ * See API_REFERENCE.md § שמות הקודש בטקסט שמגיע לתוסף.
+ */
+export interface RawDivineNamesOption {
+  /** `true`: divine names as stored. Default `false` (filtered). ⚠️ See the
+   * warning on `RawDivineNamesOption`. */
+  rawDivineNames?: boolean;
+}
+
+/** `holyName` of `app.getDivineNamesDisplay`: how שם הוי"ה is written. */
+export type HolyNameDisplay =
+  | 'asIs'
+  | 'kufKuf'
+  | 'hehApostrophe'
+  | 'doubleYod'
+  | 'daletDalet';
+
+/** Arguments to `app.getDivineNamesDisplay` (from 0.9.98.1). */
+export interface DivineNamesDisplayArgs extends BookIdentity {
+  /** `'body'` (default): the book's text; `'commentary'`: commentaries and
+   * link content. */
+  target?: 'body' | 'commentary';
+}
+
+/**
+ * How divine names reach the plugin in book text, resolved at the moment of
+ * the call as the reader would show that book (from 0.9.98.1). Without a book:
+ * the general setting only. The setting can change at any time.
+ */
+export interface DivineNamesDisplay {
+  holyName: HolyNameDisplay;
+  /** `'substitute'` applies only where the library marks the name; derived
+   * text (search snippets, TOC headings) keeps the other names as written. */
+  otherNames: 'asIs' | 'substitute';
+  /** `true` when any name is replaced. */
+  filtered: boolean;
+  /** שם הוי"ה as the plugin receives it: `'יהוה'`, `'יקוק'`, `"ה'"`, `'יי'` or `'ידוד'`. */
+  holyNameSample: string;
+}
+
+/** Arguments to `library.getBookContent`. */
+export interface GetBookContentArgs extends BookIdentity, RawDivineNamesOption {
+  /** UTF-16 offset in the returned (filtered, unless `rawDivineNames`) text. Default 0. */
+  offset?: number;
+  /** Default 1000, max 5000. */
+  limit?: number;
+  /** Jump to the first occurrence of this string; `offset` then counts from
+   * it. A string as stored, or a `getBookToc` heading, is located in the
+   * stored text and mapped to the same place in the returned text. */
+  section?: string;
+  /** Embedded text reader only: apply the bound tab's display profile. */
+  textReaderDisplay?: boolean;
+}
+
+/** Arguments to `events.setOptions` (from 0.9.98.1). */
+export interface EventOptionsArgs {
+  /** An event topic subscribed with `events.subscribe:<topic>`. */
+  topic: string;
+  /** `true`: book text in this topic arrives with divine names as stored.
+   * ⚠️ See the warning on `RawDivineNamesOption`. */
+  rawDivineNames: boolean;
+}
+
+/** Initial print range; the user can change the range and commentators in the dialog. */
+export interface ReaderPrintRangeArgs extends BookIdentity {
+  startIndex: number;
+  endIndex?: number;
+  /** Omitted: active reader selection for this book, otherwise linked commentators. []: none. */
+  commentators?: string[];
+}
+
+/** One book in `library.setProviderBooks`. */
+export interface ProviderBook {
+  /** Positive integer, unique within the provider. */
+  id: number;
+  title: string;
+  author?: string;
+  /** `/`-separated, in the form `library.getTree` uses: `/שו"ת/אחרונים`. */
+  categoryPath?: string;
+}
+
+/** Arguments to `library.setProviderBooks`: replaces the provider's whole list. */
+export interface SetProviderBooksArgs {
+  provider: string;
+  /** Up to 50,000 books; `[]` removes them all. */
+  books: ProviderBook[];
 }
 
 export type SearchMode = 'exact' | 'advanced' | 'fuzzy';
@@ -294,6 +445,9 @@ export interface SearchQueryParams {
   wordMatchMode?: SearchWordMatchMode;
   /** חוקי רק ב-advanced יחד עם wordMatchMode: 'atLeast'. */
   wordMatchCount?: number;
+  /** מגרסה 0.9.98.1. אותו מרווח כמו לפי הסדר, אבל המילים בכל סדר; נדחה ב-fuzzy,
+   *  בטווח שאינו wordDistance, בהתאמה שאינה all ועם customSpacing. */
+  anyOrder?: boolean;
   /** אפשרויות מילה שחלות על כל מילות השאילתה. */
   options?: Record<string, boolean>;
   /** אפשרויות פר-מילה במפתח `"{מילה}_{אינדקס}"`; גובר על `options`. */
@@ -318,8 +472,14 @@ export interface SearchQueryParams {
 export interface SearchQueryHit extends BookIdentity {
   book: string;
   categoryPath?: string | null;
+  /** Stored form; a lookup key, never filtered. */
   reference: string;
+  /** Snippet; שם הוי"ה per the user's setting (from 0.9.98.1) — see `RawDivineNamesOption`. */
   text: string;
+  /** ראה `SearchTextStatus`. */
+  textStatus?: SearchTextStatus;
+  /** הביטוי נמשך מסוף השורה `index` אל השורה הבאה; `text` מחבר את שתיהן ב-`<br>`. */
+  continuesToNextLine?: boolean;
   index: number;
   mergedCount: number;
   merged?: Array<
@@ -361,12 +521,34 @@ export interface SearchOptionsCatalog {
   defaultLimit: number;
 }
 
+/**
+ * ההרשאה נקבעת לפי ה-host שב-`url`: `localhost` / `::1` / `127.0.0.0`–`127.0.0.255`
+ * דורשים `network.localhost`; כל יעד אחר (אינטרנט) דורש `network.access`.
+ * מאוצריא 0.9.98.1 אחת אינה מחליפה את השנייה; פנייה לשני סוגי יעדים דורשת את שתיהן.
+ * הכתובת חייבת להופיע גם ב-`network.allowlist` של המניפסט.
+ */
 export interface NetworkFetchParams {
   url: string;
+  /** מומר לאותיות גדולות; אותיות בלבד. ברירת מחדל GET. */
   method?: string;
   headers?: Record<string, string>;
+  /** מחרוזת בלבד; מחרוזת ריקה אינה נשלחת. */
   body?: string;
   /** ברירת מחדל 30,000; מקסימום 120,000 מילישניות. */
+  timeoutMs?: number;
+}
+
+/**
+ * ההרשאה נקבעת לפי ה-host שב-`url`: `localhost` / `::1` / `127.0.0.0`–`127.0.0.255`
+ * דורשים `network.localhost`; כל יעד אחר (אינטרנט) דורש `network.access`.
+ * מאוצריא 0.9.98.1 אחת אינה מחליפה את השנייה; פנייה לשני סוגי יעדים דורשת את שתיהן.
+ * הכתובת חייבת להופיע גם ב-`network.allowlist` של המניפסט.
+ */
+export interface NetworkFetchFileParams {
+  url: string;
+  /** ברירת מחדל 50MB; מקסימום 100MB. חריגה: `error.too_large`. */
+  maxBytes?: number;
+  /** ברירת מחדל 120,000; מקסימום 600,000 מילישניות. */
   timeoutMs?: number;
 }
 
@@ -399,10 +581,27 @@ export interface OpenSearchTabSettings {
   wordMatchMode?: SearchWordMatchMode;
   /** חוקי רק עם mode: 'advanced' ו-wordMatchMode: 'atLeast'. */
   wordMatchCount?: number;
+  /** מגרסה 0.9.98.1. אותו מרווח, אבל המילים בכל סדר; כללים כמו ב-search.query. */
+  anyOrder?: boolean;
   /** אפשרויות מילה שחלות על כל מילות השאילתה (למשל 'קידומות דקדוקיות'). */
   options?: Record<string, boolean>;
   /** אפשרויות פר-מילה במפתח `"{מילה}_{אינדקס}"`; גובר על `options`. */
   wordOptions?: Record<string, Record<string, boolean>>;
+  /** מגרסה 0.9.98.1. השלילה, המילים החלופיות והמרווחים — רק עם mode: 'advanced'. */
+  negativeQuery?: string;
+  negativeOptions?: Record<string, boolean>;
+  negativeWordOptions?: Record<string, Record<string, boolean>>;
+  alternativeWords?: Record<string, string[]>;
+  negativeAlternativeWords?: Record<string, string[]>;
+  customSpacing?: Record<string, string>;
+  negativeCustomSpacing?: Record<string, string>;
+  /** מגרסה 0.9.98.1. היקף החיפוש, כמו ב-`search.query`; ברירת מחדל כל הספרייה. */
+  facets?: string[];
+  categories?: string[];
+  books?: BookIdentity[];
+  authors?: string[];
+  eras?: string[];
+  baseBooksOnly?: boolean;
 }
 
 /** פרמטרי `reader.openSearchTab` — פתיחת כרטיסיית חיפוש מובנית. */
@@ -417,6 +616,8 @@ export interface OpenSearchTabArgs {
 }
 
 export interface TocEntry {
+  /** Heading; שם הוי"ה per the user's setting (from 0.9.98.1). Navigate by
+   * `index` — a filtered heading may not resolve as a ref. */
   text: string;
   index: number;
   level: number;
@@ -430,6 +631,7 @@ export interface TocEntry {
 export interface AltStructure {
   key: string;
   title: string | null;
+  /** שם הוי"ה per the user's setting (from 0.9.98.1). */
   heTitle: string | null;
 }
 
@@ -454,10 +656,16 @@ export type GetCommentatorsResult =
   | { commentators: CommentatorInfo[] }
   | { groups: CommentatorGroup[] };
 
-/** עוגן-מילה של קישור בשורת המקור (אופסטים בתווים גלויים). */
+/**
+ * עוגן-מילה של קישור בשורת המקור, באופסטים בתווים גלויים של הטקסט ש-`getBookContent`
+ * מחזיר. גוף הערה שבטבלה נפרדת אינו בטקסט הזה: עוגן שכולו בגוף הערה אינו מוחזר,
+ * וטווח שחוצה הערה מוחזר בלי החלק שבה. האופסטים נספרים בטקסט השמור
+ * (`getBookContent` עם `rawDivineNames: true`), לא בטקסט המסונן.
+ */
 export interface LinkAnchor {
   start: number;
   end: number | null;
+  /** שם הוי"ה per the user's setting (from 0.9.98.1). */
   label: string | null;
 }
 
@@ -473,9 +681,29 @@ export interface BookLink {
   /** `true` למפרש/תרגום/מדרש; `false` להפניה. */
   isCommentary: boolean;
   targetIsUserBook: boolean;
+  /** מקור ספר היעד: `'o'` רשמי, `'u'` אישי, או `'d:<slug>'` למסד ספרים מצורף. */
+  targetSource?: string;
   targetCategoryId: number | null;
   /** מוחזר רק כאשר `includeAnchors: true` ולקישור יש עוגן. */
   anchor?: LinkAnchor;
+}
+
+/** הערת שוליים אחת, כפי שמוחזרת מ-`library.getLineNotes`. */
+export interface LineNote {
+  /** השורה, 0-based. */
+  line: number;
+  /** סדר ההערה בשורה. */
+  noteIndex: number;
+  /** סימן ההערה בשורה, או `null` להערה בלי סימן. */
+  marker: string | null;
+  /** האופסט הגלוי בשורה השמורה שבו עמד הגוף, או `-1` כשאינו ידוע. */
+  charPos: number;
+  /** ה-HTML של גוף ההערה; שם הוי"ה לפי בחירת המשתמש. */
+  body: string;
+}
+
+export interface GetLineNotesResult {
+  notes: LineNote[];
 }
 
 export interface GetLinksResult {
@@ -523,11 +751,14 @@ export interface LinkTargetSummary {
 
 export interface GetLinkTargetsSummaryResult {
   targets: LinkTargetSummary[];
-  /** השורה הגבוהה ביותר שיש עליה קישור (0-based), או ‎-1‎ כשאין קישורים. */
+  /** השורה הגבוהה ביותר שיש עליה קישור (0-based), או -1 כשאין קישורים. */
   maxSourceLine: number;
 }
 
-export type LinkContentItem = { content: string } | { error: 'not_found' };
+/** `content`: divine names per the user's commentary setting (from 0.9.98.1). */
+export type LinkContentItem =
+  | { content: string }
+  | { error: 'not_found' | 'forbidden' };
 
 export interface GetLinkContentResult {
   /** באותו סדר של פריטי הקלט. */
@@ -590,8 +821,9 @@ export interface HighlightCapabilities {
   highlights: boolean;
   /** בחירת טקסט אינה נתמכת ב-PDF. */
   selection: boolean;
-  /** האזורים שבהם פריטי תפריט הקשר של תוספים מוצגים. */
-  contextMenu: string[];
+  /** האזורים שבמשטח הנוכחי שבהם פריטי תפריט הקשר של תוספים מוצגים:
+   * `mainText` בספר טקסט, ומ־0.9.98.1 גם `commentary`, ו־`pdf` בספר PDF. */
+  contextMenu: Array<'mainText' | 'commentary' | 'pdf'>;
 }
 
 /**
@@ -602,8 +834,8 @@ export interface WorkspaceListEntry {
   name: string;
   isActive: boolean;
   /**
-   * מספר הכרטיסיות שה-API חושף — אותן כרטיסיות שב-`ReaderState.openTabs`.
-   * כרטיסיות של כלים ותוספים אינן נמנות. בשולחן הפעיל זו הספירה החיה.
+   * מספר הכרטיסיות בשולחן, כולל כלים ותוספים — כמו `ReaderState.openTabs`.
+   * בשולחן הפעיל זו הספירה החיה.
    */
   tabCount: number;
 }
@@ -645,8 +877,8 @@ export interface BookmarkEntry extends BookIdentity {
 /**
  * ארגומנטים ל-`reader.closeTab` ול-`reader.activateTab`.
  *
- * ה-index הוא המקום ב-`ReaderState.openTabs` — לא מקומה של הכרטיסייה בשורת
- * הכרטיסיות. אינדקס מחוץ לתחום מוחזר כ-`error.invalid_params`.
+ * ה-index הוא המקום ב-`ReaderState.openTabs`, כולל כרטיסיות כלים ותוספים.
+ * אינדקס מחוץ לתחום מוחזר כ-`error.invalid_params`.
  */
 export interface ReaderTabIndexArgs {
   index: number;
@@ -700,8 +932,8 @@ export interface GematriaResult {
 export interface DictionaryLookupResult {
   term: string;
   acronyms: Array<{ acronym: string; meanings: string[] }>;
-  /** `hebrew` הוא טקסט עם סימון מקורי. */
-  aramaic: Array<{ aramaic: string; hebrew: string }>;
+  /** `hebrew` הוא טקסט עם סימון מקורי; `dictionary` הוא שם המילון (מ-0.9.98.3). */
+  aramaic: Array<{ aramaic: string; hebrew: string; dictionary: string }>;
 }
 
 export type JewishHolidayKind =
@@ -715,6 +947,13 @@ export interface JewishHoliday {
   kind: JewishHolidayKind;
 }
 
+export interface DafYomi {
+  /** שם המסכת בעברית, למשל "ברכות" */
+  masechet: string;
+  /** מספר הדף במסכת */
+  daf: number;
+}
+
 export interface JewishDate {
   year: number;
   month: number;
@@ -724,6 +963,10 @@ export interface JewishDate {
   monthName: string;
   isLeapYear: boolean;
   isShabbat: boolean;
+  /** שם פרשת השבוע הקרובה מהתאריך הנתון (מושפע מ-inIsrael בפרשיות מחוברות) */
+  parasha: string;
+  /** דף היומי (בבלי); null עבור תאריכים שקדמו לתחילת המחזור הראשון (11.9.1923) */
+  dafYomi: DafYomi | null;
   holidays: JewishHoliday[];
 }
 
@@ -764,7 +1007,149 @@ export interface CityInfo {
   inIsrael: boolean;
 }
 
+/** Since 0.9.98.1. Raw HTML source is retained; editable text uses the host's stripHtml. */
+export interface CorrectionChange {
+  sectionIndex: number;
+  originalSourceText: string;
+  originalText: string;
+  proposedText: string;
+}
+export interface CorrectionSessionSnapshot {
+  sessionId: string;
+  tabId: string;
+  bookId: string;
+  bookUid: string;
+  libraryVersion: string;
+  revision: number;
+  changes: CorrectionChange[];
+  capabilities: {
+    plainTextOnly: true;
+    htmlSource: true;
+    paragraphBoundaries: false;
+    offsetUnit: 'utf16';
+    sourceSelection: false;
+    sourceAnchorsOnCorrectedParagraphs: false;
+    continuousReading: true;
+    pageShape: false;
+    splitView: true;
+    maxChanges: 500;
+    maxTextLength: 20000;
+    maxChangesBytes: 1048576;
+  };
+  /** Durable recovery draft owned by Otzaria for this plugin + bookUid. */
+  draft: CorrectionDraftState;
+}
+/** A recovered change that could not be re-verified against the current raw source. */
+export interface CorrectionConflict extends CorrectionChange {
+  /** `displaced`: unsaved edits of a session that lost ownership to another window. */
+  reason: 'source_changed' | 'not_found' | 'invalid' | 'displaced';
+}
+export interface CorrectionDraftState {
+  /** Stable for plugin + bookUid across sessions, tabs, windows and restarts. */
+  draftId: string;
+  /**
+   * Durable version whose content is exactly this snapshot's `changes` and `conflicts`
+   * (global monotonic, never reused). Null when there is nothing to acknowledge: before the
+   * first commit, while `persisted` is false, and when `displaced` is true.
+   */
+  version: number | null;
+  /** True only when the exact current `revision` is committed under `version`. */
+  persisted: boolean;
+  /** A write is scheduled or in flight. */
+  pending: boolean;
+  /** Ownership was lost; unsaved edits are rescued as `displaced` conflicts in the new owner's draft. */
+  displaced: boolean;
+  /** Last write error; retried automatically with backoff. */
+  error: string | null;
+  /** Kept until acknowledged; returned in every snapshot. */
+  conflicts: CorrectionConflict[];
+}
+export interface CorrectionRecovery {
+  draftId: string;
+  /** Draft version that was recovered. */
+  fromVersion: number;
+  restoredSectionIndices: number[];
+  conflicts: CorrectionConflict[];
+}
+export interface BeginCorrectionSessionResult extends CorrectionSessionSnapshot {
+  /** Null when there was no unacknowledged draft, or the session already existed. */
+  recovery: CorrectionRecovery | null;
+}
+export interface AcknowledgeCorrectionDraftArgs { draftId: string; version: number; }
+export interface AcknowledgeCorrectionDraftResult {
+  draftId: string;
+  version: number;
+  acknowledged: true;
+  /** True when this exact version was already acknowledged. */
+  duplicate: boolean;
+}
+export interface GetCorrectionDraftArgs { draftId: string; }
+export interface CorrectionDraftMeta {
+  draftId: string;
+  bookId: string;
+  bookUid: string;
+  bookSource: 'library' | 'user' | 'external' | 'attached';
+  libraryVersion: string;
+  version: number;
+  /** ISO-8601 UTC. */
+  updatedAt: string;
+  /** A live session (any tab or window) currently holds the draft. */
+  active: boolean;
+}
+export interface CorrectionDraftSummary extends CorrectionDraftMeta {
+  changeCount: number;
+  conflictCount: number;
+}
+export interface CorrectionDraft extends CorrectionDraftMeta {
+  changes: CorrectionChange[];
+  conflicts: CorrectionConflict[];
+}
+export interface ListCorrectionDraftsResult { drafts: CorrectionDraftSummary[]; }
+export interface BeginCorrectionSessionArgs { tabId: string; }
+export interface GetCorrectionSessionArgs { sessionId: string; }
+export interface RestoreCorrectionDraftArgs extends GetCorrectionSessionArgs {
+  bookUid: string;
+  libraryVersion: string;
+  expectedRevision: number;
+  changes: CorrectionChange[];
+}
+export interface ResetCorrectionArgs extends GetCorrectionSessionArgs {
+  sectionIndex: number;
+  expectedRevision: number;
+}
+export interface EndCorrectionSessionArgs extends GetCorrectionSessionArgs {
+  expectedRevision: number;
+}
+/** Rate-limited (at most one per 300ms per session); flushed before getCorrectionSession returns. */
+export interface CorrectionSessionChangedEvent {
+  sessionId: string;
+  revision: number;
+  /** Sorted, deduplicated paragraphs changed since the previous event. */
+  sectionIndices: number[];
+}
+/**
+ * Sent once the final write settles (lease released first), or after 3s with
+ * `snapshot.draft.persisted: false` while Otzaria keeps retrying and holds the lease.
+ * Not sent when the user confirms uninstall or data reset (drafts are purged).
+ */
+export interface CorrectionSessionEndedEvent {
+  sessionId: string;
+  reason:
+    | 'explicit'
+    | 'user'
+    | 'tab_closed'
+    | 'plugin_unavailable'
+    | 'window_closed'
+    | 'app_exit'
+    | 'ownership_lost';
+  snapshot: CorrectionSessionSnapshot;
+}
+
 export interface ReaderState {
+  /** Since 0.9.98.1: text-tab identity, stable until closure; never persisted. */
+  currentTabId: string | null;
+  /** Since 0.9.98.1: existing session owned by the caller; never creates a session. */
+  currentCorrectionSessionId: string | null;
   currentBook: string | null;
   currentBookId: string | null;
   /** מזהה ספר יציב של הטאב הפעיל (`null` לטאב שאינו ספר / אין טאב). ראה `BookMeta.bookUid`. */
@@ -772,18 +1157,22 @@ export interface ReaderState {
   /** Canonical book id of the active tab (`null` for a non-book tab / no tab). */
   currentId: number | null;
   currentType: BookType | null;
-  currentSource: 'library' | 'user' | 'external' | null;
+  currentSource: 'library' | 'user' | 'external' | 'attached' | null;
   currentIndex: number;
   currentRef: string | null;
   openTabs: Array<{
-    /** מזהה הכלי בטאב כלי/תוסף; `null` בטאב ספר. */
-    toolId?: string | null;
-    /** הטאב של התוסף הקורא עצמו. */
-    isSelf?: boolean;
-    /** Canonical book id (`null` for a non-book tab such as search). */
+    /** Since 0.9.98.1: text-tab identity; null for other tabs. */
+    tabId: string | null;
+    /** Existing correction session owned by the caller; null for other owners or tabs. */
+    correctionSessionId: string | null;
+    /** Canonical book id (`null` for a non-book tab such as search or a tool). */
     id: number | null;
+    /** מזהה הכלי או התוסף (`builtin.*` / `pluginId`); `null` לכרטיסייה שאינה כלי. */
+    toolId: string | null;
+    /** `true` לכרטיסייה של התוסף הקורא עצמו. */
+    isSelf: boolean;
     type: BookType | null;
-    source: 'library' | 'user' | 'external' | null;
+    source: 'library' | 'user' | 'external' | 'attached' | null;
     bookId: string;
     /** מזהה ספר יציב (`null` לטאב שאינו ספר). ראה `BookMeta.bookUid`. */
     bookUid: string | null;
@@ -801,14 +1190,21 @@ export interface ReaderRefState {
   /** Canonical book id of the active tab (`null` when no book tab is active). */
   currentId: number | null;
   currentType: BookType | null;
-  currentSource: 'library' | 'user' | 'external' | null;
+  currentSource: 'library' | 'user' | 'external' | 'attached' | null;
   currentIndex: number;
   currentRef: string | null;
 }
 
+/**
+ * A reader selection. From 0.9.98.1 `text`, `renderedSelectedText` and
+ * `normalizedSelectedText` follow the user's divine-names setting (see
+ * `RawDivineNamesOption`); the `source*` fields stay as stored.
+ */
 export interface ReaderSelection {
-  /** Legacy fields, retained for backward compatibility. */
+  /** Legacy fields, retained for backward compatibility. Without
+   * `sourceRange` (unanchored), `text` is as shown on screen. */
   text: string;
+  /** Offsets in the on-screen text. */
   start: number | null;
   end: number | null;
   currentRef: string | null;
@@ -822,10 +1218,14 @@ export interface ReaderSelection {
   selectionId?: string;
   bookId?: string;
   bookTitle?: string;
+  /** Since 0.9.98.1: exact tab identity in reader-book; absent in detached previews. */
   tabId?: string;
   sectionIndex?: number;
   sectionId?: string;
+  /** Rendered layer, divine names per the request; without U+2060 joiners
+   * (`renderedRange.exactText` keeps them). */
   renderedSelectedText?: string;
+  /** Stored text — divine names never substituted. */
   sourceSelectedText?: string;
   normalizedSelectedText?: string;
   sourceRange?: TextRangeAnchor;
@@ -839,6 +1239,33 @@ export interface ReaderSelection {
   /** `reader-highlight` context only: the plugin highlights found under the
    * click position. Act only on your own ids. From 0.9.97. */
   clickedHighlights?: ClickedHighlightRef[];
+  /** `reader-commentary*` contexts only: the book being read, while the
+   * top-level fields describe the commentary. From 0.9.98.1. */
+  mainBook?: CommentaryMainBook;
+  /** `reader-pdf*` contexts only (a PDF page, not its commentary pane): the
+   * 1-based page that was clicked, or where the selection starts; also given
+   * as `sectionIndex`/`currentIndex`. From 0.9.98.1. */
+  pageNumber?: number;
+  /** Identity of the book the text belongs to (see `BookIdentity`). */
+  id?: number | null;
+  type?: BookType | null;
+  source?: 'library' | 'user' | 'external' | 'attached' | null;
+  external?: { provider: 'hebrewbooks' | 'otzar'; id: number | string };
+}
+
+/** The book a right-clicked commentary belongs to. From 0.9.98.1. */
+export interface CommentaryMainBook extends BookIdentity {
+  bookId: string;
+  bookTitle: string;
+  bookUid: string;
+  /** The current position in the book being read. */
+  currentRef: string | null;
+  /** Text book: the 0-based line the commentary is linked to (commentary
+   * list only; absent in a page-shape column). PDF: the 1-based current
+   * page, also given as `pageNumber`. */
+  sectionIndex?: number;
+  /** PDF only: the 1-based current page. */
+  pageNumber?: number;
 }
 
 /** One section of a multi-paragraph selection (same shape as a verified
@@ -917,7 +1344,7 @@ export interface NormalizeOptions {
   };
 }
 
-export interface FindTextOccurrencesArgs {
+export interface FindTextOccurrencesArgs extends RawDivineNamesOption {
   bookId: string;
   sectionIndex: number;
   query: string;
@@ -969,9 +1396,9 @@ export interface TextSourceMap {
   mappings: TextSourceMapSegment[];
 }
 
-export interface GetSectionTextMapArgs {
+export interface GetSectionTextMapArgs extends RawDivineNamesOption {
   bookId: string;
-  /** מזהה ספר יציב; גובר על `bookId` (כותרת), שאינה תואמת בטאב של מהדורה חלופית. */
+  /** Stable identity; takes precedence over the book title. */
   bookUid?: string;
   sectionIndex: number;
   layer?: 'source' | 'rendered' | 'both';
@@ -1108,11 +1535,25 @@ export interface ReaderSectionContentChangedEvent {
 }
 
 export type ContextMenuContext =
+  | 'reader-book'
   | 'reader-selection'
   | 'reader-page-shape-selection'
   /** Right-click on a plugin highlight, with or without an active selection.
    * The click payload carries `selection.clickedHighlights`. From 0.9.97. */
-  | 'reader-highlight';
+  | 'reader-highlight'
+  /** Right-click on a commentary (commentary list, page-shape column or the
+   * PDF commentary pane) without a selection. Opt-in: an item without
+   * `contexts` does not appear. The commentary is the current book; see
+   * `ReaderSelection.mainBook`. From 0.9.98.1. */
+  | 'reader-commentary'
+  /** Like `reader-commentary`, with selected text in the commentary.
+   * From 0.9.98.1. */
+  | 'reader-commentary-selection'
+  /** Right-click on a PDF page without a selection. Opt-in; see
+   * `ReaderSelection.pageNumber`. From 0.9.98.1. */
+  | 'reader-pdf'
+  /** Like `reader-pdf`, with selected text on the page. From 0.9.98.1. */
+  | 'reader-pdf-selection';
 
 export interface ContextMenuColor {
   id: string;
@@ -1149,10 +1590,24 @@ export interface ContextMenuItem {
   /** When true, clicking opens the plugin page and the click event is
    * delivered to it after boot. Available from 0.9.96. */
   openPlugin?: boolean;
+  /** With `openPlugin`: open another instance of the plugin in a new tab, next
+   * to the current one, and deliver the click event to it only. Requires
+   * `contributes.toolTab.allowMultipleInstances`. Available from 0.9.99. */
+  newTab?: boolean;
   /** Free-form value echoed back as `param` in the click event payload. */
   param?: unknown;
   /** Show the item only when the selected text matches. Available from 0.9.97. */
   showWhen?: ContextMenuShowWhen;
+  /** By default the host draws a divider between the items of different
+   * plugins. Set `false` on a plugin's first top-level item to opt out.
+   * Top-level items only. Available from 0.9.98.1. */
+  separatorBefore?: boolean;
+  /** Deliver the clicked selection (`selectedText`, `selection.text`,
+   * `renderedSelectedText`, `normalizedSelectedText`, `sections`) with divine
+   * names as stored, ignoring the user's display setting. Applies to every
+   * click path of the item; inherited by children. Available from 0.9.98.
+   * ⚠️ See the warning on `RawDivineNamesOption`. */
+  rawDivineNames?: boolean;
 }
 
 /**
@@ -1173,7 +1628,8 @@ export interface UpdateContextMenuItemArgs {
 export interface ContextMenuItemClickedEvent {
   itemId: string;
   selection: ReaderSelection;
-  /** Legacy fields retained for existing plugins. */
+  /** Legacy fields retained for existing plugins. `selectedText` follows the
+   * user's divine-names setting unless the item set `rawDivineNames`. */
   selectedText: string;
   currentRef: string | null;
   currentBook: string;
@@ -1208,6 +1664,10 @@ export interface ToolbarItem {
   /** One or more reader contexts. Children inherit this when omitted; an
    * explicit child value must be a subset of its parent's contexts. */
   contexts?: ToolbarContext[];
+  /** Top-level only. Filter by this reader pane's book type, independently of
+   * focus or other panes. Omit for all types. Non-empty, unique canonical types.
+   * Planned for 0.9.99; applies to startup contributions and dynamic calls. */
+  bookTypes?: BookType[];
   /** Custom event dispatched only to the owning plugin. */
   onClickEvent?: string;
   /** Children (`type: 'menu'` or `'split'`, up to 20 buttons, no nesting). */
@@ -1215,6 +1675,10 @@ export interface ToolbarItem {
   /** When true, clicking opens the plugin page and the click event is
    * delivered to it after boot. */
   openPlugin?: boolean;
+  /** With `openPlugin`: open another instance of the plugin in a new tab, next
+   * to the current one, and deliver the click event to it only. Requires
+   * `contributes.toolTab.allowMultipleInstances`. Available from 0.9.99. */
+  newTab?: boolean;
   /** Free-form value echoed back as `param` in the click event payload. */
   param?: unknown;
 }
@@ -1326,7 +1790,9 @@ export interface OtzariaEventMap {
   'settings.changed': { key: string; newValue: unknown };
   /** Permissions snapshot changed (list of all currently granted permissions). */
   'plugin.permissions_changed': { permissions: string[] };
-  /** User selected text in the reader. Requires permission: events.subscribe:reader.selection_changed */
+  /** User selected text in the reader. Requires permission: events.subscribe:reader.selection_changed.
+   * `text` follows the user's divine-names setting; opt out per topic with
+   * `Otzaria.on(topic, cb, { rawDivineNames: true })` (from 0.9.98.1). */
   'reader.selection_changed': {
     text: string;
     currentRef: string;
@@ -1363,12 +1829,70 @@ export interface OtzariaEventMap {
     provider: string;
     query: string;
     mode: 'exact' | 'advanced' | 'fuzzy';
+    /** Words allowed between query words (0 = adjacent). Binding only with
+     *  `proximityScope: 'wordDistance'` and `wordMatchMode: 'all'`. */
     distance: number;
+    /** Always `'wordDistance'` outside `mode: 'advanced'`. Older hosts omit it. */
+    proximityScope?: SearchProximityScope;
+    /** Always `'all'` outside `mode: 'advanced'`. Older hosts omit it. */
+    wordMatchMode?: SearchWordMatchMode;
+    wordMatchCount?: number;
+    /** Since 0.9.98.1: same distance as ordered search, but the words may
+     *  appear in any order. Sent only when true. */
+    anyOrder?: boolean;
     offset: number;
     limit: number;
     ids?: number[];
+    /** Global options applied to every query word ("options for all words"). */
+    options?: Record<string, boolean>;
+    /** Per-word options keyed `'<word>_<index>'`, same format as `search.requested`. */
+    wordOptions?: Record<string, Record<string, boolean>>;
     /** The host consumes `[id, hits, categoryPath, title]` index entries. */
     indexTitles?: boolean;
+  };
+  /**
+   * The user clicked this plugin's `searchFieldActions` button in a search
+   * field, opening a session. Sent only to the owning plugin.
+   */
+  'search.fieldAction.invoked': {
+    actionId: string;
+    sessionId: string;
+    field: SearchFieldId;
+    /** Field text at the click; the selected range is what the plugin replaces. */
+    text: string;
+    selectionStart: number;
+    selectionEnd: number;
+    /**
+     * Since 0.9.98.3, `fullText` only: the dialog's search state, in the
+     * `search.requested` request shape.
+     */
+    request?: Record<string, unknown>;
+    /**
+     * Since 0.9.98.3, `fullText` only: this plugin's `searchDialogItems`
+     * selections, `itemId` to on/off (including untouched rows).
+     */
+    pluginSelections?: Record<string, boolean>;
+    /**
+     * Since 0.9.98.3, `library` only: the open category as comma-separated
+     * titles from the root (the `libraryBooks` `categoryPath` format); empty
+     * at the library root.
+     */
+    categoryPath?: string;
+  };
+  /** The user clicked the button again while its session is open. */
+  'search.fieldAction.stopRequested': { actionId: string; sessionId: string };
+  /** The session ended; later calls with its `sessionId` fail with `error.not_found`. */
+  'search.fieldAction.ended': {
+    actionId: string;
+    sessionId: string;
+    reason: 'plugin' | 'closed' | 'edited' | 'replaced';
+  };
+  /** The user chose a book of a `libraryBooks` provider this plugin owns. */
+  'library.providerBook.openRequested': {
+    provider: string;
+    id: number;
+    title: string;
+    author?: string;
   };
   /** In-book search request sent only to the plugin owning `provider`. */
   'reader.inBookSearch.requested': {
@@ -1384,6 +1908,8 @@ export interface OtzariaEventMap {
   /** User clicked a plugin-registered toolbar item. Sent only to the registering plugin. */
   'reader.toolbar_item_clicked': ToolbarItemClickedEvent;
   'reader.sectionContentChanged': ReaderSectionContentChangedEvent;
+  'reader.correctionSessionChanged': CorrectionSessionChangedEvent;
+  'reader.correctionSessionEnded': CorrectionSessionEndedEvent;
   /**
    * The user tapped a clickable message shown via `ui.show*` /
    * `notifications.showInApp`. Sent only to the plugin that raised the message,
@@ -1392,6 +1918,12 @@ export interface OtzariaEventMap {
    */
   'ui.messageClicked': { payload: unknown };
 }
+
+/** שדות החיפוש שבהם `searchFieldActions` יכול להציג כפתור. */
+export type SearchFieldId = 'fullText' | 'library' | 'inBook' | 'findRef';
+
+/** מראה כפתור `searchFieldActions` בזמן סשן. */
+export type SearchFieldActionState = 'idle' | 'active' | 'busy';
 
 /** 'more' נשמר לתאימות אחורה — פותח את פאנל הכלים. */
 export type NavigationTarget = 'library' | 'reading' | 'more' | 'settings';
@@ -1476,6 +2008,10 @@ export interface DatabaseQuerySpec {
   limit?: number;
   offset?: number;
   rowFormat?: 'array' | 'object';
+  /** From 0.9.98.1, library-text sources (`talmud_synopsis`): `true` returns
+   * string values as stored instead of שם הוי"ה per the user's setting.
+   * ⚠️ See the warning on `RawDivineNamesOption`. */
+  rawDivineNames?: boolean;
 }
 
 export interface DatabaseQueryMeta {
@@ -1506,12 +2042,22 @@ export interface DatabaseBatchQueryResult {
   results: DatabaseQueryResult[];
 }
 
+/**
+ * Where an installed plugin came from. `packaged` is an archive install (store
+ * or file); the two dev kinds are loaded by a developer from a folder or a local
+ * dev server, so their version does not come from the store and must never be
+ * compared against it. Present from 0.9.98.
+ */
+export type PluginSourceType = 'packaged' | 'development' | 'localhost_dev';
+
 export interface InstalledPlugin {
   pluginId: string;
   name: string;
   version: string;
   enabled: boolean;
   showInTools: boolean;
+  /** Absent before 0.9.98. */
+  sourceType?: PluginSourceType;
   toolTabIconName: string;
 }
 
@@ -1549,6 +2095,24 @@ export interface UserFileHandle {
 }
 
 /**
+ * תוצאת `network.fetchFile` — קובץ במטמון זמני, token לקריאה בלבד. בניגוד ל-
+ * `UserFileHandle`, הקובץ עלול להימחק (מכסה, יממה, הסרת התוסף), ולכן אין להניח
+ * שה-token שורד: אחרי `error.not_found` מורידים שוב.
+ * `fs.resolveFileUrl`, `fs.readTextFile` ו-`fs.revokeFile` על token כזה דורשים
+ * גם את `fs.user_files.read`.
+ */
+export interface RemoteFileHandle {
+  /** מזהה אטום לקובץ במטמון. */
+  token: string;
+  /** URL מ-loopback, תקף לריצה הנוכחית בלבד (הפורט מתחלף). */
+  url: string;
+  name: string;
+  size: number;
+  /** סוג התוכן ששרת הקבצים מגיש, לפי סיומת השם ולא לפי תוכן הקובץ. */
+  mime: string;
+}
+
+/**
  * תוצאת `fs.pickUserFile`. בביטול חוזר `{ cancelled: true }` בלבד, ולכן זהו
  * union ולא אובייקט עם שדות אופציונליים.
  */
@@ -1559,6 +2123,105 @@ export type PickUserFileResult =
       /** קיים מ-0.9.97. `readwrite` = ניתן לשמש כ-`targetToken` בכתיבה. */
       access?: 'read' | 'readwrite';
     } & UserFileHandle);
+
+/** ארגומנטים ל-`library.getTree`. */
+export interface LibraryTreeArgs {
+  /** צמצום לתת-קטגוריה, למשל `'/תנך/ראשונים'`. ברירת מחדל: כל הספרייה. */
+  path?: string;
+  /** ברירת מחדל `true`. */
+  includeBooks?: boolean;
+  /**
+   * מ-0.9.98: רק ספרים שה-`type` שלהם ברשימה; קטגוריות בלי אף ספר כזה תחתן
+   * נגזמות. גרסה ישנה מתעלמת מהשדה — יש לגזום גם בצד התוסף.
+   */
+  types?: BookType[];
+}
+
+/** צומת בעץ של `library.getTree`. */
+export interface LibraryTreeNode {
+  title: string;
+  path: string;
+  categories: LibraryTreeNode[];
+  /** קיים רק כש-`includeBooks` אינו `false`. */
+  books?: (BookMeta & { author?: string; topics?: string })[];
+}
+
+/** ארגומנטים ל-`library.openBookFile` (מ-0.9.98). זהות כמו ב-`getBookMetadata`. */
+export interface OpenBookFileArgs {
+  bookUid?: string;
+  id?: number;
+  bookId?: string;
+  type?: BookType;
+  source?: BookMeta['source'];
+  /** `'readwrite'` — ספר אישי בלבד, ודורש גם `fs.user_files.write`. */
+  access?: 'read' | 'readwrite';
+}
+
+/** תוצאת `library.openBookFile`. ה-`token` הוא token רגיל של קובץ משתמש. */
+export interface BookFileHandle extends UserFileHandle {
+  /** מה שה-token מאפשר בפועל. */
+  access: 'read' | 'readwrite';
+  source: 'library' | 'user' | 'attached';
+}
+
+/**
+ * תוצאת `fs.pickUserFolder` (מ-0.9.98). `cancelled: true` — המשתמש ביטל את
+ * בחירת התיקייה או סירב בדיאלוג הגישה הקבועה של אוצריא.
+ */
+export type PickUserFolderResult =
+  | { cancelled: true }
+  | {
+      cancelled: false;
+      /** מזהה אטום וקבוע של ההרשאה. יש לשמור אותו. */
+      folderToken: string;
+      /** שם התיקייה. */
+      name: string;
+      /** נתיב מלא, לתצוגה בלבד. */
+      path: string;
+    };
+
+/** ארגומנטים ל-`fs.listUserFolder`. */
+export interface ListUserFolderArgs {
+  folderToken: string;
+  /** יחסי לשורש התיקייה, מופרד ב-`/`. `''` (ברירת מחדל) = השורש. */
+  path?: string;
+  /** מסנן קבצים בלבד; לא תלוי רישיות, עם נקודה או בלעדיה. */
+  extensions?: string[];
+}
+
+/** רשומה ב-`fs.listUserFolder`. */
+export interface UserFolderEntry {
+  name: string;
+  /** יחסי לשורש התיקייה, מופרד ב-`/` — הקלט של `openFolderFile`/`listUserFolder`. */
+  path: string;
+  type: 'file' | 'dir';
+  /** `0` לתיקייה. */
+  size: number;
+  /** ISO-8601 ב-UTC. */
+  modified: string | null;
+}
+
+/** תוצאת `fs.listUserFolder`. */
+export interface UserFolderListing {
+  folderToken: string;
+  /** שם התיקייה המאושרת. */
+  name: string;
+  /** הנתיב היחסי שנמנה. */
+  path: string;
+  /** תיקיות ואחריהן קבצים, כל קבוצה לפי שם. */
+  entries: UserFolderEntry[];
+  /** `true` כשהיו יותר מ-2000 רשומות. */
+  truncated: boolean;
+}
+
+/** ארגומנטים ל-`fs.openFolderFile`. */
+export interface OpenFolderFileArgs {
+  folderToken: string;
+  /** יחסי לשורש התיקייה, מופרד ב-`/`. */
+  path: string;
+  /** `'readwrite'` דורש גם `fs.user_files.write`. */
+  access?: 'read' | 'readwrite';
+}
 
 /** תוצאת `fs.beginBinaryWrite` — לאן לשלוח את הבייטים ועד מתי. */
 export interface BinaryWriteTicket {
@@ -1679,9 +2342,9 @@ export interface FontFamilyRequest {
 }
 
 /**
- * Result of `fonts.resolveFamilies`: ready-to-inject `@font-face` rules whose
- * bytes come from Otzaria's bundled or system fonts, each declared under the
- * requested `name`.
+ * Result of `fonts.resolveFamilies`: ready-to-inject `@font-face` rules for
+ * Otzaria's bundled or system fonts, each declared under the requested `name`.
+ * Each `src` is a self-contained `data:` URL, suitable for storing or exporting.
  *
  * Needed because `src: local()` inside a plugin WebView resolves only fonts
  * installed on the machine — never the faces Otzaria injects itself. A plugin
@@ -1732,6 +2395,49 @@ export interface ListInstalledFontsResult {
   platform: string;
 }
 
+export interface SubmitBookCorrectionParams {
+  reportId: string;
+  bookId: string;
+  bookUid?: string;
+  sectionIndex: number;
+  endSectionIndex?: number;
+  snapshots: Array<{ index: number; text: string }>;
+  original: string;
+  proposed: string;
+  sourceStart?: number;
+  sourceEnd?: number;
+  details?: string;
+  allowQueue?: boolean;
+  forceFreeText?: boolean;
+  /**
+   * Reject with `error.text_correction_unavailable` (nothing sent or queued)
+   * instead of falling back to `free_text`. Cannot be combined with
+   * `forceFreeText: true` (`error.invalid_params`).
+   */
+  requireTextCorrection?: boolean;
+}
+
+export interface SubmitBookCorrectionResult {
+  /** `sent`: delivered now. `queued`: stored in Otzaria's local queue. */
+  status: 'sent' | 'queued';
+  reportId: string;
+  nativeReportId: string;
+  message: string;
+  duplicate: boolean;
+  /** Kind of report built and sent/queued; not proof of server acceptance. */
+  reportKind: 'text_correction' | 'free_text';
+  /** Server verdict for `sent` only; `null` while `queued`. */
+  correctionSupported: boolean | null;
+}
+
+/** Delivery options of an event topic for this plugin instance, until the
+ * page reloads (`events.setOptions`, from 0.9.98.1). */
+export interface OtzariaEventOptions {
+  /** Book text in the event arrives with divine names as stored.
+   * ⚠️ See the warning on `RawDivineNamesOption`. */
+  rawDivineNames?: boolean;
+}
+
 export type OtzariaMethod =
   | 'app.getInfo'
   | 'app.getTheme'
@@ -1739,6 +2445,7 @@ export type OtzariaMethod =
   | 'app.getUserEmail'
   | 'app.getGrantedPermissions'
   | 'app.getConnectivity'
+  | 'app.getDivineNamesDisplay'
   | 'app.openUrl'
   | 'fonts.resolveFamilies'
   | 'fonts.listInstalled'
@@ -1748,6 +2455,8 @@ export type OtzariaMethod =
   | 'library.findBooks'
   | 'library.resolveRef'
   | 'library.getBookMetadata'
+  | 'library.getBookDetails'
+  | 'library.getBookProtections'
   | 'library.resolveBooks'
   | 'library.resolveCategoryPaths'
   | 'library.getTree'
@@ -1758,17 +2467,24 @@ export type OtzariaMethod =
   | 'library.getBookAltToc'
   | 'library.getCommentators'
   | 'library.getLinks'
+  | 'library.getLineNotes'
   | 'library.getRawLinks'
   | 'library.getLinkTargetsSummary'
   | 'library.getLinkContent'
   | 'library.refreshUserBooks'
+  | 'library.setProviderBooks'
+  | 'library.openBookFile'
   | 'library.getTree'
   | 'library.resolveCategoryPaths'
   | 'search.fullText'
   | 'search.query'
   | 'search.getOptions'
+  | 'search.setFieldText'
+  | 'search.setFieldActionState'
+  | 'search.endFieldSession'
   | 'reader.openBook'
   | 'reader.openBookAtRef'
+  | 'reader.printRange'
   | 'reader.registerInBookSearchProvider'
   | 'reader.respondInBookSearch'
   | 'reader.openSearchTab'
@@ -1787,6 +2503,14 @@ export type OtzariaMethod =
   | 'reader.getHighlightCapabilities'
   | 'reader.findTextOccurrences'
   | 'reader.getSectionTextMap'
+  | 'reader.beginCorrectionSession'
+  | 'reader.getCorrectionSession'
+  | 'reader.restoreCorrectionDraft'
+  | 'reader.resetCorrection'
+  | 'reader.endCorrectionSession'
+  | 'reader.acknowledgeCorrectionDraft'
+  | 'reader.listCorrectionDrafts'
+  | 'reader.getCorrectionDraft'
   | 'workspace.list'
   | 'workspace.getActive'
   | 'workspace.create'
@@ -1804,6 +2528,7 @@ export type OtzariaMethod =
   | 'ui.showWarning'
   | 'ui.pickFolder'
   | 'ui.print'
+  | 'ui.printFile'
   | 'ui.exportPdf'
   | 'ui.setUnsavedChanges'
   | 'fs.extractZip'
@@ -1834,6 +2559,7 @@ export type OtzariaMethod =
   | 'publishedData.remove'
   | 'publishedData.listOwn'
   | 'feedback.sendEmail'
+  | 'feedback.submitBookCorrection'
   | 'feedback.report'
   | 'feedback.hasReporterEmail'
   | 'history.list'
@@ -1845,6 +2571,7 @@ export type OtzariaMethod =
   | 'bookmarks.remove'
   | 'tools.gematria'
   | 'tools.dictionary'
+  | 'tools.biographies'
   | 'notifications.showInApp'
   | 'notifications.sendSystem'
   | 'notifications.scheduleSystem'
@@ -1856,9 +2583,9 @@ export type OtzariaMethod =
   | 'database.describeSource'
   | 'database.query'
   | 'database.batchQuery'
-  | 'network.fetch'
   | 'network.fetchStream'
   | 'network.download'
+  | 'network.fetchFile'
   | 'fs.pickUserFile'
   | 'fs.resolveFileUrl'
   | 'fs.readTextFile'
@@ -1866,14 +2593,21 @@ export type OtzariaMethod =
   | 'fs.beginBinaryWrite'
   | 'fs.commitUserFileWrite'
   | 'fs.abortBinaryWrite'
+  | 'fs.pickUserFolder'
+  | 'fs.listUserFolder'
+  | 'fs.openFolderFile'
+  | 'fs.revokeFolder'
   | 'fs.extractZip'
   | 'fs.deleteFile'
   | 'shortcut.create'
   | 'plugin.openSelf'
+  | 'plugin.setNewTabPage'
   | 'plugin.openOther'
   /** @internal חנות התוספים בלבד — לא מתועד ב-API_REFERENCE ואינו חוזה יציב. */
   | 'plugin.requestInstall'
   | 'plugin.backgroundDone'
+  | 'events.setOptions'
+  | 'plugin.setRestoreState'
   | 'plugin.listInstalled'
   | 'reader.addContextMenuItem'
   | 'reader.removeContextMenuItem'
@@ -1896,8 +2630,46 @@ export interface OtzariaGlobal {
   /** חיפוש מלא שמזרים chunks ככל שהם מתקבלים מהמנוע. */
   call(
     method: 'search.query',
-    payload: SearchQueryParams
+    payload: SearchQueryParams & RawDivineNamesOption
   ): AsyncIterable<SearchQueryChunk>;
+
+  /** How divine names reach the plugin in book text (from 0.9.98.1). */
+  call(
+    method: 'app.getDivineNamesDisplay',
+    payload?: DivineNamesDisplayArgs
+  ): Promise<OtzariaResponse<DivineNamesDisplay>>;
+
+  /** Delivery options of an event topic for this instance (from 0.9.98.1). */
+  call(
+    method: 'events.setOptions',
+    payload: EventOptionsArgs
+  ): Promise<OtzariaResponse<{ topic: string; rawDivineNames: boolean }>>;
+
+  /** Up to 5000 UTF-16 units of the book text, divine names filtered by default. */
+  call(
+    method: 'library.getBookContent',
+    payload: GetBookContentArgs
+  ): Promise<OtzariaResponse<string>>;
+
+  call(
+    method: 'library.getBookToc',
+    payload: BookIdentity & RawDivineNamesOption
+  ): Promise<OtzariaResponse<TocEntry[]>>;
+
+  call(
+    method: 'reader.getSelection',
+    payload?: RawDivineNamesOption
+  ): Promise<OtzariaResponse<ReaderSelection | null>>;
+
+  call(
+    method: 'reader.findTextOccurrences',
+    payload: FindTextOccurrencesArgs
+  ): Promise<OtzariaResponse<FindTextOccurrencesResult>>;
+
+  call(
+    method: 'reader.getSectionTextMap',
+    payload: GetSectionTextMapArgs
+  ): Promise<OtzariaResponse<SectionTextMapResult>>;
 
   /** בקשת HTTP שמזרימה כותרות ומקטעי גוף עם הגעתם. */
   call(
@@ -1905,10 +2677,78 @@ export interface OtzariaGlobal {
     payload: NetworkFetchParams
   ): AsyncIterable<NetworkFetchStreamChunk>;
 
+  /** Waits for the print dialog to finish, without the generic 30-second RPC timeout. */
+  call(
+    method: 'reader.printRange',
+    payload: ReaderPrintRangeArgs
+  ): Promise<OtzariaResponse<{ printed: boolean }>>;
+
   /** פותח כרטיסיית חיפוש מובנית עם השאילתה וההגדרות. */
   call(
     method: 'reader.openSearchTab',
     payload: OpenSearchTabArgs
+  ): Promise<OtzariaResponse<boolean>>;
+
+  /** עץ הספרייה; עם `types` — תת-עץ גזום. `null` כש-`path` לא נמצא. */
+  call(
+    method: 'library.getTree',
+    payload?: LibraryTreeArgs
+  ): Promise<OtzariaResponse<LibraryTreeNode | null>>;
+
+  /** מחליף את כל ספרי הספק באיתור הספרים של מסך הספרייה. */
+  call(
+    method: 'library.setProviderBooks',
+    payload: SetProviderBooksArgs
+  ): Promise<OtzariaResponse<{ count: number }>>;
+
+  /** הקובץ שמאחורי ספר בספרייה, כ-token של קובץ משתמש. */
+  call(
+    method: 'library.openBookFile',
+    payload: OpenBookFileArgs
+  ): Promise<OtzariaResponse<BookFileHandle>>;
+
+  /**
+   * בחירת תיקייה עם גישה קבועה, אחרי דיאלוג הסכמה של אוצריא (תיקייה שכבר
+   * אושרה חוזרת בלי הדיאלוג). כוללת גם את מה ש-`ui.pickFolder` מעניק.
+   * המשתמש מבטל בהגדרות התוסף.
+   */
+  call(
+    method: 'fs.pickUserFolder',
+    payload?: { title?: string }
+  ): Promise<OtzariaResponse<PickUserFolderResult>>;
+
+  /** רמה אחת של תיקייה מאושרת. */
+  call(
+    method: 'fs.listUserFolder',
+    payload: ListUserFolderArgs
+  ): Promise<OtzariaResponse<UserFolderListing>>;
+
+  /** פתיחת קובץ מתיקייה מאושרת — אותה צורה כמו `fs.pickUserFile`. */
+  call(
+    method: 'fs.openFolderFile',
+    payload: OpenFolderFileArgs
+  ): Promise<OtzariaResponse<PickUserFileResult>>;
+
+  /** הסרת תיקייה מאושרת (גם הרשאת `ui.pickFolder` שלה בריצה הזו). idempotent. */
+  call(
+    method: 'fs.revokeFolder',
+    payload: { folderToken: string }
+  ): Promise<OtzariaResponse<boolean>>;
+
+  /**
+   * Registers this plugin page as the target of the reader "+" button.
+   * Pass { enabled: false } to remove this plugin registration.
+   * Requires navigation.write.
+   */
+  call(
+    method: 'plugin.setNewTabPage',
+    payload?: { enabled?: boolean }
+  ): Promise<OtzariaResponse<boolean>>;
+
+  /** שומר מצב שחזור ב-`plugin.boot.restore`; מצב שאינו null מאפשר פינוי אוטומטי של הכרטיסייה. */
+  call(
+    method: 'plugin.setRestoreState',
+    payload: PluginSetRestoreStateArgs
   ): Promise<OtzariaResponse<boolean>>;
 
   /** מחזיר רשימה של כל התוספים המותקנים. */
@@ -1916,6 +2756,46 @@ export interface OtzariaGlobal {
     method: 'plugin.listInstalled',
     payload?: Record<string, unknown>
   ): Promise<OtzariaResponse<InstalledPlugin[]>>;
+
+  /** Writes `before + text + after` into the field of an open session. */
+  call(
+    method: 'search.setFieldText',
+    payload: { sessionId: string; text: string }
+  ): Promise<OtzariaResponse<boolean>>;
+
+  call(
+    method: 'search.setFieldActionState',
+    payload: { sessionId: string; state: SearchFieldActionState; tooltip?: string }
+  ): Promise<OtzariaResponse<boolean>>;
+
+  /** Ends the session; `submit: true` runs the search as if Enter was pressed. */
+  call(
+    method: 'search.endFieldSession',
+    payload: { sessionId: string; submit?: boolean }
+  ): Promise<OtzariaResponse<boolean>>;
+
+  /** מוריד קובץ מ-URL מותר למטמון זמני פרטי, בלי לשמור בתיקיית המשתמש. */
+  call(
+    method: 'network.fetchFile',
+    payload: NetworkFetchFileParams
+  ): Promise<OtzariaResponse<RemoteFileHandle>>;
+
+  /**
+   * Opens Otzaria's print screen (page range, preview, layout, then the system
+   * print dialog) on a PDF the plugin was granted (a file token). Needs a user
+   * gesture; waits for the screen to close without the generic 30-second RPC
+   * timeout. Personal files require fs.user_files.read; network.fetchFile tokens
+   * do not. `printed` is true when the user printed or exported.
+   */
+  call(
+    method: 'ui.printFile',
+    payload: { token: string; jobName?: string }
+  ): Promise<OtzariaResponse<{ printed: boolean }>>;
+
+  call(
+    method: 'feedback.submitBookCorrection',
+    payload: SubmitBookCorrectionParams
+  ): Promise<OtzariaResponse<SubmitBookCorrectionResult>>;
 
   /**
    * Call a Host API method.
@@ -1928,12 +2808,18 @@ export interface OtzariaGlobal {
     payload?: Record<string, unknown>
   ): Promise<OtzariaResponse<T>>;
 
-  /** Subscribe to a host-dispatched event. */
+  /** Subscribe to a host-dispatched event. With `options`, also calls
+   * `events.setOptions` for the topic and returns its response. */
   on<K extends keyof OtzariaEventMap>(
     event: K,
-    callback: (detail: OtzariaEventMap[K]) => void
-  ): void;
-  on(event: string, callback: (detail: unknown) => void): void;
+    callback: (detail: OtzariaEventMap[K]) => void,
+    options?: OtzariaEventOptions
+  ): void | Promise<OtzariaResponse<unknown>>;
+  on(
+    event: string,
+    callback: (detail: unknown) => void,
+    options?: OtzariaEventOptions
+  ): void | Promise<OtzariaResponse<unknown>>;
 
   /** Unsubscribe. Must use the exact same function reference passed to `on()`. */
   off<K extends keyof OtzariaEventMap>(

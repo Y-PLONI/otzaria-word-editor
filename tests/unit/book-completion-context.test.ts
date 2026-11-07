@@ -42,14 +42,15 @@ vi.mock('../../src/engine/acronym-dictionary', () => ({ loadAcronymDictionary: a
 const POINTED = 'אָבִי אָמַר דְּבָרִים יָפִים מְאֹד';
 const PLAIN = 'אבי אמר דברים יפים מאד';
 const PLAIN_GHOST = 'אמר דברים יפים מאד';
-// HTML conversions are readable in the host; the checked-in SDK enum is older.
-const READABLE_TYPES: Array<BookType | 'html' | 'htm' | 'xhtml'> = [
+const READABLE_TYPES: BookType[] = [
   'text', 'epub', 'docx', 'docm', 'dotx', 'dotm', 'doc', 'dot', 'wbk', 'xml', 'rtf', 'odt',
   'html', 'htm', 'xhtml',
 ];
 
 function bookTab(bookId: string, overrides: Partial<ReaderState['openTabs'][number]> = {}): ReaderState['openTabs'][number] {
   return {
+    tabId: null,
+    correctionSessionId: null,
     id: 1,
     toolId: null,
     isSelf: false,
@@ -66,6 +67,8 @@ function bookTab(bookId: string, overrides: Partial<ReaderState['openTabs'][numb
 
 function currentState(overrides: Partial<ReaderState> = {}): ReaderState {
   return {
+    currentTabId: null,
+    currentCorrectionSessionId: null,
     currentBook: 'Source Book',
     currentBookId: 'source',
     bookUid: 'source',

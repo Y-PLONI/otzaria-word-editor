@@ -5,7 +5,7 @@
  * פקד אחר נבלע), ה-latch שב-`index.html` — הלחיצה מגיעה בסוף ה-boot, לפני
  * הבאנדל — וההצהרה במניפסט, שהיא המסלול שבו הכפתור קיים לפני שהתוסף רץ.
  */
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -16,7 +16,8 @@ import {
   takePendingToolbarClicks,
   type EditBookEvent,
 } from '../../src/host/edit-book';
-import { READER_PERMISSIONS } from '../../src/host/otzaria-reader';
+import { EDITABLE_BOOK_TYPES } from '../../src/sessions/open-sources';
+import { registerEditBookItem, READER_PERMISSIONS } from '../../src/host/otzaria-reader';
 
 /** בדיוק מה ש-`_dispatchItemClick` באוצריא בונה, לספר Word אישי. */
 function click(overrides: Partial<EditBookEvent> = {}): EditBookEvent {
@@ -149,13 +150,34 @@ describe('ה-latch של reader.toolbar_item_clicked', () => {
 describe('ההצהרה במניפסט', () => {
   const manifest = JSON.parse(readFileSync(join(process.cwd(), 'public/manifest.json'), 'utf8')) as {
     permissions?: string[];
+    minAppVersion?: string;
     contributes?: { startup?: { toolbarItems?: unknown[] } };
   };
 
   it('הפקד מוצהר כתרומת עלייה, זהה לזה שנרשם מ-JS', () => {
     expect(manifest.contributes?.startup?.toolbarItems).toEqual([
-      { ...EDIT_BOOK_ITEM, contexts: [...EDIT_BOOK_ITEM.contexts] },
+      { ...EDIT_BOOK_ITEM, contexts: [...EDIT_BOOK_ITEM.contexts], bookTypes: [...EDIT_BOOK_ITEM.bookTypes] },
     ]);
+  });
+
+  it('מסנן בדיוק את הסוגים שהפתיחה מקבלת ודורש מארח שתומך בסינון', () => {
+    expect(EDIT_BOOK_ITEM.bookTypes).toEqual([...EDITABLE_BOOK_TYPES]);
+    expect(manifest.minAppVersion).toBe('0.9.99');
+  });
+
+  it('הגיבוי הדינמי שולח אותו סינון גם בלי הרשאת תרומות עלייה', async () => {
+    const call = vi.fn(async (method: string) => {
+      if (method !== 'reader.addToolbarItem') throw new Error('רק reader.toolbar מאושרת');
+      return { success: true, data: true, error: null };
+    });
+    window.Otzaria = { call } as never;
+    try {
+      await expect(registerEditBookItem()).resolves.toEqual({ ok: true, value: undefined });
+      expect(call).toHaveBeenCalledExactlyOnceWith('reader.addToolbarItem',
+        manifest.contributes?.startup?.toolbarItems?.[0]);
+    } finally {
+      delete (window as Partial<Window>).Otzaria;
+    }
   });
 
   it('ההרשאה שהפקד דורש מוצהרת', () => {

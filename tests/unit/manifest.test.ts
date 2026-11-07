@@ -58,11 +58,9 @@ describe('public/manifest.json', () => {
   });
 
   it('minAppVersion מכסה את ה-API החדש ביותר שהתוסף קורא לו', () => {
-    // `reader.getSelection`, `reader.openSearchTab` ו-`navigation.goTo` קיימים
-    // מ-0.9.89; מסלול הכתיבה (`fs.commitUserFileWrite`, `access: 'readwrite'`)
-    // דורש 0.9.97 והוא הגבוה מביניהם. סקריפט האריזה של אוצריא חוסם אריזה
-    // כשההצהרה נמוכה ממה שהקוד קורא לו, ולכן זו אינה בדיקה תיאורטית.
-    expect(manifest.minAppVersion).toBe('0.9.97');
+    // bookTypes נדרש גם בהצהרה וגם בגיבוי הדינמי. 0.9.99 הוא יעד התמיכה
+    // המתוכנן במארח; אין לשחרר את השינוי לפני שגרסה רשמית כוללת אותה.
+    expect(manifest.minAppVersion).toBe('0.9.99');
   });
 
   /**

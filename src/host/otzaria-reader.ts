@@ -630,6 +630,7 @@ export function registerEditBookItem(): Promise<ReaderResult> {
   return callAck('reader.addToolbarItem', 'רישום הכפתור „ערוך בוורד לאוצריא” נכשל', {
     ...EDIT_BOOK_ITEM,
     contexts: [...EDIT_BOOK_ITEM.contexts],
+    bookTypes: [...EDIT_BOOK_ITEM.bookTypes],
   });
 }
 
